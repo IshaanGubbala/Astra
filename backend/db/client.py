@@ -21,7 +21,7 @@ async def get_ready_tasks(goal_id: str) -> list[dict]:
         return get_supabase().table("tasks").select("*").eq("goal_id", goal_id).execute().data
 
     all_tasks = await asyncio.to_thread(_query)
-    resolved_ids = {t["id"] for t in all_tasks if t["status"] in ("done", "blocked")}
+    resolved_ids = {t["id"] for t in all_tasks if t["status"] in ("done", "blocked", "awaiting_approval")}
     return [
         t for t in all_tasks
         if t["status"] == "pending"
