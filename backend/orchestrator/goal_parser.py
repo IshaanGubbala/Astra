@@ -70,6 +70,7 @@ async def parse_goal(goal_id: str, founder_id: str, raw_instruction: str) -> dic
 
     try:
         parsed = json.loads(raw)
+        parsed.setdefault("instruction", raw_instruction)
         parsed.setdefault("entities", {})
         parsed.setdefault("constraints", {})
         parsed.setdefault("priority_agents", [])
