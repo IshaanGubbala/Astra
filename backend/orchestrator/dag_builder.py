@@ -84,7 +84,7 @@ async def build_task_dag(goal_id: str, parsed_goal: dict) -> list[dict]:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=8192,
+            max_tokens=32768,
         )
         msg = response.choices[0].message
         content = msg.content or ""

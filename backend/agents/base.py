@@ -93,7 +93,7 @@ class AstraAgent:
             model=self.model,
             messages=messages,
             temperature=0.2,
-            max_tokens=4096,
+            max_tokens=32768,
         )
         msg = response.choices[0].message
         content = msg.content or ""

@@ -51,7 +51,7 @@ async def parse_goal(goal_id: str, founder_id: str, raw_instruction: str) -> dic
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=8192,
+            max_tokens=32768,
         )
         msg = response.choices[0].message
         content = msg.content or ""
