@@ -47,8 +47,9 @@ async def parse_goal(goal_id: str, founder_id: str, raw_instruction: str) -> dic
         response = client.chat.completions.create(
             model=settings.agent_model_name,
             messages=[
-                {"role": "system", "content": "You are a JSON-only goal parser. Output only valid JSON."},
+                {"role": "system", "content": "You are a JSON-only goal parser. Output only valid JSON, no explanation."},
                 {"role": "user", "content": prompt},
+                {"role": "assistant", "content": "{"},
             ],
             temperature=0.1,
             max_tokens=512,
@@ -57,7 +58,7 @@ async def parse_goal(goal_id: str, founder_id: str, raw_instruction: str) -> dic
         content = msg.content or ""
         if not content.strip():
             content = getattr(msg, "reasoning_content", "") or ""
-        return content
+        return "{" + content
 
     raw = await asyncio.to_thread(_call)
 
