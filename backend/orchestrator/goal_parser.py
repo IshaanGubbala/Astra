@@ -27,12 +27,21 @@ Respond ONLY with valid JSON:
 }}
 """
 
+_model = None
+
+
+def _get_model():
+    global _model
+    if _model is None:
+        genai.configure(api_key=settings.gemini_api_key)
+        _model = genai.GenerativeModel("gemini-2.0-flash")
+    return _model
+
 
 async def parse_goal(goal_id: str, founder_id: str, raw_instruction: str) -> dict:
     def _call():
-        genai.configure(api_key=settings.gemini_api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        prompt = _PARSE_PROMPT.format(raw_instruction=raw_instruction)
+        model = _get_model()
+        prompt = _PARSE_PROMPT.replace("{raw_instruction}", raw_instruction)
         response = model.generate_content(prompt)
         return response.text
 
