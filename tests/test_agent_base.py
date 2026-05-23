@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 from backend.agents.base import AstraAgent, AgentTask, AgentResult
 
 
@@ -92,3 +92,27 @@ async def test_agent_run_approval_required_returns_approval_result(mocker):
     result = await agent.run(task)
     assert result.status == "approval_required"
     assert result.approval_action is not None
+
+
+@pytest.mark.asyncio
+async def test_agent_run_invalid_json_returns_blocked(mocker):
+    mocker.patch("backend.agents.base.vector_store.retrieve", new=AsyncMock(return_value=[]))
+
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = "not valid json at all"
+    mock_client.chat.completions.create.return_value = mock_response
+    mocker.patch("backend.agents.base.openai.OpenAI", return_value=mock_client)
+
+    agent = AstraAgent(
+        agent_id="legal", system_prompt="Legal.", model="gemma4",
+        tools=[], memory_namespaces=["legal"],
+    )
+    task = AgentTask(
+        task_id="t3", goal_id="g1", founder_id="f1",
+        agent="legal", instruction="Do something",
+        context_bundle={}, constraints={}, tools_available=[],
+    )
+    result = await agent.run(task)
+    assert result.status == "blocked"
+    assert result.blocked_reason == "invalid_json"
