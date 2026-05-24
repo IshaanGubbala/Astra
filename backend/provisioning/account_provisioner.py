@@ -53,7 +53,10 @@ async def provision_all(
     # Run all browser automations concurrently
     from backend.tools.composio_tools import connect_founder_tools, _reset_toolset
 
-    github_fut = loop.run_in_executor(_EXECUTOR, provision_github, email, password)
+    from backend.config import settings
+    imap_pw = settings.test_email_imap_password or None
+
+    github_fut = loop.run_in_executor(_EXECUTOR, provision_github, email, password, None, imap_pw)
     sendgrid_fut = loop.run_in_executor(_EXECUTOR, provision_sendgrid, email, password)
     composio_provision_fut = loop.run_in_executor(_EXECUTOR, provision_composio, email, password)
 

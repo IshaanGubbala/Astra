@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Composio — replaces per-service OAuth for Gmail, LinkedIn, GitHub, Calendar, Notion
     composio_api_key: str = ""
 
+    # Test email — dedicated Gmail for E2E provisioning tests
+    test_email_base: str = ""
+    test_email_imap_password: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

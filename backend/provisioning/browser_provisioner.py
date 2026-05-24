@@ -10,7 +10,7 @@ import time
 logger = logging.getLogger(__name__)
 
 
-def provision_github(email: str, password: str, username: str = None) -> dict:
+def provision_github(email: str, password: str, username: str = None, imap_password: str = None) -> dict:
     """
     Create GitHub account + personal access token.
     Returns {"token": "ghp_...", "username": "...", "created": bool}
@@ -75,14 +75,28 @@ def provision_github(email: str, password: str, username: str = None) -> dict:
                     or page.locator("text=Check your email").count() > 0
                 )
                 if needs_verify:
-                    browser.close()
-                    return {
-                        "token": None,
-                        "username": username,
-                        "created": False,
-                        "needs_verification": True,
-                        "note": "GitHub sent a verification email to %s. Verify then reconnect." % email,
-                    }
+                    if imap_password:
+                        from backend.testing.email_reader import wait_for_verification_url
+                        verify_url = wait_for_verification_url(email, imap_password, "github", timeout=120)
+                        if verify_url:
+                            page.goto(verify_url, timeout=30000)
+                            page.wait_for_timeout(3000)
+                        else:
+                            browser.close()
+                            return {
+                                "token": None, "username": username, "created": False,
+                                "needs_verification": True,
+                                "note": "Verification email not received within 2 minutes.",
+                            }
+                    else:
+                        browser.close()
+                        return {
+                            "token": None,
+                            "username": username,
+                            "created": False,
+                            "needs_verification": True,
+                            "note": "GitHub sent a verification email to %s. Verify then reconnect." % email,
+                        }
 
                 # Re-attempt login after signup
                 page.goto("https://github.com/login", timeout=30000)
