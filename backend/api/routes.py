@@ -79,6 +79,20 @@ async def get_setup_status(founder_id: str):
     return await get_founder_setup_status(founder_id)
 
 
+@router.get("/setup/composio/connect/{founder_id}")
+async def composio_connect(founder_id: str, apps: str = "github,gmail,linkedin,twitter,googlecalendar,notion,linear"):
+    """
+    Returns Composio OAuth URLs for the requested apps.
+    Founder clicks each URL to authenticate — Composio stores tokens mapped to founder_id.
+    apps: comma-separated list, defaults to all supported apps.
+    """
+    import asyncio
+    from backend.tools.composio_tools import connect_founder_tools
+    app_list = [a.strip() for a in apps.split(",") if a.strip()]
+    result = await asyncio.to_thread(connect_founder_tools, founder_id, app_list)
+    return {"founder_id": founder_id, "oauth_urls": result}
+
+
 @router.get("/status/{goal_id}")
 async def get_status(goal_id: str):
     db = get_supabase()

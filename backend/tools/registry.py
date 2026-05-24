@@ -9,6 +9,16 @@ from backend.tools.github_scaffold import github_create_repo
 from backend.tools.social_content import generate_reel_package, generate_tiktok_package, generate_meta_ad
 from backend.tools.email_campaign import send_email_campaign, build_email_html
 from backend.tools.pdf_generator import generate_pdf
+from backend.tools.composio_tools import (
+    composio_gmail_send,
+    composio_linkedin_post,
+    composio_twitter_tweet,
+    composio_github_create_pr,
+    composio_github_create_issue,
+    composio_linear_create_issue,
+    composio_calendar_create_event,
+    composio_notion_create_page,
+)
 
 TOOL_REGISTRY: dict[str, callable] = {
     # Research
@@ -32,6 +42,16 @@ TOOL_REGISTRY: dict[str, callable] = {
 
     # Legal
     "generate_pdf": generate_pdf,
+
+    # Composio — OAuth-backed (Gmail, LinkedIn, Twitter, GitHub PR, Linear, Calendar, Notion)
+    "composio_gmail_send": composio_gmail_send,
+    "composio_linkedin_post": composio_linkedin_post,
+    "composio_twitter_tweet": composio_twitter_tweet,
+    "composio_github_create_pr": composio_github_create_pr,
+    "composio_github_create_issue": composio_github_create_issue,
+    "composio_linear_create_issue": composio_linear_create_issue,
+    "composio_calendar_create_event": composio_calendar_create_event,
+    "composio_notion_create_page": composio_notion_create_page,
 }
 
 

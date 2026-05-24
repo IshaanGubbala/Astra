@@ -58,6 +58,15 @@ def _tool_schema(tool_names: list[str]) -> str:
         "build_email_html": 'build_email_html(subject, body_paragraphs: list, cta_text="", cta_url="") — render HTML email',
         "generate_pdf": 'generate_pdf(title, sections: list[{heading, body}], output_dir="/tmp/astra_docs") — create PDF document',
         "doc_generator": 'doc_generator(doc_type, content: dict) — generate formatted document',
+        # Composio tools — always pass founder_id=<FOUNDER_ID from context>
+        "composio_gmail_send": "composio_gmail_send(founder_id: str, to: str, subject: str, body: str) — send email via founder's Gmail OAuth",
+        "composio_linkedin_post": "composio_linkedin_post(founder_id: str, text: str) — post to founder's LinkedIn",
+        "composio_twitter_tweet": "composio_twitter_tweet(founder_id: str, text: str) — tweet from founder's Twitter/X",
+        "composio_github_create_pr": "composio_github_create_pr(founder_id: str, owner: str, repo: str, title: str, body: str, head: str, base: str='main') — open GitHub PR via founder's OAuth",
+        "composio_github_create_issue": "composio_github_create_issue(founder_id: str, owner: str, repo: str, title: str, body: str) — open GitHub issue",
+        "composio_linear_create_issue": "composio_linear_create_issue(founder_id: str, title: str, description: str, status: str='In Progress') — create Linear issue",
+        "composio_calendar_create_event": "composio_calendar_create_event(founder_id: str, summary: str, start_time: str, end_time: str, attendees: list, description: str='') — create Google Calendar event (ISO 8601 times)",
+        "composio_notion_create_page": "composio_notion_create_page(founder_id: str, parent_page_id: str, title: str, content: str) — create Notion page",
     }
     lines = []
     for name in tool_names:
@@ -100,6 +109,7 @@ class AstraAgent:
         tool_schema = _tool_schema(task.tools_available)
         return (
             f"GOAL: {task.instruction}\n\n"
+            f"FOUNDER_ID: {task.founder_id}  (use this exact value as founder_id in all Composio tool calls)\n\n"
             f"COMPANY CONTEXT:\n{json.dumps(task.context_bundle, indent=2)}\n\n"
             f"RELEVANT MEMORY:\n{memory_text or '(none)'}\n\n"
             f"CONSTRAINTS:\n{json.dumps(task.constraints, indent=2)}\n\n"

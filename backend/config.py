@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     instagram_access_token: str = ""
     instagram_business_account_id: str = ""
 
+    # Composio — replaces per-service OAuth for Gmail, LinkedIn, GitHub, Calendar, Notion
+    composio_api_key: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
