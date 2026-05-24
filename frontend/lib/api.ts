@@ -40,6 +40,7 @@ export interface SetupResult {
   email: string;
   services: Record<string, unknown>;
   summary: string[];
+  composio_oauth_urls?: Record<string, string>;
 }
 
 export async function submitGoal(

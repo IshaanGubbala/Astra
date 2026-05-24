@@ -12,6 +12,16 @@ const SERVICES = [
   { key: "meta_ads", label: "Meta Ads", icon: "📢", desc: "Paid social campaigns", oauth: true },
 ];
 
+const COMPOSIO_APPS = [
+  { key: "gmail", label: "Gmail", icon: "📧", desc: "Send from your real inbox" },
+  { key: "linkedin", label: "LinkedIn", icon: "💼", desc: "Post announcements" },
+  { key: "twitter", label: "Twitter/X", icon: "🐦", desc: "Tweet launches" },
+  { key: "googlecalendar", label: "Calendar", icon: "📅", desc: "Schedule investor meetings" },
+  { key: "notion", label: "Notion", icon: "📝", desc: "Update company wiki" },
+  { key: "linear", label: "Linear", icon: "📋", desc: "Track dev issues" },
+  { key: "github", label: "GitHub (PRs)", icon: "🔀", desc: "Open PRs & issues" },
+];
+
 export default function SetupPage() {
   const [founderId, setFounderId] = useState("founder_001");
   const [email, setEmail] = useState("");
@@ -19,6 +29,7 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [summary, setSummary] = useState<string[]>([]);
+  const [composioUrls, setComposioUrls] = useState<Record<string, string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
 
@@ -48,6 +59,9 @@ export default function SetupPage() {
     try {
       const result = await setupAccounts(founderId, email, password);
       setSummary(result.summary ?? []);
+      if (result.composio_oauth_urls && !result.composio_oauth_urls.error) {
+        setComposioUrls(result.composio_oauth_urls);
+      }
       await fetchStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Provisioning failed");
@@ -177,6 +191,46 @@ export default function SetupPage() {
           {loading ? "Provisioning (this takes ~30s)…" : "Auto-provision →"}
         </button>
       </form>
+
+      {composioUrls && (
+        <div className="flex flex-col gap-4 border-t border-zinc-800 pt-6">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-zinc-200 font-semibold">Connect your accounts</h2>
+            <p className="text-zinc-500 text-sm">
+              Click each to authorize Astra. One-time OAuth — Composio stores your tokens.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {COMPOSIO_APPS.map((app) => {
+              const url = composioUrls[app.key];
+              const isError = !url || url.startsWith("error:");
+              return (
+                <a
+                  key={app.key}
+                  href={isError ? undefined : url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`rounded-xl border p-4 flex items-center gap-3 transition-colors ${
+                    isError
+                      ? "border-zinc-800 bg-zinc-900/30 opacity-50 cursor-not-allowed"
+                      : "border-violet-800 bg-violet-950/20 hover:border-violet-600 hover:bg-violet-950/40"
+                  }`}
+                  onClick={isError ? (e) => e.preventDefault() : undefined}
+                >
+                  <span className="text-xl">{app.icon}</span>
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <p className="font-semibold text-zinc-200 text-sm">{app.label}</p>
+                    <p className="text-zinc-500 text-xs truncate">{app.desc}</p>
+                  </div>
+                  {!isError && (
+                    <span className="ml-auto text-violet-400 text-xs whitespace-nowrap">Connect →</span>
+                  )}
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

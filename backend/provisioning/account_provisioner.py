@@ -44,18 +44,20 @@ async def provision_all(
 ) -> dict:
     """
     Provision GitHub, Vercel, SendGrid concurrently.
-    Returns status per service + OAuth URLs for social platforms.
+    Also generates Composio OAuth URLs for Gmail, LinkedIn, Twitter, Calendar, Notion, Linear.
+    Returns status per service + all OAuth URLs.
     """
     loop = asyncio.get_event_loop()
 
-    # Run browser automations in thread pool (Playwright is sync)
-    futures = {
-        "github": loop.run_in_executor(_EXECUTOR, provision_github, email, password),
-        "sendgrid": loop.run_in_executor(_EXECUTOR, provision_sendgrid, email, password),
-    }
+    # Run browser automations + Composio URL generation concurrently
+    from backend.tools.composio_tools import connect_founder_tools
+
+    github_fut = loop.run_in_executor(_EXECUTOR, provision_github, email, password)
+    sendgrid_fut = loop.run_in_executor(_EXECUTOR, provision_sendgrid, email, password)
+    composio_fut = loop.run_in_executor(_EXECUTOR, connect_founder_tools, founder_id, None)
 
     results = {}
-    for service, fut in futures.items():
+    for service, fut in [("github", github_fut), ("sendgrid", sendgrid_fut)]:
         try:
             results[service] = await fut
         except Exception as e:
@@ -70,6 +72,12 @@ async def provision_all(
         )
     except Exception as e:
         results["vercel"] = {"created": False, "error": str(e)}
+
+    # Composio OAuth URLs (non-blocking — already running)
+    try:
+        composio_urls = await composio_fut
+    except Exception as e:
+        composio_urls = {"error": str(e)}
 
     # Store credentials that were successfully obtained
     _store_service_creds(founder_id, results)
@@ -86,6 +94,7 @@ async def provision_all(
         "email": email,
         "services": results,
         "summary": _summarize(results),
+        "composio_oauth_urls": composio_urls,
     }
 
 
