@@ -25,3 +25,10 @@ class AskRequest(BaseModel):
     question: str
     context: Optional[str] = None
     founder_id: str
+
+
+class SetupRequest(BaseModel):
+    founder_id: str
+    email: str
+    password: str
+    base_url: Optional[str] = "http://localhost:8000"

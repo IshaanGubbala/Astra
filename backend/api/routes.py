@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException
 
-from backend.api.schemas import AskRequest, ApproveRequest, GoalRequest, RejectRequest
+from backend.api.schemas import AskRequest, ApproveRequest, GoalRequest, RejectRequest, SetupRequest
 from backend.db.client import get_supabase, update_task_status
 from backend.orchestrator.loop import orchestrator
 
@@ -54,6 +54,29 @@ async def ask_agent(body: AskRequest):
     )
     result = await agent.run(task)
     return {"agent": body.target_agent, "response": result.output, "reasoning": result.reasoning}
+
+
+@router.post("/setup")
+async def setup_accounts(body: SetupRequest):
+    """
+    Provision GitHub, Vercel, SendGrid accounts from email+password.
+    Returns status per service + OAuth URLs for Instagram/TikTok/Meta.
+    """
+    from backend.provisioning.account_provisioner import provision_all
+    result = await provision_all(
+        founder_id=body.founder_id,
+        email=body.email,
+        password=body.password,
+        base_url=body.base_url,
+    )
+    return result
+
+
+@router.get("/setup/{founder_id}")
+async def get_setup_status(founder_id: str):
+    """Returns which services are connected for this founder."""
+    from backend.provisioning.account_provisioner import get_founder_setup_status
+    return await get_founder_setup_status(founder_id)
 
 
 @router.get("/status/{goal_id}")

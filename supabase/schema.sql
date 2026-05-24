@@ -67,3 +67,15 @@ create table memory_documents (
 
 create index on tasks(goal_id, status);
 create index on memory_documents(founder_id, namespace);
+
+create table founder_credentials (
+  id               uuid primary key default gen_random_uuid(),
+  founder_id       uuid not null references founders(id),
+  service          text not null,
+  encrypted_creds  text not null,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  unique (founder_id, service)
+);
+
+create index on founder_credentials(founder_id);
