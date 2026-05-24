@@ -27,67 +27,114 @@ def provision_github(email: str, password: str, username: str = None) -> dict:
         page = ctx.new_page()
 
         try:
-            # --- Sign up ---
-            page.goto("https://github.com/signup", timeout=30000)
-            page.fill("input#email", email)
-            page.click("button[type=submit]")
-            page.wait_for_timeout(1000)
-
-            page.fill("input#password", password)
-            page.click("button[type=submit]")
-            page.wait_for_timeout(1000)
-
-            page.fill("input#login", username)
-            page.click("button[type=submit]")
-            page.wait_for_timeout(2000)
-
-            # Email verification required — check if we landed on verify page
-            if "verify" in page.url or "email" in page.url:
-                logger.info("GitHub requires email verification for %s", email)
-                browser.close()
-                return {
-                    "token": None,
-                    "username": username,
-                    "created": False,
-                    "needs_verification": True,
-                    "note": "GitHub sent a verification email to %s. Verify then reconnect." % email,
-                }
-
-            # --- Try to login if account already exists ---
+            # --- Attempt login first (account may already exist) ---
             page.goto("https://github.com/login", timeout=30000)
             page.fill("input#login_field", email)
             page.fill("input#password", password)
             page.click("input[type=submit]")
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
 
-            if "github.com" not in page.url or "login" in page.url:
+            logged_in = "github.com" in page.url and "login" not in page.url and "session" not in page.url
+
+            if not logged_in:
+                # --- Sign up flow (GitHub stepped form) ---
+                page.goto("https://github.com/signup", timeout=30000)
+                page.wait_for_timeout(2000)
+
+                # Step 1: email
+                email_input = page.locator("input[name='user[email]'], input#email, input[type=email]").first
+                email_input.wait_for(timeout=10000)
+                email_input.fill(email)
+                page.keyboard.press("Tab")
+                page.wait_for_timeout(500)
+
+                # Step 2: password (may be on same page or next step)
+                pwd_input = page.locator("input[name='user[password]'], input#password, input[type=password]").first
+                if pwd_input.count() > 0:
+                    pwd_input.fill(password)
+                    page.keyboard.press("Tab")
+                    page.wait_for_timeout(500)
+
+                # Step 3: username
+                uname_input = page.locator("input[name='user[login]'], input#login, input[autocomplete=username]").first
+                if uname_input.count() > 0:
+                    uname_input.fill(username)
+                    page.keyboard.press("Tab")
+                    page.wait_for_timeout(500)
+
+                # Submit
+                submit = page.locator("button[type=submit]").first
+                submit.click()
+                page.wait_for_timeout(3000)
+
+                # GitHub requires email verification before anything else
+                needs_verify = (
+                    "verify" in page.url
+                    or "email" in page.url
+                    or page.locator("text=verify your email").count() > 0
+                    or page.locator("text=Check your email").count() > 0
+                )
+                if needs_verify:
+                    browser.close()
+                    return {
+                        "token": None,
+                        "username": username,
+                        "created": False,
+                        "needs_verification": True,
+                        "note": "GitHub sent a verification email to %s. Verify then reconnect." % email,
+                    }
+
+                # Re-attempt login after signup
+                page.goto("https://github.com/login", timeout=30000)
+                page.fill("input#login_field", email)
+                page.fill("input#password", password)
+                page.click("input[type=submit]")
+                page.wait_for_timeout(3000)
+                logged_in = "login" not in page.url
+
+            if not logged_in:
                 browser.close()
-                return {"token": None, "created": False, "error": "Login failed"}
+                return {"token": None, "created": False, "error": "Login failed after signup"}
 
-            # Get username from profile
-            profile_resp = page.evaluate("() => fetch('/api/v3/user').then(r=>r.json())")
-            # Simpler: read from nav
-            actual_username = page.locator("[data-login]").first.get_attribute("data-login") or username
+            # Read actual username from DOM
+            actual_username = (
+                page.locator("meta[name='user-login']").get_attribute("content")
+                or page.locator("[data-login]").first.get_attribute("data-login")
+                or username
+            )
 
-            # --- Create personal access token ---
-            page.goto("https://github.com/settings/tokens/new", timeout=30000)
-            page.fill("input#oauth_access[name='oauth_access[description]']", "Astra Automation Token")
-            # Select all repos scope
-            page.check("input#repo")
-            # Set no expiration
-            page.select_option("select#oauth_access_expires_at", "0")
-            page.click("button[type=submit]")
+            # --- Create fine-grained personal access token ---
+            page.goto("https://github.com/settings/personal-access-tokens/new", timeout=30000)
             page.wait_for_timeout(2000)
 
-            token_el = page.locator("code#new-oauth-token")
-            token = token_el.text_content() if token_el.count() > 0 else None
+            name_field = page.locator("input#token_nickname, input[name='token[nickname]']").first
+            if name_field.count() > 0:
+                name_field.fill("Astra Automation Token")
+
+            # Fallback: classic token page
+            classic = page.locator("input#oauth_access_description, input[name='oauth_access[description]']").first
+            if classic.count() > 0:
+                classic.fill("Astra Automation Token")
+                page.locator("input#repo").check()
+                exp = page.locator("select[name='oauth_access[expires_at]']")
+                if exp.count() > 0:
+                    exp.select_option(index=0)  # first option = no expiry or longest
+
+            page.locator("button[type=submit]").last.click()
+            page.wait_for_timeout(2000)
+
+            # Extract token
+            token_el = page.locator("code#new-oauth-token, [data-value], input.js-token-value").first
+            token = None
+            if token_el.count() > 0:
+                token = token_el.text_content() or token_el.get_attribute("value")
 
             browser.close()
             return {
                 "token": token,
                 "username": actual_username,
                 "created": True,
-                "note": "Token has full repo access." if token else "Token extraction failed — create manually at github.com/settings/tokens",
+                "note": "Token created." if token else "Token extraction failed — create at github.com/settings/tokens",
             }
 
         except PWTimeout as e:
