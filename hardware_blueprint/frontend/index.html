@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blueprint — AI Hardware Design</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111;
+    --surface2: #1a1a1a;
+    --border: #222;
+    --text: #e8e8e8;
+    --text-dim: #666;
+    --accent: #ffc107;
+    --accent2: #00bcd4;
+    --mcu: #00bcd4;
+    --sensor: #ffc107;
+    --actuator: #ff7043;
+    --power: #ff9800;
+    --module: #ce93d8;
+    --display: #f48fb1;
+    --mechanical: #78909c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; height: 100vh; display: flex; flex-direction: column; }
+
+  /* HEADER */
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  header .logo { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; color: var(--text); }
+  header .logo span { color: var(--accent); }
+  header .subtitle { font-size: 12px; color: var(--text-dim); }
+  header .status { margin-left: auto; font-size: 12px; color: var(--text-dim); }
+
+  /* LAYOUT */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* SIDEBAR CHAT */
+  .sidebar { width: 340px; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+  .chat-history { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 90%; }
+  .msg.user { align-self: flex-end; }
+  .msg.bot { align-self: flex-start; }
+  .msg-bubble { padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
+  .msg.user .msg-bubble { background: var(--accent); color: #000; border-radius: 12px 12px 2px 12px; }
+  .msg.bot .msg-bubble { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px 12px 12px 2px; }
+  .msg-name { font-size: 10px; color: var(--text-dim); margin-bottom: 4px; }
+  .chat-input-area { padding: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .chat-input { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; color: var(--text); font-size: 13px; font-family: inherit; resize: none; outline: none; }
+  .chat-input:focus { border-color: var(--accent); }
+  .send-btn { background: var(--accent); color: #000; border: none; border-radius: 8px; padding: 10px 16px; font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .generate-btn { width: 100%; margin: 0 12px 12px; width: calc(100% - 24px); background: var(--accent2); color: #000; border: none; border-radius: 8px; padding: 12px; font-weight: 700; font-size: 14px; cursor: pointer; display: none; }
+  .generate-btn.visible { display: block; }
+  .generate-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* CONTENT AREA */
+  .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* TABS */
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); padding: 0 24px; }
+  .tab { padding: 12px 20px; font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; letter-spacing: 0.5px; transition: color 0.15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* PANELS */
+  .panel { display: none; flex: 1; overflow: auto; padding: 24px; }
+  .panel.active { display: flex; flex-direction: column; gap: 20px; }
+
+  /* INFO PANEL */
+  .project-header { display: flex; align-items: flex-start; gap: 20px; }
+  .project-image { width: 220px; height: 180px; border-radius: 12px; object-fit: cover; background: var(--surface2); border: 1px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 12px; }
+  .project-meta { flex: 1; }
+  .project-name { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+  .project-tagline { color: var(--text-dim); font-size: 14px; margin-bottom: 16px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .tag { background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px; font-size: 12px; color: var(--text-dim); }
+  .cost-summary { display: flex; gap: 24px; margin-top: 16px; }
+  .cost-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; text-align: center; }
+  .cost-item .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+  .cost-item .value { font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 4px; }
+  .overview-text { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 13px; line-height: 1.7; color: var(--text-dim); }
+  .specs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+  .spec-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .spec-card .spec-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .spec-card .spec-value { font-size: 14px; font-weight: 600; }
+
+  /* SCHEMATIC PANEL */
+  #schematic-panel { padding: 0; }
+  #schematic-panel.active { padding: 0; }
+  .schematic-wrap { position: relative; flex: 1; }
+  #cy { width: 100%; height: 100%; min-height: 600px; background: #0d0d0d; }
+  .schematic-legend { position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.85); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; font-size: 11px; backdrop-filter: blur(8px); }
+  .schematic-legend h4 { color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-size: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .legend-line { width: 20px; height: 2px; flex-shrink: 0; }
+  .legend-dashed { border-top: 2px dashed; width: 20px; flex-shrink: 0; }
+  .schematic-controls { position: absolute; top: 16px; right: 16px; display: flex; gap: 8px; }
+  .ctrl-btn { background: rgba(0,0,0,0.7); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .ctrl-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* PARTS PANEL */
+  .parts-filters { display: flex; gap: 12px; align-items: center; }
+  .parts-search { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 13px; font-family: inherit; outline: none; }
+  .parts-search:focus { border-color: var(--accent); }
+  .filter-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 6px 16px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--text-dim); font-family: inherit; }
+  .filter-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .parts-table { width: 100%; border-collapse: collapse; }
+  .parts-table th { text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+  .parts-table td { padding: 14px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+  .part-img { width: 56px; height: 44px; object-fit: cover; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border); }
+  .part-img-placeholder { width: 56px; height: 44px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-dim); }
+  .part-name { font-weight: 600; margin-bottom: 2px; }
+  .part-desc { font-size: 12px; color: var(--text-dim); }
+  .part-pn { font-size: 11px; color: var(--text-dim); font-family: monospace; }
+  .node-badge { display: inline-block; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: 700; color: #000; margin-top: 4px; }
+  .source-btn { background: var(--accent); color: #000; border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+  .source-btn:hover { opacity: 0.85; }
+  .total-row td { font-weight: 700; border-top: 2px solid var(--border); border-bottom: none; font-size: 14px; }
+  .cost-text { font-weight: 700; color: var(--accent); }
+
+  /* WIRING PANEL */
+  .wiring-section { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .wiring-section h3 { font-size: 13px; font-weight: 700; margin-bottom: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
+  .conn-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .conn-table th { text-align: left; padding: 8px 10px; color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); }
+  .conn-table td { padding: 8px 10px; border-bottom: 1px solid #1a1a1a; }
+  .conn-table tr:last-child td { border-bottom: none; }
+  .ascii-box { background: #050505; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; line-height: 1.6; color: #8bc34a; white-space: pre; overflow-x: auto; }
+  .note-item { background: #1a1200; border-left: 3px solid var(--accent); padding: 8px 12px; border-radius: 0 6px 6px 0; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+
+  /* MECH + INSTRUCTIONS panels */
+  .section-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+  .section-card h3 { font-size: 13px; font-weight: 700; margin-bottom: 14px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
+  .phase-block { margin-bottom: 16px; }
+  .phase-title { font-size: 13px; font-weight: 700; color: var(--accent2); margin-bottom: 8px; }
+  .phase-steps { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .phase-steps li { font-size: 13px; color: var(--text-dim); padding-left: 20px; position: relative; line-height: 1.5; }
+  .phase-steps li::before { content: "→"; position: absolute; left: 0; color: var(--accent); }
+  .code-block { background: #050505; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; line-height: 1.6; color: #8bc34a; white-space: pre-wrap; overflow-x: auto; }
+  .kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px; }
+  .kv-grid .k { color: var(--text-dim); }
+  .kv-grid .v { font-weight: 600; }
+  .warn-item { background: #1a0a00; border-left: 3px solid #ff7043; padding: 8px 12px; border-radius: 0 6px 6px 0; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .checkpoint-item { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 8px; }
+  .checkpoint-item .cp-after { font-size: 11px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; white-space: nowrap; color: var(--text-dim); }
+  .checkpoint-item .cp-test { font-size: 12px; color: var(--text-dim); }
+
+  /* EMPTY STATE */
+  .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-dim); text-align: center; }
+  .empty-state .big { font-size: 48px; }
+  .empty-state h3 { font-size: 18px; color: var(--text); }
+  .empty-state p { font-size: 13px; max-width: 300px; line-height: 1.5; }
+
+  /* LOADER */
+  .loader { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 100; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+  .loader.visible { display: flex; }
+  .spinner { width: 48px; height: 48px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loader-text { font-size: 14px; color: var(--text-dim); }
+  .loader-steps { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .loader-step { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 8px; }
+  .loader-step.done { color: #4caf50; }
+  .loader-step.active { color: var(--accent); }
+  .loader-step .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  scrollbar-width: thin;
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">blue<span>print</span></div>
+  <div class="subtitle">AI Hardware Design Tool</div>
+  <div class="status" id="status-text">Start a conversation →</div>
+</header>
+
+<div class="main">
+  <!-- CHAT SIDEBAR -->
+  <div class="sidebar">
+    <div class="chat-history" id="chat-history">
+      <div class="msg bot">
+        <div class="msg-name">Blueprint</div>
+        <div class="msg-bubble">Hey! Describe the hardware project you want to build and I'll help you design it — BOM, wiring, mechanical layout, and step-by-step instructions.</div>
+      </div>
+    </div>
+    <button class="generate-btn" id="generate-btn" onclick="generateDesign()">Generate Design →</button>
+    <div class="chat-input-area">
+      <textarea class="chat-input" id="chat-input" rows="2" placeholder="Describe your hardware project..." onkeydown="handleKey(event)"></textarea>
+      <button class="send-btn" id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content">
+    <div class="tabs" id="tabs" style="display:none">
+      <div class="tab active" onclick="showTab('about')">About</div>
+      <div class="tab" onclick="showTab('schematic')">Schematic</div>
+      <div class="tab" onclick="showTab('parts')">Parts</div>
+      <div class="tab" onclick="showTab('wiring')">Wiring</div>
+      <div class="tab" onclick="showTab('mech')">Mech</div>
+      <div class="tab" onclick="showTab('instructions')">Instructions</div>
+    </div>
+
+    <!-- EMPTY STATE -->
+    <div class="panel active" id="panel-empty">
+      <div class="empty-state">
+        <div class="big">⚡</div>
+        <h3>Build anything with AI</h3>
+        <p>Describe your hardware project in the chat. Blueprint will generate a complete design with BOM, wiring diagram, and assembly instructions.</p>
+      </div>
+    </div>
+
+    <!-- ABOUT -->
+    <div class="panel" id="panel-about">
+      <div class="project-header">
+        <div class="project-image" id="project-image-placeholder">No 3D render</div>
+        <div class="project-meta">
+          <div class="project-name" id="proj-name">—</div>
+          <div class="project-tagline" id="proj-tagline">—</div>
+          <div class="tags" id="proj-tags"></div>
+          <div class="cost-summary">
+            <div class="cost-item"><div class="label">Total Cost</div><div class="value" id="info-cost">—</div></div>
+            <div class="cost-item"><div class="label">Parts</div><div class="value" id="info-parts">—</div></div>
+            <div class="cost-item"><div class="label">Build Time</div><div class="value" id="info-time">—</div></div>
+            <div class="cost-item"><div class="label">Difficulty</div><div class="value" id="info-diff">—</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="overview-text" id="proj-overview">—</div>
+      <div class="specs-grid" id="specs-grid"></div>
+    </div>
+
+    <!-- SCHEMATIC -->
+    <div class="panel" id="panel-schematic" style="padding:0; position:relative;">
+      <div style="flex:1; position:relative; min-height:500px;">
+        <div id="cy"></div>
+        <div class="schematic-legend">
+          <h4>Node Types</h4>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--mcu)"></div> MCU</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--sensor)"></div> SENSOR</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--actuator)"></div> ACTUATOR</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--power)"></div> POWER</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--module)"></div> MODULE</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--display)"></div> DISPLAY</div>
+          <br>
+          <h4>Connections</h4>
+          <div class="legend-item"><div class="legend-line" style="background:#4caf50"></div> DATA</div>
+          <div class="legend-item"><div class="legend-dashed" style="border-color:#ff9800"></div> POWER</div>
+          <div class="legend-item"><div class="legend-line" style="background:#757575"></div> GROUND</div>
+        </div>
+        <div class="schematic-controls">
+          <button class="ctrl-btn" onclick="cyFit()">Fit</button>
+          <button class="ctrl-btn" onclick="cyReset()">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PARTS -->
+    <div class="panel" id="panel-parts">
+      <div class="parts-filters">
+        <input class="parts-search" id="parts-search" placeholder="Search for parts..." oninput="filterParts()">
+        <button class="filter-btn active" onclick="setFilter('ALL', this)" id="filter-all">ALL <span id="count-all">0</span></button>
+        <button class="filter-btn" onclick="setFilter('Electrical', this)" id="filter-elec">⚡ <span id="count-elec">0</span></button>
+        <button class="filter-btn" onclick="setFilter('Mechanical', this)" id="filter-mech">⚙ <span id="count-mech">0</span></button>
+      </div>
+      <table class="parts-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Part</th>
+            <th>QTY</th>
+            <th>Unit</th>
+            <th>Source</th>
+            <th>Subtotal</th>
+          </tr>
+        </thead>
+        <tbody id="parts-tbody"></tbody>
+        <tfoot>
+          <tr class="total-row">
+            <td colspan="5" style="text-align:right; color: var(--text-dim); font-size:12px; padding: 16px 14px;">TOTAL ESTIMATED COST</td>
+            <td id="parts-total" class="cost-text" style="padding:16px 14px;">—</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- WIRING -->
+    <div class="panel" id="panel-wiring">
+      <div class="wiring-section">
+        <h3>Connection Table</h3>
+        <table class="conn-table">
+          <thead><tr><th>From</th><th>Pin</th><th>To</th><th>Pin</th><th>Signal</th><th>Wire</th></tr></thead>
+          <tbody id="conn-tbody"></tbody>
+        </table>
+      </div>
+      <div class="wiring-section">
+        <h3>ASCII Diagram</h3>
+        <div class="ascii-box" id="ascii-diagram">—</div>
+      </div>
+      <div class="wiring-section" id="power-rails-section">
+        <h3>Power Rails</h3>
+        <div id="power-rails"></div>
+      </div>
+      <div class="wiring-section" id="wiring-notes-section">
+        <h3>Notes</h3>
+        <div id="wiring-notes"></div>
+      </div>
+    </div>
+
+    <!-- MECH -->
+    <div class="panel" id="panel-mech">
+      <div class="section-card">
+        <h3>Enclosure</h3>
+        <div class="kv-grid" id="enclosure-grid"></div>
+      </div>
+      <div class="section-card">
+        <h3>Component Layout</h3>
+        <div id="layout-list"></div>
+      </div>
+      <div class="section-card" id="cutouts-card">
+        <h3>Cutouts & Openings</h3>
+        <div id="cutouts-list"></div>
+      </div>
+      <div class="section-card">
+        <h3>PCB Notes</h3>
+        <div id="pcb-notes" style="font-size:13px; color:var(--text-dim); line-height:1.6;"></div>
+      </div>
+      <div class="ascii-box" id="mech-ascii" style="margin-top:0;"></div>
+    </div>
+
+    <!-- INSTRUCTIONS -->
+    <div class="panel" id="panel-instructions">
+      <div class="section-card">
+        <h3>Tools Needed</h3>
+        <div id="tools-list" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+      </div>
+      <div class="section-card" id="phases-card">
+        <h3>Assembly Phases</h3>
+        <div id="phases-list"></div>
+      </div>
+      <div class="section-card" id="checkpoints-card">
+        <h3>Testing Checkpoints</h3>
+        <div id="checkpoints-list"></div>
+      </div>
+      <div class="section-card" id="mistakes-card">
+        <h3>Common Mistakes</h3>
+        <div id="mistakes-list"></div>
+      </div>
+      <div class="section-card" id="code-card">
+        <h3>Starter Code</h3>
+        <pre class="code-block" id="code-snippet">—</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LOADER -->
+<div class="loader" id="loader">
+  <div class="spinner"></div>
+  <div class="loader-text">Generating hardware design...</div>
+  <div class="loader-steps">
+    <div class="loader-step active" id="step-info"><div class="dot"></div> Analyzing project spec</div>
+    <div class="loader-step" id="step-bom"><div class="dot"></div> Building Bill of Materials</div>
+    <div class="loader-step" id="step-wiring"><div class="dot"></div> Generating wiring diagram</div>
+    <div class="loader-step" id="step-mech"><div class="dot"></div> Designing mechanical layout</div>
+    <div class="loader-step" id="step-instr"><div class="dot"></div> Writing assembly instructions</div>
+    <div class="loader-step" id="step-parts"><div class="dot"></div> Fetching component images</div>
+  </div>
+</div>
+
+<script>
+let sessionId = null;
+let readyToDesign = false;
+let cyInstance = null;
+let allParts = [];
+let activeFilter = 'ALL';
+let designData = null;
+
+// ── Chat ──────────────────────────────────────────────────────────
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  addMsg('user', msg);
+  document.getElementById('send-btn').disabled = true;
+
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: sessionId, message: msg}),
+    });
+    const data = await res.json();
+    sessionId = data.session_id;
+    addMsg('bot', data.reply);
+
+    if (data.ready_to_design) {
+      document.getElementById('generate-btn').classList.add('visible');
+      document.getElementById('status-text').textContent = 'Ready to generate →';
+      readyToDesign = true;
+    }
+  } catch (e) {
+    addMsg('bot', 'Connection error. Is the server running?');
+  }
+  document.getElementById('send-btn').disabled = false;
+}
+
+function addMsg(role, text) {
+  const history = document.getElementById('chat-history');
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = `${role === 'bot' ? '<div class="msg-name">Blueprint</div>' : ''}
+    <div class="msg-bubble">${text.replace(/\n/g, '<br>')}</div>`;
+  history.appendChild(div);
+  history.scrollTop = history.scrollHeight;
+}
+
+// ── Generate Design ──────────────────────────────────────────────
+async function generateDesign() {
+  if (!sessionId) return;
+  document.getElementById('generate-btn').disabled = true;
+  showLoader();
+
+  const steps = ['step-bom','step-wiring','step-mech','step-instr','step-parts'];
+  let si = 0;
+  const stepInterval = setInterval(() => {
+    if (si < steps.length) {
+      if (si > 0) document.getElementById(steps[si-1]).classList.replace('active','done');
+      document.getElementById(steps[si]).classList.add('active');
+      si++;
+    }
+  }, 4000);
+
+  try {
+    const res = await fetch('/design', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: sessionId}),
+    });
+    const data = await res.json();
+    clearInterval(stepInterval);
+    hideLoader();
+    renderDesign(data.design);
+  } catch (e) {
+    clearInterval(stepInterval);
+    hideLoader();
+    addMsg('bot', 'Design generation failed. Check server logs.');
+    document.getElementById('generate-btn').disabled = false;
+  }
+}
+
+function showLoader() {
+  document.getElementById('loader').classList.add('visible');
+}
+function hideLoader() {
+  document.getElementById('loader').classList.remove('visible');
+}
+
+// ── Render Design ────────────────────────────────────────────────
+function renderDesign(design) {
+  designData = design;
+  document.getElementById('panel-empty').classList.remove('active');
+  document.getElementById('tabs').style.display = 'flex';
+
+  renderInfo(design.INFO, design.BOM);
+  renderParts(design.BOM?.items || []);
+  renderWiring(design.WIRING || {});
+  renderMech(design.MECH || {});
+  renderInstructions(design.INSTRUCTIONS || {});
+  if (design.SCHEMATIC) renderSchematic(design.SCHEMATIC);
+
+  showTab('about');
+}
+
+function renderInfo(info, bom) {
+  if (!info) return;
+  document.getElementById('proj-name').textContent = info.project_name || 'Hardware Project';
+  document.getElementById('proj-tagline').textContent = info.tagline || '';
+  document.getElementById('proj-overview').textContent = info.overview || '';
+  document.getElementById('info-cost').textContent = `~$${(bom?.total_cost_usd || info.estimated_total_cost_usd || 0).toFixed(2)}`;
+  document.getElementById('info-parts').textContent = bom?.item_count || '—';
+  document.getElementById('info-time').textContent = info.estimated_build_time_hours ? `${info.estimated_build_time_hours}h` : '—';
+  document.getElementById('info-diff').textContent = info.difficulty || '—';
+
+  const tags = document.getElementById('proj-tags');
+  tags.innerHTML = '';
+  const tagItems = [info.microcontroller, info.firmware_language, ...(info.connectivity || [])].filter(Boolean);
+  tagItems.forEach(t => {
+    const s = document.createElement('span');
+    s.className = 'tag';
+    s.textContent = t;
+    tags.appendChild(s);
+  });
+
+  const specs = document.getElementById('specs-grid');
+  specs.innerHTML = '';
+  const specData = [
+    ['MCU', info.microcontroller],
+    ['Firmware', info.firmware_language],
+    ['Power', `${info.power_consumption_ma || '?'}mA`],
+    ['Difficulty', info.assembly_difficulty || info.difficulty],
+  ];
+  specData.filter(([,v]) => v).forEach(([k, v]) => {
+    specs.innerHTML += `<div class="spec-card"><div class="spec-label">${k}</div><div class="spec-value">${v}</div></div>`;
+  });
+  if (info.key_challenges?.length) {
+    const challengeDiv = document.createElement('div');
+    challengeDiv.className = 'section-card';
+    challengeDiv.innerHTML = `<h3>Key Challenges</h3><ul class="phase-steps">${info.key_challenges.map(c=>`<li>${c}</li>`).join('')}</ul>`;
+    document.getElementById('panel-about').appendChild(challengeDiv);
+  }
+}
+
+function renderParts(items) {
+  allParts = items;
+  const electrical = items.filter(i => i.category !== 'Mechanical');
+  const mechanical = items.filter(i => i.category === 'Mechanical');
+  document.getElementById('count-all').textContent = items.length;
+  document.getElementById('count-elec').textContent = electrical.length;
+  document.getElementById('count-mech').textContent = mechanical.length;
+  renderPartsTable(items);
+}
+
+function filterParts() {
+  const q = document.getElementById('parts-search').value.toLowerCase();
+  let items = allParts;
+  if (activeFilter !== 'ALL') items = items.filter(i => i.category === activeFilter);
+  if (q) items = items.filter(i =>
+    (i.component||'').toLowerCase().includes(q) ||
+    (i.part_number||'').toLowerCase().includes(q) ||
+    (i.description||'').toLowerCase().includes(q)
+  );
+  renderPartsTable(items);
+}
+
+function setFilter(filter, btn) {
+  activeFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  filterParts();
+}
+
+function renderPartsTable(items) {
+  const tbody = document.getElementById('parts-tbody');
+  tbody.innerHTML = '';
+  let total = 0;
+  items.forEach(item => {
+    const qty = item.quantity || 1;
+    const unit = item.unit_cost_usd || 0;
+    const subtotal = qty * unit;
+    total += subtotal;
+    const imgHtml = item.image_url
+      ? `<img class="part-img" src="${item.image_url}" alt="${item.component}" onerror="this.style.display='none'">`
+      : `<div class="part-img-placeholder">—</div>`;
+    const badge = `<span class="node-badge" style="background:${item.node_color||'#78909c'}">${item.node_type||'?'}</span>`;
+    const shopUrl = item.purchase_links?.[0]?.url || `https://www.amazon.com/s?k=${encodeURIComponent(item.part_number||item.component)}`;
+    tbody.innerHTML += `<tr data-category="${item.category}">
+      <td>${imgHtml}</td>
+      <td>
+        <div class="part-name">${item.component||'—'}</div>
+        <div class="part-desc">${item.description||''}</div>
+        <div class="part-pn">${item.part_number||''}</div>
+        ${badge}
+      </td>
+      <td>${qty}</td>
+      <td>~$${unit.toFixed(2)}</td>
+      <td><button class="source-btn" onclick="window.open('${shopUrl}','_blank')">${item.where_to_buy||'Amazon'}</button></td>
+      <td class="cost-text">~$${subtotal.toFixed(2)}</td>
+    </tr>`;
+  });
+  document.getElementById('parts-total').textContent = `~$${total.toFixed(2)}`;
+}
+
+function renderWiring(wiring) {
+  const tbody = document.getElementById('conn-tbody');
+  tbody.innerHTML = '';
+  (wiring.connections||[]).forEach(c => {
+    const signalColor = getSignalColor(c.signal_type||'DATA');
+    tbody.innerHTML += `<tr>
+      <td><strong>${c.from_component||'—'}</strong></td>
+      <td style="font-family:monospace;font-size:11px;color:var(--text-dim)">${c.from_pin||'—'}</td>
+      <td><strong>${c.to_component||'—'}</strong></td>
+      <td style="font-family:monospace;font-size:11px;color:var(--text-dim)">${c.to_pin||'—'}</td>
+      <td><span style="color:${signalColor};font-size:11px;font-weight:700">${c.signal_type||'DATA'}</span></td>
+      <td style="color:${c.wire_color?'#aaa':'var(--text-dim)'}">● ${c.wire_color||'—'}</td>
+    </tr>`;
+  });
+  document.getElementById('ascii-diagram').textContent = wiring.ascii_diagram || '(no diagram)';
+
+  const rails = document.getElementById('power-rails');
+  rails.innerHTML = (wiring.power_rails||[]).map(r =>
+    `<div class="note-item"><strong>${r.voltage}</strong>: ${(r.components||[]).join(', ')} — ${r.source||''}</div>`
+  ).join('');
+
+  const notes = document.getElementById('wiring-notes');
+  notes.innerHTML = (wiring.notes||[]).map(n => `<div class="note-item">${n}</div>`).join('');
+}
+
+function getSignalColor(signal) {
+  const s = (signal||'').toUpperCase();
+  if (s.includes('I2C')) return '#2196f3';
+  if (s.includes('SPI')) return '#9c27b0';
+  if (s.includes('UART')) return '#00bcd4';
+  if (s.includes('PWM')) return '#ff7043';
+  if (s.includes('POWER') || s.includes('VCC')) return '#ff9800';
+  if (s.includes('GROUND') || s.includes('GND')) return '#757575';
+  return '#4caf50';
+}
+
+function renderMech(mech) {
+  const enc = mech.enclosure || {};
+  const grid = document.getElementById('enclosure-grid');
+  const dim = enc.dimensions_mm ? `${enc.dimensions_mm.width}×${enc.dimensions_mm.height}×${enc.dimensions_mm.depth}mm` : '—';
+  grid.innerHTML = `
+    <span class="k">Type</span><span class="v">${enc.type||'—'}</span>
+    <span class="k">Dimensions</span><span class="v">${dim}</span>
+    <span class="k">Material</span><span class="v">${enc.material||'—'}</span>
+    <span class="k">Mounting</span><span class="v">${enc.mounting||'—'}</span>
+    <span class="k">Difficulty</span><span class="v">${mech.assembly_difficulty||'—'}</span>
+    <span class="k">Build Time</span><span class="v">${mech.estimated_build_time_hours ? mech.estimated_build_time_hours+'h' : '—'}</span>
+  `;
+
+  const layout = document.getElementById('layout-list');
+  layout.innerHTML = (mech.component_layout||[]).map(c =>
+    `<div class="note-item"><strong>${c.component}</strong> — ${c.position}${c.notes ? '. '+c.notes : ''}</div>`
+  ).join('');
+
+  const cutouts = document.getElementById('cutouts-list');
+  cutouts.innerHTML = (mech.cutouts||[]).map(c =>
+    `<div class="note-item">${c.purpose}: ${c.size} @ ${c.location}</div>`
+  ).join('');
+
+  document.getElementById('pcb-notes').textContent = mech.pcb_notes || '—';
+  document.getElementById('mech-ascii').textContent = mech.ascii_layout || '';
+}
+
+function renderInstructions(instr) {
+  const tools = document.getElementById('tools-list');
+  tools.innerHTML = (instr.tools_needed||[]).map(t =>
+    `<span class="tag">${t}</span>`
+  ).join('');
+
+  const phases = document.getElementById('phases-list');
+  phases.innerHTML = (instr.phases||[]).map(p => `
+    <div class="phase-block">
+      <div class="phase-title">${p.phase}</div>
+      <ul class="phase-steps">${(p.steps||[]).map(s=>`<li>${s}</li>`).join('')}</ul>
+    </div>`).join('');
+
+  const checkpoints = document.getElementById('checkpoints-list');
+  checkpoints.innerHTML = (instr.testing_checkpoints||[]).map(c =>
+    `<div class="checkpoint-item"><span class="cp-after">After: ${c.after}</span><span class="cp-test">${c.test}</span></div>`
+  ).join('');
+
+  const mistakes = document.getElementById('mistakes-list');
+  mistakes.innerHTML = (instr.common_mistakes||[]).map(m =>
+    `<div class="warn-item">⚠ ${m}</div>`
+  ).join('');
+
+  document.getElementById('code-snippet').textContent = instr.code_snippet || '// No starter code generated';
+}
+
+// ── Schematic (Cytoscape.js) ─────────────────────────────────────
+function renderSchematic(schematic) {
+  const nodes = schematic.nodes || [];
+  const edges = schematic.edges || [];
+  if (!nodes.length) return;
+
+  // Destroy previous instance
+  if (cyInstance) { cyInstance.destroy(); cyInstance = null; }
+
+  cyInstance = cytoscape({
+    container: document.getElementById('cy'),
+    elements: [
+      ...nodes.map(n => ({
+        group: 'nodes',
+        data: {
+          ...n.data,
+          label: (n.data.label||'').replace(/\s+/g, '\n').substring(0, 40),
+        }
+      })),
+      ...edges.map(e => ({group: 'edges', data: e.data})),
+    ],
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'background-color': 'data(color)',
+          'background-image': 'data(image)',
+          'background-fit': 'cover',
+          'background-opacity': ele => ele.data('image') ? 0 : 1,
+          'border-width': 2,
+          'border-color': 'data(color)',
+          'width': 80,
+          'height': 60,
+          'label': 'data(label)',
+          'text-valign': 'bottom',
+          'text-halign': 'center',
+          'color': '#e8e8e8',
+          'font-size': 9,
+          'font-family': 'SF Mono, Fira Code, monospace',
+          'text-wrap': 'wrap',
+          'text-max-width': 90,
+          'text-margin-y': 4,
+          'shape': 'roundrectangle',
+          'padding': 6,
+        }
+      },
+      {
+        selector: 'node[image]',
+        style: {
+          'background-color': '#111',
+          'background-image': 'data(image)',
+          'background-fit': 'cover',
+          'border-width': 2,
+          'border-color': 'data(color)',
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'width': 1.5,
+          'line-color': 'data(color)',
+          'target-arrow-color': 'data(color)',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'line-style': ele => ele.data('dashed') ? 'dashed' : 'solid',
+          'line-dash-pattern': [6, 3],
+          'label': 'data(label)',
+          'font-size': 7,
+          'color': '#555',
+          'text-rotation': 'autorotate',
+          'font-family': 'monospace',
+        }
+      },
+      {
+        selector: ':selected',
+        style: {
+          'border-width': 3,
+          'border-color': '#ffc107',
+        }
+      }
+    ],
+    layout: {
+      name: 'breadthfirst',
+      directed: true,
+      padding: 40,
+      spacingFactor: 1.4,
+    },
+    userZoomingEnabled: true,
+    userPanningEnabled: true,
+    boxSelectionEnabled: false,
+    autoungrabify: false,
+  });
+
+  cyInstance.on('tap', 'node', evt => {
+    const node = evt.target;
+    const d = node.data();
+    addMsg('bot', `**${d.label}**\nType: ${d.type}\nPart: ${d.part_number||'—'}\nCost: $${(d.cost||0).toFixed(2)}`);
+  });
+}
+
+function cyFit() { if (cyInstance) cyInstance.fit(undefined, 40); }
+function cyReset() { if (cyInstance) { cyInstance.fit(); cyInstance.zoom(1); } }
+
+// ── Tabs ─────────────────────────────────────────────────────────
+const panelMap = {
+  about: 'panel-about',
+  schematic: 'panel-schematic',
+  parts: 'panel-parts',
+  wiring: 'panel-wiring',
+  mech: 'panel-mech',
+  instructions: 'panel-instructions',
+};
+
+function showTab(name) {
+  Object.values(panelMap).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
+  const el = document.getElementById(panelMap[name]);
+  if (el) el.classList.add('active');
+
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.textContent.toLowerCase().includes(name) || (name === 'about' && t.textContent === 'About'));
+  });
+
+  if (name === 'schematic' && cyInstance) {
+    setTimeout(() => cyInstance.fit(undefined, 40), 50);
+  }
+}
+</script>
+</body>
+</html>
