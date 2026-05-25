@@ -101,27 +101,35 @@ Rules:
             if result.returncode != 0:
                 logger.warning("claude exited %d: %s", result.returncode, result.stderr[:300])
 
-            # Stage + commit (skip if nothing changed)
+            # Stage any uncommitted changes Claude Code left behind
             status = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=tmpdir, capture_output=True, text=True
             ).stdout.strip()
 
-            if not status:
+            if status:
+                _run(["git", "add", "-A"], cwd=tmpdir)
+                _run(["git", "commit", "-m", commit_message], cwd=tmpdir)
+
+            # Check if there are local commits ahead of origin (Claude Code may have committed itself)
+            ahead = subprocess.run(
+                ["git", "rev-list", "--count", "HEAD@{upstream}..HEAD"],
+                cwd=tmpdir, capture_output=True, text=True
+            ).stdout.strip()
+
+            if ahead == "0" and not status:
                 return {
                     "success": True,
                     "repo_url": repo_url,
                     "commit": None,
-                    "note": "No file changes — Claude Code may have only explained rather than written files",
+                    "note": "No changes — Claude Code may have only described rather than written files",
                     "output_preview": claude_output[:400],
                 }
 
-            _run(["git", "add", "-A"], cwd=tmpdir)
-            _run(["git", "commit", "-m", commit_message], cwd=tmpdir)
-
+            # Push all commits (ours + any Claude Code made)
             push_result = subprocess.run(
                 ["git", "push"],
-                cwd=tmpdir, capture_output=True, text=True, timeout=30
+                cwd=tmpdir, capture_output=True, text=True, timeout=60
             )
             if push_result.returncode != 0:
                 return {
@@ -136,11 +144,17 @@ Rules:
                 cwd=tmpdir, capture_output=True, text=True
             ).stdout.strip()
 
+            # Count total files in repo
+            file_count = subprocess.run(
+                ["git", "ls-files", "--cached"],
+                cwd=tmpdir, capture_output=True, text=True
+            ).stdout.strip().count("\n") + 1
+
             return {
                 "success": True,
                 "repo_url": repo_url,
                 "commit": sha,
-                "files_changed": len(status.splitlines()),
+                "files_in_repo": file_count,
                 "output_preview": claude_output[:400],
             }
 
