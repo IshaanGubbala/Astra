@@ -50,41 +50,25 @@ def claude_code_scaffold(
 
             # Augment the task with a comprehensive scaffold directive
             context_section = f"\n\nSESSION CONTEXT (from other agents):\n{context}\n" if context else ""
-            full_task = f"""IMPORTANT: Write actual files NOW. Do not present plans, architectures, or ask clarifying questions. Use the Write tool immediately to create files.
+            full_task = f"""Write actual files NOW using the Write tool. Do not plan, explain, or ask questions — start writing code immediately.
 
-You are scaffolding a new SaaS product. Write a complete, production-ready codebase with real working code.
+Scaffold a production-ready SaaS codebase for: {task}{context_section}
 
-PROJECT GOAL: {task}{context_section}
+Required files (write all with real working code, no TODOs):
+1. backend/main.py — FastAPI app with routers mounted
+2. backend/models.py — SQLAlchemy models
+3. backend/routers/auth.py — JWT /register /login /me
+4. backend/routers/api.py — core business endpoints
+5. backend/services/core.py — business logic
+6. backend/requirements.txt
+7. frontend/package.json
+8. frontend/src/app/page.tsx — landing page
+9. frontend/src/app/dashboard/page.tsx
+10. docker-compose.yml
+11. .env.example
+12. README.md
 
-FILE STRUCTURE TO CREATE (write all of these):
-backend/
-  main.py          — FastAPI app entry point with all routers mounted
-  models.py        — SQLAlchemy models for all entities
-  routers/
-    auth.py        — JWT login/register endpoints
-    api.py         — core business logic endpoints
-  services/
-    core.py        — main business logic
-  requirements.txt — all Python deps
-
-frontend/
-  package.json
-  src/
-    app/
-      page.tsx     — landing/home page
-      dashboard/
-        page.tsx   — main app dashboard
-    components/
-      Nav.tsx
-
-docker-compose.yml — postgres + backend + frontend
-README.md          — setup instructions, env vars, architecture
-.env.example       — all required env vars
-
-Rules:
-- Write EVERY file listed above using the Write tool
-- NO placeholder comments, NO TODOs — real functional code only
-- Start writing immediately with the Write tool — do not plan or discuss"""
+Start with file 1 immediately. Write each file completely before moving to the next."""
 
             # Run Claude Code non-interactively
             env = os.environ.copy()
@@ -94,7 +78,7 @@ Rules:
                 cwd=tmpdir,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=600,
                 env=env,
             )
             claude_output = result.stdout.strip()
@@ -159,7 +143,7 @@ Rules:
             }
 
         except subprocess.TimeoutExpired:
-            return {"error": "claude_code_scaffold timed out (180s)"}
+            return {"error": "claude_code_scaffold timed out (600s)"}
         except Exception as e:
             logger.error("claude_code_scaffold failed: %s", e)
             return {"error": str(e)}
