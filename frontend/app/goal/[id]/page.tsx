@@ -4,8 +4,6 @@ import { use, useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { streamGoal, AGENT_LABELS, AGENT_ORDER } from "@/lib/api";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 interface AgentTask {
   id: string;
   agent: string;
@@ -52,27 +50,27 @@ function AgentCard({ state }: { state: AgentState }) {
 
   const borderColor =
     state.status === "done" ? "border-green-800" :
-    state.status === "running" ? "border-violet-600" :
+    state.status === "running" ? "border-blue-600" :
     state.status === "error" ? "border-red-800" :
     "border-zinc-800";
 
   const dotColor =
     state.status === "done" ? "bg-green-400" :
-    state.status === "running" ? "bg-violet-400 animate-pulse" :
+    state.status === "running" ? "bg-blue-400 animate-pulse" :
     state.status === "error" ? "bg-red-400" :
     "bg-zinc-600";
 
   return (
-    <div className={`rounded-xl border ${borderColor} bg-zinc-900 p-5 flex flex-col gap-3 transition-all duration-300`}>
-      <div className="flex items-center justify-between">
+    <article className={`site-card site-card-soft p-5 flex flex-col gap-4 transition-all duration-300 ${borderColor}`}>
+      <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
           <span className="text-lg">{icon}</span>
-          <h3 className="font-semibold text-zinc-200">{label}</h3>
+          <h3 className="text-lg text-white">{label}</h3>
         </div>
-        <span className={`text-xs font-mono uppercase px-2 py-0.5 rounded ${
+        <span className={`site-pill px-2 py-1 ${
           state.status === "done" ? "text-green-400 bg-green-950/40" :
-          state.status === "running" ? "text-violet-300 bg-violet-950/40" :
+          state.status === "running" ? "text-blue-300 bg-blue-950/40" :
           state.status === "error" ? "text-red-400 bg-red-950/40" :
           "text-zinc-500 bg-zinc-800"
         }`}>
@@ -81,12 +79,12 @@ function AgentCard({ state }: { state: AgentState }) {
       </div>
 
       {state.instruction && (
-        <p className="text-zinc-500 text-xs leading-relaxed line-clamp-2">{state.instruction}</p>
+        <p className="text-sm leading-6 text-[var(--fg-dim)] line-clamp-3">{state.instruction}</p>
       )}
 
       {state.status === "running" && state.currentAction && (
-        <div className="flex items-center gap-2 text-sm text-violet-300 bg-violet-950/20 rounded-lg px-3 py-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse flex-shrink-0" />
+        <div className="flex items-center gap-2 rounded-xl border border-blue-900/60 bg-blue-950/20 px-3 py-2 text-sm text-blue-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
           <span className="truncate">
             {state.currentTool ? `Using ${state.currentTool}` : state.currentAction}
             {state.reasoning ? ` — ${state.reasoning}` : ""}
@@ -95,10 +93,10 @@ function AgentCard({ state }: { state: AgentState }) {
       )}
 
       {state.log.length > 0 && (
-        <div ref={logRef} className="bg-zinc-950 rounded-lg p-3 max-h-36 overflow-y-auto flex flex-col gap-1">
+        <div ref={logRef} className="max-h-36 overflow-y-auto rounded-xl border border-[var(--line)] bg-[rgba(0,0,10,0.75)] p-3 flex flex-col gap-1">
           {state.log.map((entry, i) => (
             <div key={i} className="flex items-start gap-2 text-xs">
-              <span className="text-zinc-600 font-mono flex-shrink-0">
+              <span className="font-mono flex-shrink-0 text-[var(--fg-mute)]">
                 {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </span>
               <span className={
@@ -115,11 +113,11 @@ function AgentCard({ state }: { state: AgentState }) {
       )}
 
       {state.status === "done" && state.result && (
-        <div className="border-t border-zinc-800 pt-3">
+        <div className="border-t border-[var(--line)] pt-4">
           <ResultView agent={state.agent} result={state.result} />
         </div>
       )}
-    </div>
+    </article>
   );
 }
 
@@ -146,8 +144,8 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
       <div className="flex flex-col gap-2 text-sm">
         {entries.slice(0, 5).map(([k, v]) => (
           <div key={k}>
-            <span className="text-zinc-500 text-xs uppercase">{k.replace(/_/g, " ")}: </span>
-            <span className="text-zinc-300">{formatValue(v)}</span>
+            <span className="site-label">{k.replace(/_/g, " ")}: </span>
+            <span className="text-[var(--fg)]">{formatValue(v)}</span>
           </div>
         ))}
       </div>
@@ -157,7 +155,7 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
   if (agent === "web" && result.site_url) {
     return (
       <a href={String(result.site_url)} target="_blank" rel="noopener noreferrer"
-        className="text-violet-400 hover:underline text-sm font-mono">
+        className="text-sm font-mono text-blue-300 hover:text-blue-200 hover:underline">
         {String(result.site_url)} ↗
       </a>
     );
@@ -168,8 +166,8 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
       <div className="flex flex-col gap-2 text-sm">
         {entries.filter(([k]) => ["generated", "path", "filename", "doc_type", "error"].includes(k)).map(([k, v]) => (
           <div key={k}>
-            <span className="text-zinc-500 text-xs uppercase">{k.replace(/_/g, " ")}: </span>
-            <span className={k === "error" ? "text-red-400" : "text-zinc-300"}>{formatValue(v)}</span>
+            <span className="site-label">{k.replace(/_/g, " ")}: </span>
+            <span className={k === "error" ? "text-red-400" : "text-[var(--fg)]"}>{formatValue(v)}</span>
           </div>
         ))}
       </div>
@@ -181,8 +179,8 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
       <div className="flex flex-col gap-2 text-sm">
         {entries.filter(([k]) => !["script", "caption", "visual_notes"].includes(k)).slice(0, 4).map(([k, v]) => (
           <div key={k}>
-            <span className="text-zinc-500 text-xs uppercase">{k.replace(/_/g, " ")}: </span>
-            <span className="text-zinc-300">{formatValue(v)}</span>
+            <span className="site-label">{k.replace(/_/g, " ")}: </span>
+            <span className="text-[var(--fg)]">{formatValue(v)}</span>
           </div>
         ))}
       </div>
@@ -190,7 +188,7 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
   }
 
   return (
-    <pre className="text-xs text-zinc-400 overflow-auto max-h-32 whitespace-pre-wrap">
+    <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-xs text-[var(--fg-dim)]">
       {JSON.stringify(result, null, 2)}
     </pre>
   );
@@ -307,7 +305,7 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
   }, [sessionId]);
 
   const agentList = planTasks.length > 0
-    ? planTasks.map((t) => t.agent)
+    ? [...new Set(planTasks.map((t) => t.agent))]
     : AGENT_ORDER;
 
   const doneCount = Object.values(agents).filter((a) => a.status === "done").length;
@@ -333,59 +331,88 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-white truncate max-w-2xl">
-            {instruction || "Running goal…"}
+      <section className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
+        <div className="flex flex-col gap-5">
+          <div className="eyebrow">Goal stream</div>
+          <h1 className="max-w-4xl text-[clamp(44px,5.4vw,88px)] leading-[0.95]">
+            Astra is building your company.
           </h1>
-          <span className={`text-xs font-mono px-2 py-0.5 rounded border flex-shrink-0 ${
-            done ? "text-green-400 border-green-800 bg-green-950/30" :
-            error ? "text-red-400 border-red-800 bg-red-950/30" :
-            "text-yellow-400 border-yellow-800 bg-yellow-950/30"
-          }`}>
-            {done ? "done" : error ? "error" : connected ? "running" : "connecting…"}
-          </span>
+          <p className="lede max-w-2xl">
+            {instruction || "Running goal…"}
+          </p>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={`site-pill px-3 py-2 ${
+              done ? "text-green-400 border-green-800 bg-green-950/30" :
+              error ? "text-red-400 border-red-800 bg-red-950/30" :
+              "text-blue-300 border-blue-800 bg-blue-950/30"
+            }`}>
+              {done ? "done" : error ? "error" : connected ? "running" : "connecting"}
+            </span>
+            <span className="site-label break-all">{sessionId}</span>
+          </div>
+
+          {total > 0 && (
+            <div className="flex items-center gap-3">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[rgba(246,246,248,0.05)]">
+                <div
+                  className="h-1.5 rounded-full bg-blue-500 transition-all duration-700"
+                  style={{ width: `${(doneCount / total) * 100}%` }}
+                />
+              </div>
+              <span className="flex-shrink-0 text-sm text-[var(--fg-dim)]">{doneCount}/{total} agents</span>
+            </div>
+          )}
+
+          {!connected && !error && (
+            <div className="flex items-center gap-2 text-sm text-[var(--fg-dim)]">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
+              Connecting to agent stream…
+            </div>
+          )}
+
+          {error && (
+            <p className="rounded-2xl border border-red-900/70 bg-red-950/25 px-4 py-3 text-sm text-red-300">{error}</p>
+          )}
         </div>
 
-        <p className="text-zinc-600 text-xs font-mono">{sessionId}</p>
-
-        {total > 0 && (
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-1.5 rounded-full bg-zinc-800">
-              <div
-                className="h-1.5 rounded-full bg-violet-500 transition-all duration-700"
-                style={{ width: `${(doneCount / total) * 100}%` }}
-              />
+        <div className="site-card p-5">
+          <div className="flex items-center justify-between border-b border-[var(--line)] pb-4">
+            <div>
+              <p className="site-label">Runtime</p>
+              <p className="mt-2 text-sm text-[var(--fg-dim)]">
+                Monitor the planner and each agent as they move through the goal.
+              </p>
             </div>
-            <span className="text-zinc-400 text-sm flex-shrink-0">{doneCount}/{total} agents</span>
+            <span className="site-pill">{connected ? "stream live" : "stream idle"}</span>
           </div>
-        )}
 
-        {!connected && !error && (
-          <div className="flex items-center gap-2 text-zinc-500 text-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" />
-            Connecting to agent stream…
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="site-card site-card-soft p-4">
+              <p className="site-label">Done</p>
+              <p className="mt-3 text-3xl text-white">{doneCount}</p>
+            </div>
+            <div className="site-card site-card-soft p-4">
+              <p className="site-label">Total</p>
+              <p className="mt-3 text-3xl text-white">{total}</p>
+            </div>
           </div>
-        )}
-
-        {error && (
-          <p className="text-red-400 text-sm bg-red-950/20 border border-red-800 rounded-lg px-4 py-2">{error}</p>
-        )}
-      </div>
+        </div>
+      </section>
 
       {total === 0 && connected && !error && (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-3 text-zinc-400 text-sm">
-            <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+          <div className="flex items-center gap-3 text-sm text-[var(--fg-dim)]">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
             Planner is breaking your goal into tasks… (takes ~30-60s for local model)
           </div>
-          <div className="h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
-            <div className="h-1 bg-violet-500/50 rounded-full animate-pulse w-full" />
+          <div className="h-1 w-full overflow-hidden rounded-full bg-[rgba(246,246,248,0.05)]">
+            <div className="h-1 w-full animate-pulse rounded-full bg-blue-500/50" />
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid gap-4 lg:grid-cols-2">
         {agentList.map((agent) => (
           <AgentCard key={agent} state={visibleAgents[agent]} />
         ))}

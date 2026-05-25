@@ -122,7 +122,7 @@ def _generate_doc_body(doc_type: str, company_name: str, context: str) -> str:
     prompt = prompt_template.format(company_name=company_name, context=context or "a technology company")
     try:
         from backend.tools._llm import generate
-        body = generate(prompt, max_tokens=1500)
+        body = generate(prompt, max_tokens=24000)
         if body and len(body) > 200:
             return body
         logger.warning("LLM legal doc output too short (%d chars) — using raw content", len(body))

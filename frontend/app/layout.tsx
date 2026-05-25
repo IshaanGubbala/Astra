@@ -1,9 +1,28 @@
 import type { Metadata } from "next";
+import { Geist, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
+import SiteNav from "./site-nav";
 import "./globals.css";
 
+const geist = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist-sans",
+});
+
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin"],
+  weight: ["400"],
+  style: ["normal", "italic"],
+  variable: "--font-source-serif",
+});
+
+const jetBrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+});
+
 export const metadata: Metadata = {
-  title: "Astra — AI Startup OS",
-  description: "Your AI co-founder, 24/7",
+  title: "Astra — Your AI Founding Team",
+  description: "Launch and operate a company with a coordinated AI founding team.",
 };
 
 export default function RootLayout({
@@ -12,14 +31,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full antialiased">
-      <body className="min-h-screen bg-zinc-950 text-zinc-100">
-        <header className="border-b border-zinc-800 px-6 py-4">
-          <a href="/" className="text-lg font-semibold tracking-tight text-white">
-            ✦ Astra
-          </a>
-        </header>
-        <main className="mx-auto max-w-5xl px-6 py-10">{children}</main>
+    <html
+      lang="en"
+      className={`${geist.variable} ${sourceSerif.variable} ${jetBrainsMono.variable} antialiased`}
+    >
+      <body>
+        <SiteNav />
+        <main className="site-shell">{children}</main>
       </body>
     </html>
   );
