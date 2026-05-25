@@ -1,5 +1,6 @@
 import base64
 import logging
+import uuid
 import requests
 
 from backend.config import settings
@@ -40,14 +41,16 @@ def github_create_repo(
         user_resp.raise_for_status()
         username = user_resp.json()["login"]
 
-        # Create repo
+        # Create repo — append short suffix to avoid name collisions
+        unique_name = f"{repo_name}-{uuid.uuid4().hex[:6]}"
         repo_resp = requests.post(
             f"{_GH_API}/user/repos",
             headers=headers,
-            json={"name": repo_name, "description": description, "private": private, "auto_init": True},
+            json={"name": unique_name, "description": description, "private": private, "auto_init": True},
             timeout=15,
         )
         repo_resp.raise_for_status()
+        repo_name = unique_name
         repo_data = repo_resp.json()
         repo_url = repo_data["html_url"]
 

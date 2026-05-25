@@ -77,7 +77,8 @@ class Orchestrator:
                 try:
                     tasks = json.loads(m.group(1))
                     if tasks:
-                        return tasks
+                        seen: set[str] = set()
+                        return [t for t in tasks if t.get("agent") not in seen and not seen.add(t.get("agent", ""))]  # type: ignore[func-returns-value]
                 except Exception:
                     pass
             messages.append({"role": "assistant", "content": raw})
