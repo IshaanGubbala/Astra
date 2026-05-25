@@ -37,10 +37,11 @@ class Orchestrator:
             "  sales      — lead discovery, lead enrichment, outreach sequence generation, inbox warming setup, CRM contact tracking, cold email sending. Use for: finding customers, building pipeline, outbound sales.\n"
             "  design     — wireframes, color palettes, design specifications, logo briefs, UI/UX mockups. Use for: any visual design, brand identity, UX planning.\n\n"
             "Rules:\n"
+            "- Each agent may appear AT MOST ONCE in the task list. Never create two tasks for the same agent.\n"
             "- Only assign agents whose capabilities match the task. Do NOT give web agent research-only tasks — use research for that.\n"
             "- Only include agents whose work is actually needed for this specific goal. Skip agents with nothing relevant to do.\n"
-            "- Set depends_on so research always runs first. web/marketing/legal/sales/design can run after research. technical/ops run last or in parallel.\n"
-            "- Give each agent a clear, specific instruction scoped to what that agent can actually DO.\n\n"
+            "- Run ALL relevant agents in parallel by default. Set depends_on=[] for every agent unless there is a HARD data dependency.\n"
+            "- Each instruction MUST include the specific product/company from the goal (e.g. 'hormone cycle tracking app for women' not 'SaaS platform'). Never use generic placeholders.\n\n"
             "Format:\n"
             '{\"tasks\": [\n'
             '  {\"id\": \"t1\", \"agent\": \"<specialist>\", \"instruction\": \"...\", \"depends_on\": []},\n'
@@ -60,7 +61,14 @@ class Orchestrator:
                     parsed = json.loads(pattern)
                     tasks = parsed.get("tasks", [])
                     if tasks and all("agent" in t for t in tasks):
-                        return tasks
+                        # Deduplicate — keep first occurrence of each agent
+                        seen: set[str] = set()
+                        deduped = []
+                        for t in tasks:
+                            if t["agent"] not in seen:
+                                seen.add(t["agent"])
+                                deduped.append(t)
+                        return deduped
                 except Exception:
                     pass
             # also try finding tasks: [...] directly
