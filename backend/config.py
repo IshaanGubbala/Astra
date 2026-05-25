@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     agent_model_base_url: str = "http://localhost:8081/v1"
     agent_model_api_key: str = "dummy"
     agent_model_name: str = "mythos-26b-a4b-prism-pro-dq.gguf"
+    # Planner uses a stronger model for task decomposition
+    planner_model_base_url: str = "https://api.deepinfra.com/v1/openai"
+    planner_model_api_key: str = ""
+    planner_model_name: str = "moonshotai/Kimi-K2.5"
     vertex_project: str = ""
     vertex_location: str = "us-central1"
 

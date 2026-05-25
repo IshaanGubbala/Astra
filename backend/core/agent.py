@@ -127,6 +127,8 @@ class Agent:
         sub_agents: list["Agent"] = None,
         use_computer: bool = False,
         model: str = None,
+        model_base_url: str = None,
+        model_api_key: str = None,
     ):
         self.name = name
         self.role = role
@@ -134,14 +136,16 @@ class Agent:
         self.sub_agents = {a.name: a for a in (sub_agents or [])}
         self.use_computer = use_computer
         self.model = model or settings.agent_model_name
+        self._model_base_url = model_base_url or settings.agent_model_base_url
+        self._model_api_key = model_api_key or settings.agent_model_api_key
         self._inbox: asyncio.Queue = asyncio.Queue()
         self._llm: Optional[openai.OpenAI] = None
 
     def _get_llm(self) -> openai.OpenAI:
         if self._llm is None:
             self._llm = openai.OpenAI(
-                base_url=settings.agent_model_base_url,
-                api_key=settings.agent_model_api_key,
+                base_url=self._model_base_url,
+                api_key=self._model_api_key,
             )
         return self._llm
 

@@ -4,6 +4,7 @@ Called once at startup; cached as a module-level singleton.
 """
 from backend.core.agent import Agent
 from backend.core.orchestrator import Orchestrator
+from backend.config import settings
 from backend.specialists.research import build_research_agent
 from backend.specialists.web import build_web_agent
 from backend.specialists.marketing import build_marketing_agent
@@ -34,6 +35,9 @@ def get_orchestrator() -> Orchestrator:
             role="planning coordinator. Decompose founder goals into specialist tasks scoped to each agent's actual capabilities.",
             tools={},
             sub_agents=list(specialists.values()),
+            model=settings.planner_model_name,
+            model_base_url=settings.planner_model_base_url,
+            model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         )
         _orchestrator = Orchestrator(planner=planner, specialists=specialists)
     return _orchestrator
