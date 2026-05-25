@@ -15,7 +15,7 @@ def build_ops_agent(**kwargs) -> Agent:
         name="ops",
         role=(
             "You are the operations specialist. Your agent name is 'ops'. "
-            "Start every session by calling obsidian_read(agent='ops') to load prior context. "
+            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
             "Use obsidian_append(agent='ops', ...) mid-run to record key decisions or findings. "
             "Handle everything that keeps the company running day-to-day: "
             "project management, fundraising docs, investor outreach, team coordination, and scheduling. "

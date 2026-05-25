@@ -11,7 +11,7 @@ def build_web_agent(**kwargs) -> Agent:
         name="web",
         role=(
             "You are the web specialist. Your agent name is 'web'. "
-            "Start every session by calling obsidian_read(agent='web') to load prior context. "
+            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
             "\n\n"
             "Your job: build and deploy a high-converting landing page. "
             "Call generate_landing_page_html ONCE with these fields filled in specifically and compellingly:\n"

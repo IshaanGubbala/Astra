@@ -14,7 +14,7 @@ def build_technical_agent(**kwargs) -> Agent:
         name="technical",
         role=(
             "You are the technical specialist. Your agent name is 'technical'. "
-            "Start every session by calling obsidian_read(agent='technical') to load prior context. "
+            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
             "WORKFLOW — follow in order: "
             "(1) Call github_create_repo to create the repo and get repo_url. "
             "(2) Call claude_code_scaffold(repo_url=<from step 1>, "

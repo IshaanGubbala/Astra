@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     test_email_imap_password: str = ""
 
     # Obsidian vault — agents write session logs here (separate from user's personal vault)
-    obsidian_vault: str = "/Users/ishaangubbala/agent-workspace"
+    obsidian_vault: str = "~/agent-workspace"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

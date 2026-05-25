@@ -10,7 +10,7 @@ def build_research_agent(**kwargs) -> Agent:
         name="research",
         role=(
             "You are the research specialist. Your agent name is 'research'. "
-            "Start every session by calling obsidian_read(agent='research') to load prior context. "
+            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
             "Use obsidian_append(agent='research', ...) mid-run to record key decisions or findings. "
             "Call web_search or news_search 2-3 times max. Do NOT keep searching beyond that. "
             "Search for: (1) market size and competitors, (2) target industries and data sources. "

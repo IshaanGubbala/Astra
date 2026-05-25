@@ -124,11 +124,13 @@ class Orchestrator:
 
             dep_results = {dep: completed.get(dep, {}) for dep in task.get("depends_on", [])}
 
-            # Load agent's prior Obsidian context
-            vault_context = {}
+            # Load agent's prior Obsidian context as readable markdown (not raw JSON)
+            vault_context_text = ""
             try:
-                from backend.tools.obsidian_logger import obsidian_read
-                vault_context = await asyncio.to_thread(obsidian_read, agent_name)
+                from backend.tools.obsidian_logger import format_vault_context
+                vault_context_text = await asyncio.to_thread(
+                    format_vault_context, agent_name, 3, founder_id
+                )
             except Exception:
                 pass
 
@@ -136,7 +138,11 @@ class Orchestrator:
                 goal=task["instruction"],
                 founder_id=founder_id,
                 session_id=session_id,
-                shared={**shared, "prior_results": dep_results, "vault_context": vault_context},
+                shared={
+                    **shared,
+                    "prior_results": dep_results,
+                    "prior_vault_notes": vault_context_text,  # readable text, not raw dict
+                },
             )
             if proprietary_engine:
                 proprietary_engine.on_agent_start(agent_name)
@@ -161,6 +167,17 @@ class Orchestrator:
                         logger.warning("Mirror BLOCKED %s — flagging for founder", agent_name)
                 except Exception as _me:
                     logger.warning("Mirror review failed for %s: %s", agent_name, _me)
+
+            # Auto-log to Obsidian if agent didn't call obsidian_log itself
+            try:
+                from backend.tools.obsidian_logger import auto_log_if_missing
+                auto_wrote = await asyncio.to_thread(
+                    auto_log_if_missing, agent_name, session_id, result, founder_id
+                )
+                if auto_wrote:
+                    logger.debug("Auto-logged Obsidian note for %s", agent_name)
+            except Exception as _ole:
+                logger.warning("Obsidian auto-log failed for %s: %s", agent_name, _ole)
 
             completed[tid] = result
             shared[f"result_{tid}"] = result
@@ -192,6 +209,16 @@ class Orchestrator:
                 in_flight.discard(t["id"])
 
         await publish(session_id, {"type": "goal_done", "results": completed})
+
+        # Write session index linking all agent notes
+        try:
+            from backend.tools.obsidian_logger import obsidian_session_index
+            agents_ran = [t["agent"] for t in tasks]
+            await asyncio.to_thread(
+                obsidian_session_index, session_id, goal, agents_ran, founder_id
+            )
+        except Exception as _sie:
+            logger.warning("Obsidian session index failed: %s", _sie)
 
         # Proprietary engine: post-run fingerprint
         if proprietary_engine:

@@ -14,7 +14,7 @@ def build_marketing_agent(**kwargs) -> Agent:
         name="marketing",
         role=(
             "You are the marketing specialist. Your agent name is 'marketing'. "
-            "Start every session by calling obsidian_read(agent='marketing') to load prior context. "
+            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
             "Use obsidian_append(agent='marketing', ...) mid-run to record key decisions or findings. "
             "Create social content and email campaigns. Generate 1-2 content pieces max then call done. "
             "Do NOT loop generating more content after 2 pieces. "

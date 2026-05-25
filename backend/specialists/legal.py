@@ -11,7 +11,7 @@ def build_legal_agent(**kwargs) -> Agent:
         name="legal",
         role=(
             "You are the legal specialist. Your agent name is 'legal'. "
-            "Start every session by calling obsidian_read(agent='legal') to load prior context. "
+            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
             "Use obsidian_append(agent='legal', ...) mid-run to record key decisions or findings. "
             "Draft legal documents and save them as files. "
             "Generate exactly ONE legal document per session — pick the most relevant doc type for the goal. "
