@@ -78,11 +78,11 @@ export default function Home() {
   ];
 
   return (
-    <div className="flex flex-col gap-20">
+    <div className="flex flex-col gap-14">
       {/* Hero */}
-      <section className="grid gap-10 lg:grid-cols-[1fr_1.1fr] lg:items-center">
-        <div className="flex flex-col gap-8">
-          <div className="flex flex-col gap-5">
+      <section className="grid gap-8 lg:grid-cols-[1fr_1.1fr] lg:items-center">
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-4">
             <div className="eyebrow">Astra · AI founding team</div>
             <h1>
               You bring<br />the idea.<br />
