@@ -4,6 +4,211 @@ What we're building, why, and exactly how each system works.
 
 ---
 
+## The Astra Agent Harness
+
+### Problem With The Current Loop
+
+`backend/core/agent.py` is a hand-rolled loop: call LLM → parse tool call → execute → repeat. It works but it's fragile, has no observability, no security layer, no multi-model routing, and no structured output validation. Every agent runs on the same model with the same retry logic with no ability to swap, fallback, or audit.
+
+### What We're Building Instead
+
+A proprietary agentic harness. Not from scratch — that's wasted effort. The right approach is to own the loop logic, security, and observability while standing on proven infrastructure for the parts that are commodity:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  Astra Agent Harness                     │
+│                                                         │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │
+│  │  Loop Core  │  │  Tool Layer  │  │  Observability │  │
+│  │  (custom)   │  │  (custom)    │  │  (custom)      │  │
+│  └──────┬──────┘  └──────┬───────┘  └───────┬───────┘  │
+│         │                │                   │           │
+│  ┌──────▼──────────────────────────────────▼─────────┐  │
+│  │              LiteLLM Router (commodity)            │  │
+│  │  100+ models, fallbacks, spend tracking, retries   │  │
+│  └────────────────────────────────────────────────────┘  │
+│         │                │                               │
+│  ┌──────▼──────┐  ┌──────▼──────────────────────────┐   │
+│  │  Instructor │  │  Composio + MCP + Direct APIs    │   │
+│  │  (struct.   │  │  200+ app integrations           │   │
+│  │  outputs)   │  └─────────────────────────────────┘   │
+│  └─────────────┘                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Layer Decisions
+
+**LiteLLM as the model router (not from scratch)**
+- Supports 100+ providers: OpenAI, Anthropic, DeepInfra, Groq, Mistral, Vertex, Bedrock, local Ollama
+- Per-agent model assignment: research runs on Llama 3.3, legal runs on Claude Sonnet, web runs on whatever is fastest at deploy time
+- Automatic fallback: if DeepInfra is down, route to Groq without code changes
+- Built-in spend tracking per agent, per session, per founder
+- Rate limiting and budget caps per founder
+- We own the agent loop that calls LiteLLM — we don't use LiteLLM's agent abstractions
+
+**Instructor for structured outputs (not from scratch)**
+- Forces every LLM response into a validated Pydantic model
+- No more manual JSON parsing or tool call extraction
+- Tool calls become typed function signatures — if the model hallucinates a field, Instructor catches it and retries
+- Works on top of LiteLLM so we get both benefits
+
+**Custom loop logic (proprietary)**
+- Tool dispatch, iteration control, one-shot guards
+- Security validation before every tool execution
+- Output sanitization before returning to LLM context
+- Integration with the four intelligence systems (graph, observer, fingerprints, mirror)
+- Streaming event emission at every step
+
+**Composio + MCP + direct APIs (integrations layer)**
+- Composio already integrated: Gmail, LinkedIn, GitHub, Linear, Notion, Calendar (200+ apps)
+- MCP (Model Context Protocol) — Anthropic's emerging standard for agent↔tool communication. Add an MCP server layer so any MCP-compatible tool works with zero integration code
+- Direct APIs for latency-critical tools: Vercel, GitHub repos, SendGrid (bypass Composio overhead)
+
+### Security Layer (proprietary)
+
+This is where we build real moat. No one else has per-tool, per-agent, per-founder security enforcement at the loop level.
+
+```python
+class ToolSecurityLayer:
+    def validate_call(self, agent: str, tool: str, args: dict, founder_id: str) -> ValidationResult:
+        # 1. Allowlist check — agent can only call its declared tools
+        if tool not in AGENT_TOOL_ALLOWLIST[agent]:
+            return ValidationResult.block(f"{agent} is not permitted to call {tool}")
+
+        # 2. Input sanitization — strip prompt injection attempts
+        args = self._sanitize_inputs(args)
+
+        # 3. Founder isolation — tool cannot access another founder's data
+        if "founder_id" in args and args["founder_id"] != founder_id:
+            return ValidationResult.block("Cross-founder data access denied")
+
+        # 4. Rate limit — per tool per founder per hour
+        if self._rate_exceeded(founder_id, tool):
+            return ValidationResult.block(f"{tool} rate limit exceeded for this founder")
+
+        # 5. Destructive action check — flag any tool that writes external state
+        if tool in DESTRUCTIVE_TOOLS:
+            return ValidationResult.flag("Destructive tool — logging for audit")
+
+        return ValidationResult.allow(args)
+
+    def sanitize_output(self, tool: str, result: dict) -> dict:
+        # Strip secrets, tokens, PII from tool results before they enter LLM context
+        return self._redact_sensitive_fields(result)
+```
+
+**Tool allowlists per agent — hardcoded, not LLM-configurable:**
+```python
+AGENT_TOOL_ALLOWLIST = {
+    "research":   {"web_search", "news_search", "patent_search", "obsidian_log", "obsidian_read", "done"},
+    "legal":      {"format_legal_document", "generate_pdf", "obsidian_log", "obsidian_read", "done"},
+    "web":        {"generate_landing_page_html", "vercel_deploy", "github_create_repo", "web_search", "obsidian_log", "obsidian_read", "done"},
+    "marketing":  {"generate_reel_package", "generate_tiktok_package", "generate_meta_ad", "send_email_campaign", "obsidian_log", "obsidian_read", "done"},
+    "technical":  {"github_create_repo", "claude_code_scaffold", "composio_linear_create_issue", "composio_notion_create_page", "obsidian_log", "obsidian_read", "done"},
+    "ops":        {"generate_pdf", "send_email_campaign", "composio_linear_create_issue", "composio_notion_create_page", "obsidian_log", "obsidian_read", "done"},
+}
+```
+
+### Per-Agent Model Routing
+
+Different tasks call for different models. LiteLLM makes this free:
+
+```python
+AGENT_MODELS = {
+    "research":   "deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo",  # fast, cheap
+    "legal":      "anthropic/claude-sonnet-4-5",                         # best reasoning, high stakes
+    "web":        "deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo",  # fast
+    "marketing":  "deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo",  # creative, fast
+    "technical":  "anthropic/claude-sonnet-4-5",                         # code quality matters
+    "ops":        "deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo",  # structured output, fast
+    "mirror":     "anthropic/claude-sonnet-4-5",                         # adversarial needs best model
+    "planner":    "deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo",  # fast planning
+}
+
+AGENT_MODEL_FALLBACKS = {
+    "legal":     ["openai/gpt-4o", "deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo"],
+    "technical": ["openai/gpt-4o", "deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo"],
+    "mirror":    ["openai/gpt-4o", "deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo"],
+}
+```
+
+### Observability (proprietary)
+
+Every LLM call, tool execution, and agent event is traced with full context. Built in-house — no Langfuse, no Helicone, no DataDog. Stored in Supabase.
+
+```python
+@dataclass
+class AgentTrace:
+    session_id: str
+    agent: str
+    iteration: int
+    event_type: str          # "llm_call" | "tool_call" | "tool_result" | "done"
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    latency_ms: int
+    tool_name: str | None
+    tool_args: dict | None
+    tool_result: dict | None
+    error: str | None
+    timestamp: str
+```
+
+Dashboard query: "Show me every tool call that took > 60s in the last 30 days, grouped by agent." Answer in milliseconds from Supabase.
+
+### MCP Integration
+
+MCP (Model Context Protocol) is the emerging standard for agent↔tool communication — Anthropic, OpenAI, and Google are all aligning on it. Build an MCP server layer now so any MCP-compatible tool (from any vendor) works with Astra agents with zero integration code.
+
+```python
+class MCPToolBridge:
+    """Wraps any MCP server as a native Astra tool."""
+    async def discover_tools(self, mcp_server_url: str) -> list[AstraTool]:
+        # Connect to MCP server, fetch tool schemas
+        # Return as native Astra tools — agents see no difference
+
+    async def call(self, tool_name: str, args: dict) -> dict:
+        # Route call to appropriate MCP server
+        # Apply security layer before and after
+```
+
+When a new MCP tool ships (Stripe, Salesforce, Shopify, etc.), it works with Astra in minutes — not weeks of integration work.
+
+### New Dependencies
+
+```
+litellm>=1.40
+instructor>=1.3
+mcp>=1.0          # when stable
+```
+
+### What This Gives Us
+
+| Capability | Current | With Harness |
+|---|---|---|
+| Model providers | 1 (DeepInfra) | 100+ via LiteLLM |
+| Per-agent models | No | Yes — legal on Claude, others on Llama |
+| Structured outputs | Manual JSON parse | Pydantic-validated via Instructor |
+| Tool security | None | Allowlist + rate limit + sanitization |
+| Fallbacks | None | Automatic per-agent |
+| Observability | SSE events only | Full trace per LLM call and tool |
+| Tool integrations | ~15 custom + Composio | Composio + MCP (unbounded) |
+| Spend tracking | None | Per agent, per founder, per session |
+
+### What Stays Proprietary
+
+- The loop logic and iteration control
+- The security validation layer
+- The intelligence systems (A/E/F/G)
+- The per-agent model routing config
+- The observability schema and queries
+- The tool allowlists
+
+LiteLLM and Instructor are open source primitives — the value we build on top of them is not.
+
+---
+
 ## The Problem With Current Astra
 
 Every run starts cold. Agents have no memory of prior decisions beyond flat Obsidian notes. There's no learning between sessions, no cross-founder pattern recognition, no proactive intelligence, and no quality gate before outputs ship. The system is as smart on run 100 as it was on run 1.
