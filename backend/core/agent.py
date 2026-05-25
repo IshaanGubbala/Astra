@@ -17,6 +17,81 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _format_tool_result(tool_name: str, result: Any) -> str:
+    """
+    Format tool results as readable text for LLM context.
+    Raw JSON is hard for the LLM to parse — structured text is much better.
+    """
+    if not isinstance(result, dict):
+        return str(result)
+
+    # Web search — format as numbered list
+    if tool_name in ("web_search", "news_search") and "formatted" in result:
+        return result["formatted"]
+
+    # Page fetcher / search_and_read — format as readable article sections
+    if tool_name in ("fetch_page", "search_and_read"):
+        if "results" in result:  # search_and_read
+            lines = [f"Search: {result.get('query', '')}\n"]
+            for r in result.get("results", []):
+                lines.append(f"### {r.get('title', r.get('url', ''))}")
+                lines.append(f"URL: {r.get('url', '')}")
+                content = r.get("page_content") or r.get("snippet", "")
+                if content:
+                    lines.append(content[:1500])
+                lines.append("")
+            return "\n".join(lines)
+        # fetch_page
+        title = result.get("title", "")
+        text = result.get("text", "")
+        url = result.get("url", "")
+        lines = []
+        if title:
+            lines.append(f"# {title}")
+        if url:
+            lines.append(f"Source: {url}")
+        if text:
+            lines.append(text)
+        return "\n".join(lines)
+
+    # Browser read_page
+    if tool_name == "computer_use" or (isinstance(result, dict) and "body_text" in result):
+        text = result.get("body_text", result.get("text", ""))
+        title = result.get("title", "")
+        url = result.get("url", "")
+        out = []
+        if title:
+            out.append(f"Page: {title}")
+        if url:
+            out.append(f"URL: {url}")
+        if text:
+            out.append(text)
+        return "\n".join(out) if out else json.dumps(result)
+
+    # Obsidian tools — compact
+    if tool_name in ("obsidian_log", "obsidian_read", "obsidian_append"):
+        if tool_name == "obsidian_read":
+            notes = result.get("notes", [])
+            if not notes:
+                return "No prior notes found."
+            lines = [f"{len(notes)} prior session(s) found:\n"]
+            for n in notes:
+                lines.append(f"--- {n.get('file', '')} ---")
+                lines.append(n.get("content", "")[:500])
+            return "\n".join(lines)
+        return json.dumps(result)
+
+    # Default: compact JSON (not full dump for large results)
+    try:
+        text = json.dumps(result, indent=2)
+        if len(text) > 3000:
+            # Truncate large results, keeping structure
+            return text[:3000] + "\n... (truncated)"
+        return text
+    except Exception:
+        return str(result)
+
+
 
 @dataclass
 class Message:
@@ -129,15 +204,19 @@ class Agent:
             "\nTo control the browser:\n"
             '{"action": "computer_use", "action_detail": {"action": "<cmd>", ...params}, "reasoning": "..."}\n'
             "Commands:\n"
-            "  navigate   {url}\n"
-            "  find_elements  {}  → lists buttons/inputs/links on page\n"
-            "  click      {selector} or {x, y}\n"
-            "  type       {selector, text}\n"
-            "  key        {key}  e.g. Enter, Tab\n"
-            "  scroll     {delta_y}\n"
-            "  get_text   {selector}  → read specific element text\n"
-            "  wait       {ms}\n"
-            "After each action you receive: result + current URL + page text.\n"
+            "  navigate      {url}  → go to URL\n"
+            "  read_page     {}     → extract clean readable content from current page (preferred over get_text)\n"
+            "  find_elements {}     → list interactive elements (buttons, inputs, links)\n"
+            "  click         {selector} or {x, y}\n"
+            "  type          {selector, text}\n"
+            "  key           {key}  e.g. Enter, Tab\n"
+            "  scroll        {delta_y}\n"
+            "  scroll_to     {text} or {selector}  → scroll until element is visible\n"
+            "  extract_table {}     → extract table data from page\n"
+            "  get_text      {selector}  → read specific element text\n"
+            "  wait          {ms}\n"
+            "After each action you receive: result + current URL + clean page content.\n"
+            "PREFER read_page over get_text — it returns clean article content without ads/nav.\n"
             "Use find_elements to discover selectors before clicking.\n"
         ) if self.use_computer else ""
 
@@ -249,7 +328,7 @@ class Agent:
                     _tool_fail_counts[tool_name] = 0  # reset on success
                     if tool_name in _ONE_SHOT_TOOLS:
                         _one_shot_done.add(tool_name)
-                    content = f"Tool result: {json.dumps(result)}"
+                    content = f"Tool result ({tool_name}):\n{_format_tool_result(tool_name, result)}"
                     if i >= 5:
                         content += f"\n\n[Iteration {i}/{MAX_ITERATIONS}] You have gathered enough data. Call obsidian_log then done now unless you have a specific reason to do one more tool call."
                     if tool_name in _ONE_SHOT_TOOLS:

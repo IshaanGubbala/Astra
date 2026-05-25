@@ -70,20 +70,27 @@ class BrowserSession:
         self._started = False
 
     async def page_state(self) -> dict:
-        """Text summary of current page — URL, title, body text (2000 chars)."""
+        """Clean summary of current page — URL, title, main content text (5000 chars, noise removed)."""
         p = self._page
         if p is None:
             return {}
         try:
             title = await p.title()
-            body = await p.inner_text("body")
+            html = await p.content()
+            from backend.tools.page_fetcher import _extract
+            body, _, links = _extract(html, base_url=p.url)
         except Exception:
-            body = ""
+            try:
+                body = await p.inner_text("body")
+            except Exception:
+                body = ""
             title = ""
+            links = []
         return {
             "url": p.url,
             "title": title,
-            "body_text": body[:2000],
+            "body_text": body[:5000],
+            "links_on_page": links[:10],
         }
 
     async def execute_action(self, action: dict) -> dict:
@@ -166,18 +173,64 @@ class BrowserSession:
                 # Returns text+selector hints for interactive elements
                 elements = await p.evaluate("""() => {
                     const els = document.querySelectorAll('a, button, input, select, textarea, [role="button"]');
-                    return Array.from(els).slice(0, 30).map(el => ({
+                    return Array.from(els).slice(0, 50).map((el, i) => ({
                         tag: el.tagName.toLowerCase(),
                         type: el.type || '',
-                        text: (el.innerText || el.value || el.placeholder || '').slice(0, 80),
+                        text: (el.innerText || el.value || el.placeholder || '').slice(0, 100).trim(),
                         id: el.id || '',
                         name: el.name || '',
-                    }));
+                        href: el.href || '',
+                        index: i,
+                    })).filter(el => el.text.length > 0);
                 }""")
                 return {"elements": elements}
 
+            elif act == "read_page":
+                # Extract clean readable content from current page (strips ads/nav/footer)
+                html = await p.content()
+                from backend.tools.page_fetcher import _extract
+                text, title, links = _extract(html, base_url=p.url)
+                return {
+                    "url": p.url,
+                    "title": title,
+                    "text": text[:6000],
+                    "links": links[:15],
+                    "truncated": len(text) > 6000,
+                }
+
+            elif act == "scroll_to":
+                # Scroll until element matching text is visible
+                target_text = action.get("text", "")
+                selector = action.get("selector", "")
+                if selector:
+                    await p.scroll_into_view_if_needed(selector, timeout=5000)
+                    return {"ok": True, "scrolled_to": selector}
+                elif target_text:
+                    # Find element containing text and scroll to it
+                    el = await p.get_by_text(target_text).first.element_handle()
+                    if el:
+                        await el.scroll_into_view_if_needed()
+                        return {"ok": True, "scrolled_to": target_text}
+                    return {"ok": False, "error": f"Text not found: {target_text}"}
+                else:
+                    await p.mouse.wheel(0, action.get("delta_y", 500))
+                    return {"ok": True}
+
+            elif act == "extract_table":
+                # Extract table data from page as list of row dicts
+                tables = await p.evaluate("""() => {
+                    return Array.from(document.querySelectorAll('table')).slice(0, 3).map(table => {
+                        const headers = Array.from(table.querySelectorAll('th')).map(th => th.innerText.trim());
+                        const rows = Array.from(table.querySelectorAll('tr')).slice(1).map(tr =>
+                            Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim())
+                        ).filter(row => row.some(cell => cell.length > 0));
+                        return { headers, rows: rows.slice(0, 20) };
+                    });
+                }""")
+                return {"tables": tables}
+
             else:
-                return {"error": f"unknown action: {act}"}
+                return {"error": f"unknown action: {act}. Valid: navigate, click, type, scroll, key, wait, get_text, screenshot, find_elements, read_page, scroll_to, extract_table"}
 
         except Exception as e:
             return {"error": str(e)}
