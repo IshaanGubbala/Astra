@@ -520,7 +520,8 @@ class TestRufloBridge:
     def test_mcp_manifest_has_all_agents(self):
         from proprietary_agent.ruflo_bridge import MCP_TOOL_MANIFEST
         expected = {"astra_research", "astra_legal", "astra_web", "astra_marketing",
-                    "astra_technical", "astra_ops", "astra_mirror", "astra_observer"}
+                    "astra_technical", "astra_ops", "astra_mirror", "astra_observer",
+                    "astra_sales", "astra_design"}
         assert set(MCP_TOOL_MANIFEST.keys()) == expected
 
     def test_mcp_manifest_schema_valid(self):

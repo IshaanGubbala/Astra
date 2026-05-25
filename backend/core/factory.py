@@ -10,6 +10,8 @@ from backend.specialists.marketing import build_marketing_agent
 from backend.specialists.technical import build_technical_agent
 from backend.specialists.legal import build_legal_agent
 from backend.specialists.ops import build_ops_agent
+from backend.specialists.sales import build_sales_agent
+from backend.specialists.design import build_design_agent
 
 _orchestrator: Orchestrator | None = None
 
@@ -24,6 +26,8 @@ def get_orchestrator() -> Orchestrator:
             "technical": build_technical_agent(use_computer=True),
             "legal": build_legal_agent(use_computer=True),
             "ops": build_ops_agent(use_computer=True),
+            "sales": build_sales_agent(use_computer=False),
+            "design": build_design_agent(use_computer=False),
         }
         planner = Agent(
             name="planner",

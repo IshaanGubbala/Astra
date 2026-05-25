@@ -47,6 +47,18 @@ _AGENT_QUESTIONS = {
         "What assumption in the financial model is most fragile?",
         "What would a skeptical Series A investor ask first?",
     ],
+    "sales": [
+        "Is this ICP (ideal customer profile) specific enough — or is it everyone?",
+        "Would a real person open this cold email, or does it read like spam?",
+        "What objection is not addressed in the outreach sequence?",
+        "Is the lead list high-quality or scraped noise?",
+    ],
+    "design": [
+        "Does this wireframe prioritize the user goal or the founder's vanity?",
+        "Is the visual hierarchy clear — can a user find the CTA in 3 seconds?",
+        "Does this design system solve for the target audience or a generic user?",
+        "What design pattern here will date the product in 12 months?",
+    ],
 }
 
 _SYSTEM_PROMPT = """\

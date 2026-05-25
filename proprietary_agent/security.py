@@ -66,6 +66,21 @@ AGENT_TOOL_ALLOWLIST: dict[str, set[str]] = {
         "runway_calculator", "kpi_dashboard_builder", "investor_matcher",
         "cap_table_modeler", "competitive_positioning_map", "board_deck_generator",
     },
+    "sales": {
+        "find_leads", "enrich_lead", "build_outreach_sequence",
+        "create_warming_schedule", "generate_spf_dkim_instructions",
+        "build_crm_contact", "track_outreach", "send_email_campaign",
+        "obsidian_log", "obsidian_read", "obsidian_append", "done",
+        # specialized
+        "icp_builder", "pipeline_analyzer", "deal_scorer", "competitor_battlecard",
+    },
+    "design": {
+        "generate_wireframe", "generate_color_palette", "generate_design_spec",
+        "generate_logo_brief", "web_search",
+        "obsidian_log", "obsidian_read", "obsidian_append", "done",
+        # specialized
+        "accessibility_checker", "design_system_exporter", "figma_component_gen",
+    },
     # Internal agents
     "mirror": {"done"},
     "observer": {"web_search", "news_search", "obsidian_log", "done"},
@@ -77,6 +92,7 @@ DESTRUCTIVE_TOOLS = {
     "vercel_deploy", "github_create_repo", "send_email_campaign",
     "claude_code_scaffold", "composio_linear_create_issue",
     "composio_notion_create_page",
+    "track_outreach",  # writes CRM state
 }
 
 # Patterns that signal prompt injection attempts

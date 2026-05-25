@@ -13,6 +13,7 @@ from backend.provisioning.browser_provisioner import (
     provision_sendgrid,
     provision_vercel,
 )
+from backend.provisioning.supabase_provisioner import provision_supabase_project
 from backend.provisioning.credentials_store import load_all_credentials, store_credentials
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,15 @@ async def provision_all(
         )
     except Exception as e:
         results["vercel"] = {"created": False, "error": str(e)}
+
+    # Supabase — database + auth + storage (matches Cofounder 2 auto-infra)
+    project_name = email.split("@")[0].replace(".", "-").replace("_", "-")[:20]
+    try:
+        results["supabase"] = await loop.run_in_executor(
+            _EXECUTOR, provision_supabase_project, founder_id, project_name
+        )
+    except Exception as e:
+        results["supabase"] = {"created": False, "error": str(e)}
 
     # Composio account — inject API key into settings + .env if obtained
     try:
@@ -149,6 +159,12 @@ def _store_service_creds(founder_id: str, results: dict) -> None:
         "github": lambda r: {"token": r.get("token"), "username": r.get("username")},
         "vercel": lambda r: {"token": r.get("token")},
         "sendgrid": lambda r: {"api_key": r.get("api_key")},
+        "supabase": lambda r: {
+            "project_url": r.get("project_url"),
+            "anon_key": r.get("anon_key"),
+            "service_role_key": r.get("service_role_key"),
+            "ref": r.get("ref"),
+        },
     }
     for service, extractor in mappings.items():
         r = results.get(service, {})
@@ -165,6 +181,7 @@ def _summarize(results: dict) -> list[str]:
         "github": "GitHub",
         "vercel": "Vercel",
         "sendgrid": "SendGrid (email)",
+        "supabase": "Supabase (database + auth)",
         "composio": "Composio (tool execution)",
     }
     for key, label in service_labels.items():
@@ -193,6 +210,7 @@ async def get_founder_setup_status(founder_id: str) -> dict:
         "github": bool(creds.get("github", {}).get("token")),
         "vercel": bool(creds.get("vercel", {}).get("token")),
         "sendgrid": bool(creds.get("sendgrid", {}).get("api_key")),
+        "supabase": bool(creds.get("supabase", {}).get("anon_key")),
         "instagram": bool(creds.get("instagram", {}).get("access_token")),
         "tiktok": bool(creds.get("tiktok", {}).get("access_token")),
         "meta_ads": bool(creds.get("meta_ads", {}).get("access_token")),

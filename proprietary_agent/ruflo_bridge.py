@@ -113,13 +113,46 @@ MCP_TOOL_MANIFEST = {
             "required": ["goal", "founder_id"],
         },
     },
+    "astra_sales": {
+        "name": "astra_sales",
+        "description": "Lead discovery, enrichment, outreach sequence generation, inbox warming setup, CRM tracking. Returns leads list, enrichment data, and multi-touch email sequences.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string"},
+                "founder_id": {"type": "string"},
+                "session_id": {"type": "string"},
+                "industry": {"type": "string", "description": "Target industry for lead discovery"},
+                "job_title": {"type": "string", "description": "Target job title / ICP role"},
+                "product_name": {"type": "string"},
+                "value_prop": {"type": "string"},
+            },
+            "required": ["goal", "founder_id"],
+        },
+    },
+    "astra_design": {
+        "name": "astra_design",
+        "description": "UI/UX design: wireframes, color palettes, design specifications, logo briefs. Returns structured design artifacts ready for implementation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string"},
+                "founder_id": {"type": "string"},
+                "session_id": {"type": "string"},
+                "product_type": {"type": "string", "description": "saas | marketplace | mobile_app | dashboard | ecommerce"},
+                "brand_vibe": {"type": "string", "description": "minimal | bold | friendly | professional | innovative | calm"},
+                "page_types": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["goal", "founder_id"],
+        },
+    },
     "astra_mirror": {
         "name": "astra_mirror",
         "description": "Adversarial quality review. Attacks any agent output and returns pass/flag/block verdict with critique and questions. Use to gate outputs before delivery.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "agent": {"type": "string", "enum": ["research", "legal", "web", "marketing", "technical", "ops"]},
+                "agent": {"type": "string", "enum": ["research", "legal", "web", "marketing", "technical", "ops", "sales", "design"]},
                 "output": {"type": "string", "description": "Full agent output to review"},
             },
             "required": ["agent", "output"],
