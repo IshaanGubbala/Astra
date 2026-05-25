@@ -8,6 +8,7 @@ from backend.tools.composio_tools import (
     composio_notion_create_page,
     composio_linear_create_issue,
 )
+from backend.tools.resend_tools import resend_send_email, resend_generate_integration, resend_create_email_templates
 
 
 def build_ops_agent(**kwargs) -> Agent:
@@ -35,7 +36,10 @@ def build_ops_agent(**kwargs) -> Agent:
             "composio_calendar_create_event": composio_calendar_create_event,
             "composio_notion_create_page": composio_notion_create_page,
             "composio_linear_create_issue": composio_linear_create_issue,
-                    "obsidian_log": obsidian_log,
+            "resend_send_email": resend_send_email,
+            "resend_generate_integration": resend_generate_integration,
+            "resend_create_email_templates": resend_create_email_templates,
+            "obsidian_log": obsidian_log,
             "obsidian_read": obsidian_read,
             "obsidian_append": obsidian_append,
         },

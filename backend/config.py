@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     # Obsidian vault — agents write session logs here (separate from user's personal vault)
     obsidian_vault: str = "~/agent-workspace"
 
+    # User-project tool APIs
+    resend_api_key: str = ""
+    cloudflare_api_token: str = ""
+    supabase_management_token: str = ""
+    posthog_api_key: str = ""
+    posthog_project_id: str = ""
+    clerk_secret_key: str = ""
+    deepinfra_api_key: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

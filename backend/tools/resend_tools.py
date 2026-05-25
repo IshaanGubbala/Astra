@@ -1,0 +1,98 @@
+"""Resend email tools — transactional email for user projects (not Astra itself)."""
+import logging
+import requests
+from backend.config import settings
+
+logger = logging.getLogger(__name__)
+_API = "https://api.resend.com"
+
+
+def resend_send_email(to: str, from_email: str, subject: str, html: str, text: str = "") -> dict:
+    """Send transactional email via Resend. Requires RESEND_API_KEY in founder's env."""
+    api_key = getattr(settings, "resend_api_key", "")
+    if not api_key:
+        return {
+            "sent": False,
+            "queued": True,
+            "note": "RESEND_API_KEY not set — email content generated, set key to send",
+            "preview": {"to": to, "subject": subject, "body": html[:300]},
+        }
+    try:
+        resp = requests.post(
+            f"{_API}/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"from": from_email, "to": [to], "subject": subject, "html": html, "text": text or subject},
+            timeout=10,
+        )
+        data = resp.json()
+        return {"sent": resp.ok, "id": data.get("id"), "status": resp.status_code}
+    except Exception as e:
+        return {"error": str(e), "sent": False}
+
+
+def resend_generate_integration(app_name: str, from_domain: str) -> dict:
+    """
+    Generate Resend integration code for a user's Next.js/Node app.
+    Returns install command, env vars, and ready-to-use send function.
+    """
+    return {
+        "app": app_name,
+        "install": "npm install resend",
+        "env_vars": {"RESEND_API_KEY": "re_your_api_key_here"},
+        "setup_code": (
+            "import { Resend } from 'resend';\n"
+            f"const resend = new Resend(process.env.RESEND_API_KEY);\n\n"
+            f"// Send email\n"
+            f"const {{ data, error }} = await resend.emails.send({{\n"
+            f"  from: 'noreply@{from_domain}',\n"
+            f"  to: ['user@example.com'],\n"
+            f"  subject: 'Welcome to {app_name}',\n"
+            f"  html: '<p>Welcome!</p>',\n"
+            f"}});"
+        ),
+        "welcome_template": (
+            f"<div style='font-family:sans-serif;max-width:600px;margin:auto;padding:40px'>\n"
+            f"  <h1>Welcome to {app_name}!</h1>\n"
+            f"  <p>You're in. Here's what to do next:</p>\n"
+            f"  <a href='{{{{dashboard_url}}}}' style='background:#000;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none'>Open Dashboard</a>\n"
+            f"</div>"
+        ),
+        "dns_records": [
+            {"type": "TXT", "host": f"resend._domainkey.{from_domain}", "value": "Add DKIM from Resend dashboard"},
+            {"type": "TXT", "host": from_domain, "value": "v=spf1 include:amazonses.com ~all"},
+        ],
+        "dashboard": "https://resend.com/domains",
+    }
+
+
+def resend_create_email_templates(app_name: str, templates: list[str] = None) -> dict:
+    """
+    Generate HTML email templates for common transactional flows.
+    templates: ['welcome', 'reset_password', 'magic_link', 'invoice', 'trial_ending']
+    """
+    templates = templates or ["welcome", "magic_link", "reset_password"]
+    result = {}
+    for t in templates:
+        if t == "welcome":
+            result[t] = _template(app_name, "Welcome!", "You're all set.", "Go to Dashboard", "{{dashboard_url}}")
+        elif t == "magic_link":
+            result[t] = _template(app_name, "Your login link", "Click below to sign in — link expires in 10 minutes.", "Sign In", "{{magic_link}}")
+        elif t == "reset_password":
+            result[t] = _template(app_name, "Reset your password", "Click below to choose a new password.", "Reset Password", "{{reset_url}}")
+        elif t == "invoice":
+            result[t] = _template(app_name, "Invoice #{{invoice_number}}", "Payment of {{amount}} received.", "View Invoice", "{{invoice_url}}")
+        elif t == "trial_ending":
+            result[t] = _template(app_name, "Your trial ends in 3 days", "Upgrade to keep access.", "Upgrade Now", "{{upgrade_url}}")
+    return {"app": app_name, "templates": result}
+
+
+def _template(app, subject, body, cta, url):
+    return (
+        f"<div style='font-family:sans-serif;max-width:580px;margin:auto;padding:40px 24px'>"
+        f"<h2 style='margin:0 0 16px'>{subject}</h2>"
+        f"<p style='margin:0 0 24px;color:#555'>{body}</p>"
+        f"<a href='{url}' style='background:#000;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600'>{cta}</a>"
+        f"<hr style='margin:32px 0;border:none;border-top:1px solid #eee'/>"
+        f"<p style='color:#999;font-size:12px'>Sent by {app}</p>"
+        f"</div>"
+    )

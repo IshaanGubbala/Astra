@@ -19,6 +19,7 @@ def claude_code_scaffold(
     task: str,
     commit_message: str = "feat: scaffold via claude code",
     context: str = "",
+    api_key: str = "",
 ) -> dict:
     """
     Clone a GitHub repo, run Claude Code to implement the task, commit and push.
@@ -73,6 +74,10 @@ Start with file 1 immediately. Write each file completely before moving to the n
             # Run Claude Code non-interactively
             env = os.environ.copy()
             env["HOME"] = os.environ.get("HOME", "/Users/ishaangubbala")
+            # Use DeepInfra API key if provided (for user-facing runs)
+            effective_key = api_key or getattr(settings, "deepinfra_api_key", "") or getattr(settings, "planner_model_api_key", "")
+            if effective_key:
+                env["ANTHROPIC_API_KEY"] = effective_key
             result = subprocess.run(
                 [CLAUDE_BIN, "--print", full_task, "--output-format", "text", "--dangerously-skip-permissions"],
                 cwd=tmpdir,

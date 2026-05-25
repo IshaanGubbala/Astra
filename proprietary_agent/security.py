@@ -38,7 +38,9 @@ AGENT_TOOL_ALLOWLIST: dict[str, set[str]] = {
     },
     "web": {
         "generate_landing_page_html", "vercel_deploy", "github_create_repo",
-        "web_search", "obsidian_log", "obsidian_read", "done",
+        "web_search", "obsidian_log", "obsidian_read", "obsidian_append", "done",
+        "cloudflare_setup_vercel_domain", "cloudflare_generate_instructions",
+        "posthog_generate_integration", "clarity_generate_integration",
         # specialized
         "seo_keyword_research", "competitor_page_analyzer", "domain_availability",
         "conversion_benchmarks", "a_b_variant_generator", "page_speed_optimizer",
@@ -53,7 +55,18 @@ AGENT_TOOL_ALLOWLIST: dict[str, set[str]] = {
     "technical": {
         "github_create_repo", "claude_code_scaffold",
         "composio_linear_create_issue", "composio_notion_create_page",
-        "obsidian_log", "obsidian_read", "done",
+        "obsidian_log", "obsidian_read", "obsidian_append", "done",
+        # Supabase
+        "supabase_create_table", "supabase_enable_rls", "supabase_setup_auth",
+        "supabase_create_storage_bucket", "supabase_generate_schema",
+        # Clerk
+        "clerk_generate_integration", "clerk_generate_webhook_handler",
+        # Cloudflare
+        "cloudflare_create_dns_record", "cloudflare_setup_vercel_domain",
+        "cloudflare_setup_email_dns", "cloudflare_generate_instructions",
+        # Analytics
+        "posthog_generate_integration", "posthog_create_key_events_spec",
+        "clarity_generate_integration", "clarity_setup_for_app",
         # specialized
         "stack_recommender", "security_scanner", "dependency_auditor",
         "architecture_diagram_gen", "api_spec_generator", "infra_cost_estimator",
@@ -61,7 +74,9 @@ AGENT_TOOL_ALLOWLIST: dict[str, set[str]] = {
     "ops": {
         "generate_pdf", "send_email_campaign",
         "composio_linear_create_issue", "composio_notion_create_page",
-        "obsidian_log", "obsidian_read", "done",
+        "composio_gmail_send", "composio_calendar_create_event",
+        "resend_send_email", "resend_generate_integration", "resend_create_email_templates",
+        "obsidian_log", "obsidian_read", "obsidian_append", "done",
         # specialized
         "runway_calculator", "kpi_dashboard_builder", "investor_matcher",
         "cap_table_modeler", "competitive_positioning_map", "board_deck_generator",
