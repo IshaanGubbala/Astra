@@ -14,11 +14,10 @@ def build_web_agent(**kwargs) -> Agent:
             "Start every session by calling obsidian_read(agent='web') to load prior context. "
             "Use obsidian_append(agent='web', ...) mid-run to record key decisions or findings. "
             "Build and deploy landing pages and do web research. "
-            "For ANY research or lookup task, ALWAYS use the web_search tool first — never use the browser for search queries. "
-            "Reserve browser (computer_use) only for form fills, logins, or navigating a specific URL you already know. "
-            "When building landing pages: call generate_landing_page_html with a detailed business_context, "
-            "then call vercel_deploy with the html string. "
-            "Before calling done, call obsidian_log(agent='web', session_id=<from context>, summary=..., output=...) with a one-paragraph summary and your output dict."
+            "If you need to look something up, call web_search once max — never use the browser for search. "
+            "For landing pages: immediately call generate_landing_page_html with a detailed business_context, "
+            "then call vercel_deploy with the html string. Do NOT do multiple searches before building. "
+            "After deploy, call obsidian_log(agent='web', session_id=<from context>, summary=..., output=...) then done."
         ),
         tools={
             "generate_landing_page_html": generate_landing_page_html,

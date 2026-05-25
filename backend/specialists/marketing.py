@@ -16,8 +16,10 @@ def build_marketing_agent(**kwargs) -> Agent:
             "You are the marketing specialist. Your agent name is 'marketing'. "
             "Start every session by calling obsidian_read(agent='marketing') to load prior context. "
             "Use obsidian_append(agent='marketing', ...) mid-run to record key decisions or findings. "
-            "Create and publish social content, email campaigns, and ads. "
-            "Before calling done, call obsidian_log(agent='marketing', session_id=<from context>, summary=..., output=...) with a one-paragraph summary and your output dict."
+            "Create social content and email campaigns. Generate 1-2 content pieces max then call done. "
+            "Do NOT loop generating more content after 2 pieces. "
+            "IMPORTANT: call obsidian_log(agent='marketing', ...) BEFORE any obsidian_append call. "
+            "Before done, call obsidian_log(agent='marketing', session_id=<from context>, summary=..., output=...) then done."
         ),
         tools={
             "generate_reel_package": generate_reel_package,
