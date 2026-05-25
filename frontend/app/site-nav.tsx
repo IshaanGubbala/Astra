@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 
 function NavLink({ href, children, className = "" }: { href: string; children: ReactNode; className?: string }) {
   const pathname = usePathname();
-  const isActive = href === "/" ? pathname === "/" : href.startsWith("/") ? pathname === href.split("#")[0] : false;
+  const isActive = href === "/" ? pathname === "/" : pathname.startsWith(href.split("#")[0]);
   return (
     <Link href={href} className={`${className} ${isActive ? "active" : ""}`.trim()}>
       {children}
@@ -17,7 +17,7 @@ function NavLink({ href, children, className = "" }: { href: string; children: R
 
 export default function SiteNav() {
   const pathname = usePathname();
-  if (pathname.startsWith("/dashboard") || pathname.startsWith("/setup")) return null;
+  if (pathname.startsWith("/dashboard")) return null;
 
   return (
     <header className="site-nav">
@@ -27,24 +27,8 @@ export default function SiteNav() {
       </Link>
 
       <nav className="site-nav-links" aria-label="Primary">
-        <NavLink href="/">Home</NavLink>
         <Show when="signed-in">
           <NavLink href="/dashboard">Dashboard</NavLink>
-        </Show>
-        <NavLink href="/setup">Setup</NavLink>
-
-        <Show when="signed-out">
-          <SignInButton mode="modal">
-            <button className="site-btn site-btn-ghost px-4">Sign in</button>
-          </SignInButton>
-          <SignUpButton mode="modal">
-            <button className="site-btn site-btn-primary px-4">
-              Get started <span aria-hidden="true">→</span>
-            </button>
-          </SignUpButton>
-        </Show>
-
-        <Show when="signed-in">
           <NavLink href="/" className="site-btn site-btn-primary">
             New goal <span aria-hidden="true">→</span>
           </NavLink>
@@ -53,6 +37,25 @@ export default function SiteNav() {
               elements: { avatarBox: "w-8 h-8 rounded-full ring-1 ring-[rgba(255,255,255,0.15)]" },
             }}
           />
+        </Show>
+
+        <Show when="signed-out">
+          <a
+            href="https://astracreates.com"
+            style={{ fontSize: 14, color: "var(--fg-dim)", transition: "color 0.2s" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--fg)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--fg-dim)")}
+          >
+            About
+          </a>
+          <SignInButton mode="modal">
+            <button className="site-btn site-btn-ghost px-4">Sign in</button>
+          </SignInButton>
+          <SignUpButton mode="modal">
+            <button className="site-btn site-btn-primary px-4">
+              Get started <span aria-hidden="true">→</span>
+            </button>
+          </SignUpButton>
         </Show>
       </nav>
     </header>

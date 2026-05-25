@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useUser, SignInButton } from "@clerk/nextjs";
+import { useUser, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { submitGoal } from "@/lib/api";
 import { saveSession } from "@/lib/history";
 
@@ -13,6 +12,12 @@ const STACK_OPTIONS = {
   database: ["Supabase (Postgres)", "PlanetScale (MySQL)", "MongoDB", "SQLite"],
   auth: ["Clerk", "Supabase Auth", "NextAuth", "Custom JWT"],
 };
+
+const EXAMPLES = [
+  "Build a waitlist SaaS for creators — landing page, Next.js app, Supabase DB, Clerk auth, Vercel deploy.",
+  "Launch a B2B invoice automation tool — repo, database, auth, landing page, three investor emails.",
+  "Build a real-time co-founder matching platform with live URL, auth, and a pitch deck PDF.",
+];
 
 export default function Home() {
   const router = useRouter();
@@ -39,7 +44,8 @@ export default function Home() {
     const parts = [
       companyName.trim() && `Company name: ${companyName.trim()}.`,
       domain.trim() && `Domain: ${domain.trim()}.`,
-      showStack && `Tech stack preferences: Frontend=${stack.frontend}, Backend=${stack.backend}, Database=${stack.database}, Auth=${stack.auth}.`,
+      showStack &&
+        `Tech stack preferences: Frontend=${stack.frontend}, Backend=${stack.backend}, Database=${stack.database}, Auth=${stack.auth}.`,
     ].filter(Boolean);
 
     const full = parts.length ? `${parts.join(" ")}\n\n${instruction}` : instruction;
@@ -47,8 +53,6 @@ export default function Home() {
 
     try {
       const result = await submitGoal(founderId, full);
-
-      // Save to history
       saveSession({
         sessionId: result.session_id,
         founderId,
@@ -58,91 +62,58 @@ export default function Home() {
         status: "running",
         artifacts: [],
       });
-
-      // Request browser notification permission
       if (typeof Notification !== "undefined" && Notification.permission === "default") {
         Notification.requestPermission();
       }
-
-      router.push(`/goal/${result.session_id}?instruction=${encodeURIComponent(instruction)}&founder=${encodeURIComponent(founderId)}&company=${encodeURIComponent(companyName)}`);
+      router.push(
+        `/dashboard/goal/${result.session_id}?instruction=${encodeURIComponent(instruction)}&founder=${encodeURIComponent(founderId)}&company=${encodeURIComponent(companyName)}`
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit goal");
       setLoading(false);
     }
   }
 
-  const EXAMPLES = [
-    "Build a waitlist SaaS for creators — landing page, Next.js app, Supabase DB, Clerk auth, Vercel deploy.",
-    "Launch a B2B invoice automation tool — repo, database, auth, landing page, three investor emails.",
-    "Build a real-time co-founder matching platform with live URL, auth, and a pitch deck PDF.",
-  ];
-
   return (
-    <div className="flex flex-col gap-14">
-      {/* Hero */}
-      <section className="grid gap-8 lg:grid-cols-[1fr_1.1fr] lg:items-center">
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-col gap-4">
-            <div className="eyebrow">Astra · AI founding team</div>
-            <h1>
-              You bring<br />the idea.<br />
-              <span className="display-italic">Astra does<br />the rest.</span>
-            </h1>
-            <p className="lede">
-              One instruction. Eight agents running in parallel — GitHub repo, Supabase database, Vercel deploy, landing page, legal docs, investor outreach.
-            </p>
-          </div>
+    <div className="site-shell" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", gap: 32 }}>
 
-          <div className="flex flex-wrap gap-3">
-            {[
-              { value: "8", label: "Agents" },
-              { value: "Auto", label: "GitHub + Vercel" },
-              { value: "1", label: "Prompt" },
-            ].map((s) => (
-              <div key={s.label} className="site-card site-card-soft px-5 py-3 flex items-center gap-3">
-                <span className="text-xl font-bold text-white">{s.value}</span>
-                <span className="site-label">{s.label}</span>
-              </div>
-            ))}
-          </div>
+      {/* Header text */}
+      <div style={{ textAlign: "center", maxWidth: 480 }}>
+        <div className="eyebrow" style={{ justifyContent: "center", marginBottom: 20 }}>Astra · AI founding team</div>
+        <h1 style={{ fontSize: "clamp(32px, 4vw, 52px)", lineHeight: 1.1, marginBottom: 16 }}>
+          What are you<br />
+          <em className="display-italic">building?</em>
+        </h1>
+        <p className="lede" style={{ margin: "0 auto", textAlign: "center", fontSize: "clamp(14px, 1.2vw, 16px)" }}>
+          Describe the idea. Eight agents run in parallel — GitHub repo, landing page, legal docs,
+          market research, investor outreach.
+        </p>
+      </div>
 
-          <div className="flex flex-wrap gap-3">
-            <Link href="/dashboard" className="site-btn site-btn-ghost">App</Link>
-            <Link href="/setup" className="site-btn site-btn-ghost">Connect accounts</Link>
-          </div>
-        </div>
-
-        {/* Launch card */}
-        <div className="site-card p-6 sm:p-7 flex flex-col gap-5">
-          <div className="flex items-center justify-between gap-4 border-b border-[var(--line)] pb-5">
-            <div>
-              <p className="site-label">Launch prompt</p>
-              <p className="mt-1.5 text-sm text-[var(--fg-dim)]">
-                Describe what you&rsquo;re building. Astra plans, builds, and deploys.
-              </p>
-            </div>
-            <span className="site-pill">Live</span>
-          </div>
-
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      {/* Form or sign-in prompt */}
+      {isSignedIn ? (
+        <div className="site-card" style={{ width: "100%", maxWidth: 580, padding: "28px 32px" }}>
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* Company + domain */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label className="site-label">Company name</label>
                 <input
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
-                  className="site-input px-4 py-3 text-sm text-white"
+                  className="site-input"
+                  style={{ padding: "10px 14px", fontSize: 14, color: "var(--fg)" }}
                   placeholder="Astra"
                   disabled={loading}
                 />
               </div>
-              <div className="flex flex-col gap-1.5">
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label className="site-label">Domain (optional)</label>
                 <input
                   value={domain}
                   onChange={(e) => setDomain(e.target.value)}
-                  className="site-input px-4 py-3 text-sm text-white"
+                  className="site-input"
+                  style={{ padding: "10px 14px", fontSize: 14, color: "var(--fg)" }}
                   placeholder="astra.ai"
                   disabled={loading}
                 />
@@ -150,49 +121,66 @@ export default function Home() {
             </div>
 
             {/* Goal */}
-            <div className="flex flex-col gap-1.5">
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label className="site-label">Goal</label>
               <textarea
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
-                placeholder="Build a SaaS product for indie hackers to track MRR — landing page, GitHub repo, Supabase backend, Clerk auth, Vercel deploy."
+                placeholder="Build a SaaS for indie hackers to track MRR — landing page, GitHub repo, Supabase backend, Clerk auth, Vercel deploy."
                 rows={5}
-                className="site-textarea resize-none px-4 py-4 text-sm leading-6"
+                className="site-textarea"
+                style={{ padding: "14px", fontSize: 14, lineHeight: 1.6, resize: "none" }}
                 disabled={loading}
               />
             </div>
 
             {/* Examples */}
-            <div className="flex flex-col gap-1.5">
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <p className="site-label">Examples</p>
               {EXAMPLES.map((ex, i) => (
-                <button key={i} type="button" onClick={() => setInstruction(ex)} disabled={loading}
-                  className="text-left text-xs text-[var(--fg-mute)] hover:text-[var(--fg-dim)] transition-colors leading-relaxed">
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setInstruction(ex)}
+                  disabled={loading}
+                  style={{
+                    textAlign: "left", fontSize: 12, color: "var(--fg-mute)",
+                    cursor: "pointer", background: "none", border: "none",
+                    padding: "2px 0", lineHeight: 1.5, transition: "color 0.2s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "var(--fg-dim)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "var(--fg-mute)")}
+                >
                   · {ex}
                 </button>
               ))}
             </div>
 
-            {/* Stack preferences toggle */}
-            <div className="flex flex-col gap-3 border border-[var(--line)] rounded-xl p-4 bg-[rgba(255,255,255,0.02)]">
-              <button type="button" onClick={() => setShowStack(v => !v)}
-                className="flex items-center justify-between w-full text-left">
+            {/* Stack preferences */}
+            <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "12px 16px", background: "rgba(255,255,255,0.02)" }}>
+              <button
+                type="button"
+                onClick={() => setShowStack((v) => !v)}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer" }}
+              >
                 <span className="site-label">Tech stack preferences</span>
-                <span className="text-xs text-[var(--fg-mute)]">{showStack ? "▲ hide" : "▼ show"}</span>
+                <span style={{ fontSize: 11, color: "var(--fg-mute)" }}>{showStack ? "▲ hide" : "▼ show"}</span>
               </button>
               {showStack && (
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr", marginTop: 12 }}>
                   {(Object.entries(STACK_OPTIONS) as [string, string[]][]).map(([key, opts]) => (
-                    <div key={key} className="flex flex-col gap-1.5">
+                    <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <label className="site-label">{key}</label>
                       <select
                         value={stack[key]}
-                        onChange={(e) => setStack(p => ({ ...p, [key]: e.target.value }))}
+                        onChange={(e) => setStack((p) => ({ ...p, [key]: e.target.value }))}
                         disabled={loading}
-                        className="site-input px-3 py-2.5 text-sm text-white"
-                        style={{ background: "rgba(255,255,255,0.04)" }}
+                        className="site-input"
+                        style={{ padding: "8px 12px", fontSize: 13, color: "var(--fg)", background: "rgba(255,255,255,0.04)" }}
                       >
-                        {opts.map(o => <option key={o} value={o} style={{ background: "#0d1117" }}>{o}</option>)}
+                        {opts.map((o) => (
+                          <option key={o} value={o} style={{ background: "#0d1117" }}>{o}</option>
+                        ))}
                       </select>
                     </div>
                   ))}
@@ -200,76 +188,53 @@ export default function Home() {
               )}
             </div>
 
-            {/* Submit */}
-            <div className="flex justify-end">
-              {isSignedIn ? (
-                <button type="submit" disabled={loading || !instruction.trim()}
-                  className="site-btn site-btn-primary px-6">
-                  {loading ? "Launching…" : "Launch Astra"}
-                  <span aria-hidden="true">→</span>
-                </button>
-              ) : (
-                <SignInButton mode="modal">
-                  <button type="button" className="site-btn site-btn-primary px-6">
-                    Sign in to launch →
-                  </button>
-                </SignInButton>
-              )}
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="submit"
+                disabled={loading || !instruction.trim()}
+                className="site-btn site-btn-primary"
+                style={{ padding: "0 24px" }}
+              >
+                {loading ? "Launching…" : "Launch Astra"}{" "}
+                <span aria-hidden="true">→</span>
+              </button>
             </div>
 
             {error && (
-              <p className="rounded-2xl border border-red-900/70 bg-red-950/30 px-4 py-3 text-sm text-red-300">{error}</p>
+              <p style={{ borderRadius: 10, border: "1px solid rgba(200,50,50,0.4)", background: "rgba(180,20,20,0.15)", padding: "10px 14px", fontSize: 13, color: "#f87171", margin: 0 }}>
+                {error}
+              </p>
             )}
           </form>
         </div>
-      </section>
-
-      <div className="site-rule" />
-
-      {/* Process */}
-      <section id="process" className="grid gap-10 lg:grid-cols-[0.75fr_1.25fr] lg:items-start">
-        <div className="flex flex-col gap-5">
-          <div className="eyebrow">The flow</div>
-          <h2>One instruction.<br /><span className="display-italic">A full founding stack.</span></h2>
-          <p className="lede">
-            Eight specialists run in parallel — each executing real actions, not describing them.
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {[
-            { step: "01", title: "Research", desc: "Market sizing, competitors, TAM/SAM/SOM before you spend a dollar." },
-            { step: "02", title: "Build & Deploy", desc: "GitHub repo → Supabase DB → Claude Code scaffold → Vercel. Live URL." },
-            { step: "03", title: "Launch", desc: "Landing page, campaigns, social content from the same strategy." },
-            { step: "04", title: "Operate", desc: "Legal docs, investor outreach, Linear tickets, persistent memory." },
-          ].map((item) => (
-            <article key={item.step} className="site-card site-card-soft p-5">
-              <div className="site-label">{item.step}</div>
-              <h3 className="mt-3 text-[24px] leading-none">{item.title}</h3>
-              <p className="mt-3 text-sm leading-6 text-[var(--fg-dim)]">{item.desc}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      {/* Agents */}
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          { icon: "🔬", label: "Research", desc: "TAM, SAM, SOM, competitors, customer profile." },
-          { icon: "🌐", label: "Web", desc: "Landing pages + full app deploys to Vercel." },
-          { icon: "📢", label: "Marketing", desc: "Campaigns, social content, outreach." },
-          { icon: "⚙️", label: "Technical", desc: "GitHub → Supabase → Claude Code → Vercel. Live." },
-          { icon: "⚖️", label: "Legal", desc: "Entity setup, policies, compliance drafting." },
-          { icon: "🚀", label: "Ops", desc: "Fundraising docs, investor outreach, scheduling." },
-          { icon: "🤝", label: "Sales", desc: "Lead finding, enrichment, outreach sequences." },
-          { icon: "🎨", label: "Design", desc: "Wireframes, color palettes, logo briefs, specs." },
-        ].map((item) => (
-          <div key={item.label} className="site-card site-card-soft p-5">
-            <span className="text-2xl">{item.icon}</span>
-            <p className="mt-4 text-sm font-medium tracking-wide text-white">{item.label}</p>
-            <p className="mt-1.5 text-xs leading-5 text-[var(--fg-dim)]">{item.desc}</p>
+      ) : (
+        <div className="site-card" style={{ width: "100%", maxWidth: 420, padding: "36px 40px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <p style={{ margin: 0, fontSize: 16, color: "var(--fg)" }}>Sign in to launch your company</p>
+            <p className="site-muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+              Eight agents, one prompt. GitHub, Vercel, legal, outreach — all automated.
+            </p>
           </div>
-        ))}
-      </section>
+          <div style={{ display: "flex", gap: 10 }}>
+            <SignInButton mode="modal">
+              <button className="site-btn site-btn-ghost" style={{ padding: "0 20px" }}>Sign in</button>
+            </SignInButton>
+            <SignUpButton mode="modal">
+              <button className="site-btn site-btn-primary" style={{ padding: "0 20px" }}>
+                Get started <span aria-hidden="true">→</span>
+              </button>
+            </SignUpButton>
+          </div>
+          <a
+            href="https://astracreates.com"
+            style={{ fontSize: 12, color: "var(--fg-mute)", transition: "color 0.2s" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--fg-dim)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--fg-mute)")}
+          >
+            Learn more at astracreates.com →
+          </a>
+        </div>
+      )}
     </div>
   );
 }
