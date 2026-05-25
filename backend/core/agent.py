@@ -240,6 +240,10 @@ class Agent:
                     content = f"Tool result: {json.dumps(result)}"
                     if i >= 5:
                         content += f"\n\n[Iteration {i}/{MAX_ITERATIONS}] You have gathered enough data. Call obsidian_log then done now unless you have a specific reason to do one more tool call."
+                    # Tool-specific post-success guidance to prevent repeated expensive calls
+                    _one_shot_tools = {"format_legal_document", "generate_landing_page_html", "generate_pdf"}
+                    if tool_name in _one_shot_tools:
+                        content += f"\n\nIMPORTANT: {tool_name} has completed successfully. Do NOT call {tool_name} again. Proceed to the next step."
                     messages.append({"role": "user", "content": content})
 
             elif action == "delegate":

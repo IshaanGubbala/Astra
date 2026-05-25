@@ -111,7 +111,7 @@ Return ONLY the complete HTML — no explanation, no markdown fences, no comment
 
     try:
         from backend.tools._llm import generate
-        html = generate(prompt, max_tokens=4000)
+        html = generate(prompt, max_tokens=2000)
         # Strip any accidental markdown fences
         html = re.sub(r"^```html?\s*", "", html, flags=re.IGNORECASE).rstrip("`").strip()
         if html.startswith("<!"):
