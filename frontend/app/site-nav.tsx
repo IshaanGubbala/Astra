@@ -40,14 +40,7 @@ export default function SiteNav() {
         </Show>
 
         <Show when="signed-out">
-          <a
-            href="https://astracreates.com"
-            style={{ fontSize: 14, color: "var(--fg-dim)", transition: "color 0.2s" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--fg)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--fg-dim)")}
-          >
-            About
-          </a>
+          <a href="https://astracreates.com">About</a>
           <SignInButton mode="modal">
             <button className="site-btn site-btn-ghost px-4">Sign in</button>
           </SignInButton>
