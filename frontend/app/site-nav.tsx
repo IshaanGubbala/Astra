@@ -35,14 +35,11 @@ export default function SiteNav() {
       </Link>
 
       <nav className="site-nav-links" aria-label="Primary">
-        <NavLink href="/">Overview</NavLink>
+        <NavLink href="/">Home</NavLink>
+        <NavLink href="/dashboard">Dashboard</NavLink>
         <NavLink href="/setup">Setup</NavLink>
-        <NavLink href="/#process" className="hidden sm:inline">
-          Process
-        </NavLink>
-        <NavLink href="/#process">Flow</NavLink>
-        <NavLink href="/setup" className="site-btn site-btn-primary">
-          Get started <span aria-hidden="true">→</span>
+        <NavLink href="/" className="site-btn site-btn-primary">
+          New goal <span aria-hidden="true">→</span>
         </NavLink>
       </nav>
     </header>
