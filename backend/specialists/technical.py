@@ -17,12 +17,13 @@ def build_technical_agent(**kwargs) -> Agent:
             "Start every session by calling obsidian_read(agent='technical') to load prior context. "
             "WORKFLOW — follow in order: "
             "(1) Call github_create_repo to create the repo and get repo_url. "
-            "(2) Call claude_code_scaffold(repo_url=<from step 1>, task=<detailed description of what to build — "
-            "include stack, file structure, key files to create, MVP features>). "
-            "This runs real Claude Code in the repo and pushes actual working code. "
-            "(3) Optionally call composio_linear_create_issue for project tickets. "
-            "(4) Call obsidian_log(agent='technical', session_id=<from context>, summary=..., output=...) then done. "
-            "IMPORTANT: claude_code_scaffold is the main deliverable — always call it after github_create_repo."
+            "(2) Call claude_code_scaffold(repo_url=<from step 1>, "
+            "task=<full description: product name, what it does, stack, key entities/endpoints>, "
+            "context=<paste the vault_context and prior_results from SHARED CONTEXT — this gives Claude Code "
+            "the research findings, market data, and other agent outputs to build the right product>). "
+            "This runs real Claude Code in the repo and pushes actual working code — it is the main deliverable. "
+            "(3) Call composio_linear_create_issue for 2-3 key MVP tickets. "
+            "(4) Call obsidian_log(agent='technical', session_id=<from context>, summary=..., output=...) then done."
         ),
         tools={
             "github_create_repo": github_create_repo,

@@ -18,6 +18,7 @@ def claude_code_scaffold(
     repo_url: str,
     task: str,
     commit_message: str = "feat: scaffold via claude code",
+    context: str = "",
 ) -> dict:
     """
     Clone a GitHub repo, run Claude Code to implement the task, commit and push.
@@ -25,6 +26,7 @@ def claude_code_scaffold(
         repo_url: full GitHub HTTPS URL (e.g. https://github.com/org/repo)
         task: detailed instruction for Claude Code (what to build / scaffold)
         commit_message: git commit message for the changes
+        context: optional extra context (research findings, session notes, etc.)
     Returns: {success, repo_url, commit, output_preview, error?}
     """
     token = settings.github_token
@@ -46,15 +48,53 @@ def claude_code_scaffold(
             _run(["git", "config", "user.email", "astra-agent@astra.ai"], cwd=tmpdir)
             _run(["git", "config", "user.name", "Astra Technical Agent"], cwd=tmpdir)
 
+            # Augment the task with a comprehensive scaffold directive
+            context_section = f"\n\nSESSION CONTEXT (from other agents):\n{context}\n" if context else ""
+            full_task = f"""IMPORTANT: Write actual files NOW. Do not present plans, architectures, or ask clarifying questions. Use the Write tool immediately to create files.
+
+You are scaffolding a new SaaS product. Write a complete, production-ready codebase with real working code.
+
+PROJECT GOAL: {task}{context_section}
+
+FILE STRUCTURE TO CREATE (write all of these):
+backend/
+  main.py          — FastAPI app entry point with all routers mounted
+  models.py        — SQLAlchemy models for all entities
+  routers/
+    auth.py        — JWT login/register endpoints
+    api.py         — core business logic endpoints
+  services/
+    core.py        — main business logic
+  requirements.txt — all Python deps
+
+frontend/
+  package.json
+  src/
+    app/
+      page.tsx     — landing/home page
+      dashboard/
+        page.tsx   — main app dashboard
+    components/
+      Nav.tsx
+
+docker-compose.yml — postgres + backend + frontend
+README.md          — setup instructions, env vars, architecture
+.env.example       — all required env vars
+
+Rules:
+- Write EVERY file listed above using the Write tool
+- NO placeholder comments, NO TODOs — real functional code only
+- Start writing immediately with the Write tool — do not plan or discuss"""
+
             # Run Claude Code non-interactively
             env = os.environ.copy()
             env["HOME"] = os.environ.get("HOME", "/Users/ishaangubbala")
             result = subprocess.run(
-                [CLAUDE_BIN, "--print", task, "--output-format", "text", "--dangerously-skip-permissions"],
+                [CLAUDE_BIN, "--print", full_task, "--output-format", "text", "--dangerously-skip-permissions"],
                 cwd=tmpdir,
                 capture_output=True,
                 text=True,
-                timeout=180,
+                timeout=300,
                 env=env,
             )
             claude_output = result.stdout.strip()
