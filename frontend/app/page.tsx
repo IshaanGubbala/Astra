@@ -107,7 +107,7 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Link href="/dashboard" className="site-btn site-btn-ghost">Dashboard</Link>
+            <Link href="/dashboard" className="site-btn site-btn-ghost">App</Link>
             <Link href="/setup" className="site-btn site-btn-ghost">Connect accounts</Link>
           </div>
         </div>
