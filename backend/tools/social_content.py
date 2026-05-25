@@ -11,10 +11,10 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 
-def _llm_generate(prompt: str, max_tokens: int = 1500) -> str:
+def _llm_generate(prompt: str) -> str:
     try:
         from backend.tools._llm import generate
-        return generate(prompt, max_tokens=max_tokens)
+        return generate(prompt)
     except Exception as e:
         logger.warning("LLM social content generation failed: %s", e)
         return ""
@@ -52,7 +52,7 @@ HASHTAGS:
 VISUAL_NOTES:
 <specific shot-by-shot visual direction>"""
 
-    raw = _llm_generate(prompt, max_tokens=800)
+    raw = _llm_generate(prompt)
 
     script, caption, hashtags, visual = _parse_social_sections(
         raw,
@@ -115,7 +115,7 @@ CAPTION:
 HASHTAGS:
 <hashtags>"""
 
-    raw = _llm_generate(prompt, max_tokens=700)
+    raw = _llm_generate(prompt)
     script, caption, hashtags, _ = _parse_social_sections(
         raw,
         fallback_script=(
@@ -175,7 +175,7 @@ Then pick the best one and output:
 BEST HEADLINE: <headline>
 BEST PRIMARY TEXT: <primary text>"""
 
-    raw = _llm_generate(prompt, max_tokens=900)
+    raw = _llm_generate(prompt)
 
     best_headline = headline
     best_body = body

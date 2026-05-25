@@ -49,7 +49,7 @@ def _expand_section(heading: str, body: str, doc_title: str) -> str:
     )
     try:
         from backend.tools._llm import generate
-        expanded = generate(prompt, max_tokens=6000)
+        expanded = generate(prompt)
         if expanded and len(expanded) > len(body):
             return expanded
     except Exception as e:
