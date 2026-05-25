@@ -13,12 +13,12 @@ import os
 import sqlite3
 import uuid
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 _DB_PATH = os.environ.get("ASTRA_FINGERPRINT_DB", os.path.expanduser("~/agent-workspace/fingerprints.db"))
-_SIMILARITY_THRESHOLD = 0.65
+_SIMILARITY_THRESHOLD = 0.20  # Combined: token Jaccard + TF-IDF cosine on short texts
 _TOP_K = 3
 
 
@@ -115,7 +115,7 @@ class Fingerprinter:
                 json.dumps(tool_outcomes),
                 json.dumps(timing),
                 success_score,
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
         self._db.commit()
@@ -128,29 +128,45 @@ class Fingerprinter:
 
     def match(self, goal: str, founder_id: str | None = None) -> list[dict]:
         """Return top-K similar historical runs above threshold."""
-        rows = self._db.execute("SELECT goal FROM fingerprints").fetchall()
-        corpus = [r[0] for r in rows]
-        query_vec = self._tfidf_vector(goal, corpus)
-
         query = "SELECT * FROM fingerprints"
         params: list = []
         if founder_id:
             query += " WHERE founder_id = ?"
             params.append(founder_id)
 
+        rows = self._db.execute(query, params).fetchall()
+        if not rows:
+            return []
+
+        # Recompute all vectors with the full current corpus (query included)
+        # This ensures IDF weights are consistent across query + documents
+        all_goals = [r[3] for r in rows]
+        corpus = [goal] + all_goals  # query is doc 0
+        query_vec = self._tfidf_vector(goal, corpus)
+
         results = []
-        for row in self._db.execute(query, params).fetchall():
-            fp_id, session_id, f_id, fp_goal, goal_vec_json, agents_json, tools_json, timing_json, score, ts = row
-            fp_vec = json.loads(goal_vec_json)
+        for row in rows:
+            fp_id, session_id, f_id, fp_goal, _stored_vec, agents_json, tools_json, timing_json, score, ts = row
             tool_outcomes = json.loads(tools_json)
 
-            goal_sim = self._cosine(query_vec, fp_vec)
+            # Recompute doc vector with same corpus for fair comparison
+            fp_vec = self._tfidf_vector(fp_goal, corpus)
+            tfidf_sim = self._cosine(query_vec, fp_vec)
+
+            # Token Jaccard — robust for short goal texts where TF-IDF collapses
+            q_tokens = set(self._tokenize(goal))
+            fp_tokens = set(self._tokenize(fp_goal))
+            token_sim = self._jaccard(q_tokens, fp_tokens)
+
+            # Goal similarity: average TF-IDF and token Jaccard
+            goal_sim = 0.5 * tfidf_sim + 0.5 * token_sim
+
             tool_sim = self._jaccard(
                 {t for t, s in tool_outcomes.items() if s == "success"},
                 set(),  # query has no tool history yet
             )
-            # Weighted: 80% goal similarity + 20% tool Jaccard
-            combined = 0.8 * goal_sim + 0.2 * tool_sim
+            # Weighted: 85% goal similarity + 15% tool Jaccard
+            combined = 0.85 * goal_sim + 0.15 * tool_sim
 
             if combined >= _SIMILARITY_THRESHOLD:
                 results.append(

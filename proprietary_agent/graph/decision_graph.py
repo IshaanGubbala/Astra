@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import networkx as nx
@@ -79,7 +79,7 @@ class DecisionGraph:
             outcome_score=outcome_score,
             session_id=session_id,
             tags=tags or [],
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
         for pid in parent_ids or []:
             if self.G.has_node(pid):
@@ -105,7 +105,7 @@ class DecisionGraph:
             relevance_score=relevance_score,
             url=url,
             content_hash=content_hash,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
         self.save()
         return node_id
@@ -128,7 +128,7 @@ class DecisionGraph:
             critique=critique,
             questions=questions,
             revised_recommendation=revised_recommendation,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
         if self.G.has_node(decision_id):
             self.G.add_edge(decision_id, node_id, type="mirror_review")

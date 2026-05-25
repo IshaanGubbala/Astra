@@ -11,7 +11,7 @@ import hashlib
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class SilentObserver:
                     relevance_score=score,
                     suggested_action=await self._generate_action(item["summary"]),
                     content_hash=h,
-                    timestamp=datetime.utcnow().isoformat(),
+                    timestamp=datetime.now(timezone.utc).isoformat(),
                 )
                 self._pending_alerts.append(alert)
 
