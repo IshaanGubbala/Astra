@@ -44,7 +44,7 @@ export default function Home() {
 
           <div className="grid gap-3 sm:grid-cols-3">
             {[
-              { value: "6", label: "specialized agents" },
+              { value: "8", label: "specialized agents" },
               { value: "72h", label: "to first launch pass" },
               { value: "1", label: "instruction to start" },
             ].map((stat) => (
@@ -147,14 +147,16 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3">
+      <section className="grid gap-4 lg:grid-cols-4">
         {[
           { icon: "🔬", label: "Research", desc: "TAM, SAM, SOM, competitors, and customer profile work." },
-          { icon: "🌐", label: "Web", desc: "Landing pages and app scaffolds that ship with your idea." },
-          { icon: "📢", label: "Growth", desc: "Campaigns, social content, and outreach built from the same plan." },
-          { icon: "⚙️", label: "Technical", desc: "Repository scaffolding, architecture, and implementation support." },
+          { icon: "🌐", label: "Web", desc: "Landing pages and full app deploys with Vercel + Supabase wired." },
+          { icon: "📢", label: "Marketing", desc: "Campaigns, social content, and outreach built from the same plan." },
+          { icon: "⚙️", label: "Technical", desc: "GitHub repo → Supabase → Claude Code scaffold → live Vercel deploy." },
           { icon: "⚖️", label: "Legal", desc: "Entity setup, policies, and compliance-driven drafting." },
-          { icon: "🚀", label: "Ops", desc: "Coordination, approvals, and a persistent memory of company decisions." },
+          { icon: "🚀", label: "Ops", desc: "Coordination, fundraising docs, and a persistent memory of decisions." },
+          { icon: "🤝", label: "Sales", desc: "Lead finding, enrichment, outreach sequences, and CRM setup." },
+          { icon: "🎨", label: "Design", desc: "Wireframes, color palettes, logo briefs, and design specs." },
         ].map((item) => (
           <div key={item.label} className="site-card site-card-soft p-5">
             <span className="text-2xl">{item.icon}</span>

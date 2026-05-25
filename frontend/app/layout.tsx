@@ -55,6 +55,11 @@ export default function RootLayout({
         )}
       </head>
       <body>
+        <div id="star-field" aria-hidden="true">
+          <div id="stars1" />
+          <div id="stars2" />
+          <div id="stars3" />
+        </div>
         <SiteNav />
         <main className="site-shell">{children}</main>
       </body>

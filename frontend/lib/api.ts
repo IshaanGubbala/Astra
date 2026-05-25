@@ -134,6 +134,37 @@ export const AGENT_LABELS: Record<string, string> = {
   technical: "Technical Architecture",
   legal: "Legal & Compliance",
   ops: "Ops & Fundraising",
+  sales: "Sales & Outreach",
+  design: "Design & Brand",
 };
 
-export const AGENT_ORDER = ["research", "web", "marketing", "technical", "legal", "ops"];
+export const AGENT_ORDER = ["research", "web", "marketing", "technical", "legal", "ops", "sales", "design"];
+
+export const TOOL_DESCRIPTIONS: Record<string, string> = {
+  github_create_repo: "Creating GitHub repository",
+  supabase_create_project: "Provisioning Supabase database",
+  supabase_generate_schema: "Designing database schema",
+  clerk_generate_integration: "Setting up authentication",
+  posthog_generate_integration: "Configuring analytics",
+  clarity_setup_for_app: "Adding session recording",
+  claude_code_scaffold: "Building codebase with Claude Code",
+  vercel_deploy_from_github: "Deploying to Vercel",
+  vercel_deploy: "Deploying to Vercel",
+  cloudflare_setup_vercel_domain: "Configuring Cloudflare DNS",
+  generate_landing_page_html: "Generating landing page",
+  web_search: "Searching the web",
+  news_search: "Searching news",
+  obsidian_log: "Saving session notes",
+  generate_pdf: "Generating PDF document",
+  send_email_campaign: "Sending email campaign",
+  composio_gmail_send: "Sending email",
+  composio_linear_create_issue: "Creating Linear tickets",
+  composio_notion_create_page: "Writing to Notion",
+  resend_send_email: "Sending email via Resend",
+  find_leads: "Finding leads",
+  enrich_lead: "Enriching lead data",
+  build_outreach_sequence: "Building outreach sequence",
+  format_legal_document: "Drafting legal document",
+  generate_wireframe: "Generating wireframe",
+  generate_color_palette: "Generating color palette",
+};
