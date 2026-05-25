@@ -1,4 +1,12 @@
 **/*.pyc
 **/__pycache__/
 .env
+.env.*
 .credentials/
+.next/
+.vscode/
+.claude/
+memory/
+results/
+pi-mlx-server
+.composio.lock
