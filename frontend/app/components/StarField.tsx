@@ -43,7 +43,7 @@ export default function StarField() {
     }
 
     function resize() {
-      if (!canvas) return;
+      if (!canvas || !ctx) return;
       w = window.innerWidth;
       h = window.innerHeight;
       canvas.width = w * dpr;
