@@ -101,6 +101,26 @@ class HermesAgent:
         from backend.core.events import publish
         await publish(ctx.session_id, {"type": event_type, "agent": self.name, **kwargs})
 
+    # ── direct LLM call (used by orchestrator planner) ────────────────────
+
+    def _call_llm(self, messages: list[dict]) -> str:
+        import re
+        import openai
+        client = openai.OpenAI(
+            base_url=self._model_base_url,
+            api_key=self._model_api_key,
+        )
+        resp = client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.1,
+            response_format={"type": "json_object"},
+        )
+        content = resp.choices[0].message.content or ""
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        content = re.sub(r"^```(?:json)?\s*", "", content).rstrip("```").strip()
+        return content
+
     # ── tool registration ──────────────────────────────────────────────────
 
     def _register_toolset(

@@ -53,7 +53,7 @@ def get_orchestrator() -> Orchestrator:
             ),
             "marketing": build_marketing_agent(
                 hermes_toolsets=["web", "browser", "image_gen"],
-                **_di("meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"),
+                **_di("mistralai/Mistral-Small-3.2-24B-Instruct-2506"),
             ),
             "technical": build_technical_agent(
                 hermes_toolsets=["web", "browser", "code_execution", "terminal", "file"],
@@ -69,11 +69,11 @@ def get_orchestrator() -> Orchestrator:
             ),
             "sales": build_sales_agent(
                 hermes_toolsets=["web", "browser"],
-                **_di("meta-llama/Llama-4-Scout-17B-16E-Instruct"),
+                **_di("meta-llama/Meta-Llama-3.3-70B-Instruct"),
             ),
             "design": build_design_agent(
                 hermes_toolsets=["web", "browser", "image_gen", "vision"],
-                **_di("meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"),
+                **_di("mistralai/Mistral-Small-3.2-24B-Instruct-2506"),
             ),
         }
         planner = Agent(
