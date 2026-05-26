@@ -231,20 +231,22 @@ def composio_notion_create_page(
     resolved_parent = parent_id
 
     if not resolved_parent:
-        # Find any existing page to use as parent
-        search = _run("NOTION_SEARCH_NOTION_PAGE", {"query": ""}, founder_id)
-        pages = []
-        if isinstance(search, dict):
-            # Composio wraps response under "data"
-            data = search.get("data", search)
-            pages = data.get("results", []) or data.get("pages", []) or []
-        if pages:
-            resolved_parent = pages[0].get("id", "")
+        # Try to find a parent page via search (may be deprecated on some Composio versions)
+        try:
+            search = _run("NOTION_SEARCH_NOTION_PAGE", {"query": ""}, founder_id)
+            pages = []
+            if isinstance(search, dict):
+                data = search.get("data", search)
+                pages = data.get("results", []) or data.get("pages", []) or []
+            if pages:
+                resolved_parent = pages[0].get("id", "")
+        except Exception:
+            pass  # Fall through to root-level creation
 
-    if not resolved_parent:
-        return {"error": "Notion is connected but no pages found to use as parent. Create a page in Notion first, then retry."}
-
-    return _run("NOTION_CREATE_NOTION_PAGE", {"title": title, "parent_id": resolved_parent}, founder_id)
+    params = {"title": title}
+    if resolved_parent:
+        params["parent_id"] = resolved_parent
+    return _run("NOTION_CREATE_NOTION_PAGE", params, founder_id)
 
 
 # ---------------------------------------------------------------------------
