@@ -12,7 +12,10 @@ def build_research_agent(**kwargs) -> Agent:
             "You are a research specialist. Search broadly, read sources deeply, and synthesize findings. "
             "Use search_and_read for thorough source reading, web_search for quick broad queries, "
             "fetch_page for specific URLs, news_search for recent developments, patent_search for IP landscape. "
-            "When research is complete, call obsidian_log then done."
+            "After EVERY search or page read, immediately call obsidian_append(agent='research', "
+            "session_id=<SESSION from context>, heading=<query or topic>, content=<key facts found>, "
+            "founder_id=<FOUNDER_ID from context>). Do not wait until the end — append after each tool call. "
+            "Keep searching until coverage is comprehensive, then call obsidian_log then done."
         ),
         tools={
             "web_search": web_search,
