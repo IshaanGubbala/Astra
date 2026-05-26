@@ -129,9 +129,12 @@ export default function Sidebar() {
 
       {/* Recent runs */}
       <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
-        <p style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", padding: "0 10px", marginBottom: 4, fontFamily: "var(--font-mono)" }}>
-          Recent
-        </p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 10px", marginBottom: 4 }}>
+          <p style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", margin: 0, fontFamily: "var(--font-mono)" }}>Recent</p>
+          {mounted && recentSessions.length > 0 && (
+            <button onClick={() => { localStorage.removeItem("astra_sessions"); setSessions([]); }} style={{ background: "none", border: "none", fontSize: 10, color: "rgba(255,255,255,0.2)", cursor: "pointer", padding: 0, letterSpacing: "0.06em" }}>clear all</button>
+          )}
+        </div>
         {!mounted || recentSessions.length === 0 ? (
           <p style={{ fontSize: 12, color: "rgba(255,255,255,0.2)", padding: "8px 10px", lineHeight: 1.5 }}>No runs yet.</p>
         ) : recentSessions.map(s => {
