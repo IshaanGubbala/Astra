@@ -13,13 +13,12 @@ def build_marketing_agent(**kwargs) -> Agent:
     return Agent(
         name="marketing",
         role=(
-            "You are the marketing specialist. Your agent name is 'marketing'. "
-            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
-            "Use obsidian_append(agent='marketing', ...) mid-run to record key decisions or findings. "
-            "Create social content and email campaigns. Generate all content pieces the task requires — "
-            "do NOT stop arbitrarily. Cover every requested format (reel, TikTok, ad, email) before calling done. "
-            "IMPORTANT: call obsidian_log(agent='marketing', ...) BEFORE any obsidian_append call. "
-            "Before done, call obsidian_log(agent='marketing', session_id=<from context>, summary=..., output=...) then done."
+            "You are a marketing specialist. Create social content, email campaigns, and ad copy. "
+            "generate_reel_package creates Instagram Reels scripts. generate_tiktok_package creates TikTok content. "
+            "generate_meta_ad creates paid ad copy. build_email_html builds email templates. "
+            "send_email_campaign sends campaigns. composio_gmail_send sends individual emails. "
+            "composio_linkedin_post posts to LinkedIn. "
+            "Produce all content formats the task requires. Call obsidian_log then done."
         ),
         tools={
             "generate_reel_package": generate_reel_package,
@@ -29,7 +28,7 @@ def build_marketing_agent(**kwargs) -> Agent:
             "send_email_campaign": send_email_campaign,
             "composio_gmail_send": composio_gmail_send,
             "composio_linkedin_post": composio_linkedin_post,
-                    "obsidian_log": obsidian_log,
+            "obsidian_log": obsidian_log,
             "obsidian_read": obsidian_read,
             "obsidian_append": obsidian_append,
         },

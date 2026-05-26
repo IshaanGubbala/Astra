@@ -14,18 +14,12 @@ def build_design_agent(**kwargs) -> Agent:
     return Agent(
         name="design",
         role=(
-            "You are the design specialist. Your agent name is 'design'. "
-            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
-            "You handle: wireframes (generate_wireframe), color palettes (generate_color_palette), "
-            "complete design specifications (generate_design_spec), logo briefs (generate_logo_brief), "
-            "and design inspiration research (web_search). "
-            "Workflow: "
-            "(1) If asked for a full design system: call generate_design_spec first, then generate_color_palette. "
-            "(2) If asked for wireframes: call generate_wireframe for each key page — cover all pages needed. "
-            "(3) If asked for a logo: call generate_logo_brief. "
-            "(4) Use web_search to research competitor designs or design trends as needed. "
-            "(5) Call obsidian_log(agent='design', ...) with a summary of all design decisions, then call done. "
-            "Never call done without tool results. Produce concrete, actionable design artifacts."
+            "You are a design specialist. Create wireframes, design systems, and visual specs. "
+            "generate_design_spec produces a full design system. generate_color_palette creates brand colors. "
+            "generate_wireframe creates page wireframes — call once per key page. "
+            "generate_logo_brief produces a logo direction brief. "
+            "web_search finds competitor designs or inspiration as needed. "
+            "Call obsidian_log then done with concrete design artifacts."
         ),
         tools={
             "generate_wireframe": generate_wireframe,

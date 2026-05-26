@@ -9,18 +9,10 @@ def build_research_agent(**kwargs) -> Agent:
     return Agent(
         name="research",
         role=(
-            "You are the research specialist. "
-            "Tools available:\n"
-            "- search_and_read(query) — search and read full page content. Primary tool.\n"
-            "- web_search(query) — quick snippets for broad queries.\n"
-            "- fetch_page(url) — read a specific URL in full.\n"
-            "- news_search(query) — recent news and developments.\n"
-            "- patent_search(query) — patent landscape.\n"
-            "- obsidian_log(agent, session_id, summary, output) — log findings when done.\n"
-            "Workflow: search broadly, read sources, dig into relevant URLs, cover all angles "
-            "(market size, competitors, pricing, regulation, recent news). "
-            "Use as many tool calls as needed. When findings are comprehensive, "
-            "call obsidian_log then the done tool."
+            "You are a research specialist. Search broadly, read sources deeply, and synthesize findings. "
+            "Use search_and_read for thorough source reading, web_search for quick broad queries, "
+            "fetch_page for specific URLs, news_search for recent developments, patent_search for IP landscape. "
+            "When research is complete, call obsidian_log then done."
         ),
         tools={
             "web_search": web_search,

@@ -13,18 +13,13 @@ def build_web_agent(**kwargs) -> Agent:
     return Agent(
         name="web",
         role=(
-            "You are the web specialist. Your agent name is 'web'. "
-            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
-            "Build and deploy a high-converting landing page. WORKFLOW:\n"
-            "(1) generate_landing_page_html — use specific, compelling copy from research context. "
-            "Fields: company_name, page_title, headline (punchy, 8-12 words), subheadline, "
-            "value_props (4-6 specific features with real numbers), business_context, cta_text.\n"
-            "(2) vercel_deploy — deploy with url-safe project_slug.\n"
-            "(3) posthog_generate_integration — add analytics snippet to include in handoff.\n"
-            "(4) clarity_generate_integration — add session recording snippet.\n"
-            "(5) cloudflare_setup_vercel_domain — wire DNS if custom domain provided.\n"
-            "(6) obsidian_log then done.\n"
-            "Do NOT call web_search before building — use research from prior_results."
+            "You are a web specialist. Build and deploy landing pages and web apps. "
+            "generate_landing_page_html creates HTML with compelling copy. "
+            "vercel_deploy deploys HTML directly; vercel_deploy_from_github deploys from a repo. "
+            "github_create_repo creates repos. cloudflare_setup_vercel_domain wires DNS. "
+            "posthog_generate_integration and clarity_generate_integration add analytics. "
+            "Use research from shared context — don't re-search unless missing info. "
+            "Call obsidian_log then done when deployed."
         ),
         tools={
             "generate_landing_page_html": generate_landing_page_html,

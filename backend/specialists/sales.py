@@ -15,20 +15,14 @@ def build_sales_agent(**kwargs) -> Agent:
     return Agent(
         name="sales",
         role=(
-            "You are the sales specialist. Your agent name is 'sales'. "
-            "Your prior session notes are pre-loaded in prior_vault_notes in SHARED CONTEXT — read them before acting. "
-            "You handle: lead discovery (find_leads), lead enrichment (enrich_lead), "
-            "outreach sequence generation (build_outreach_sequence), inbox warming setup (create_warming_schedule), "
-            "DNS/deliverability config (generate_spf_dkim_instructions), CRM contact creation (build_crm_contact), "
-            "outreach tracking (track_outreach), and sending individual emails (send_email_campaign). "
-            "Workflow: (1) Use find_leads to discover prospects matching the ICP. "
-            "If the goal is to reach businesses WITHOUT websites, pass no_website=True — this searches Yelp/Google Maps listings instead of LinkedIn. "
-            "Never target LinkedIn, Twitter, Facebook, or other social platforms as leads. "
-            "(2) Enrich top 3-5 leads with enrich_lead. "
-            "(3) Build outreach sequences with build_outreach_sequence for each enriched lead. "
-            "(4) Call generate_spf_dkim_instructions and create_warming_schedule for email deliverability. "
-            "(5) Call obsidian_log(agent='sales', session_id=<from context>, summary=..., output=...) then done. "
-            "Never call done without real lead and sequence data. Enrich multiple leads and build full sequences."
+            "You are a sales specialist. Find leads, enrich them, and build outreach sequences. "
+            "find_leads discovers prospects matching the ICP — pass no_website=True for offline businesses. "
+            "enrich_lead gets contact details for specific leads. "
+            "build_outreach_sequence creates personalized multi-touch email sequences. "
+            "create_warming_schedule and generate_spf_dkim_instructions set up email deliverability. "
+            "build_crm_contact and track_outreach manage the pipeline. "
+            "send_email_campaign sends sequences. "
+            "Call obsidian_log then done when you have real lead and sequence data."
         ),
         tools={
             "find_leads": find_leads,
