@@ -141,7 +141,7 @@ CREATE THESE FILES with real working code (no TODOs, no placeholders):
 - frontend/package.json  (Next.js 14, TypeScript, Tailwind, shadcn/ui)
 - frontend/tailwind.config.ts
 - frontend/tsconfig.json
-- frontend/next.config.ts
+- frontend/next.config.js
 - frontend/app/layout.tsx  (root layout with Tailwind + fonts)
 - frontend/app/page.tsx  (compelling landing/home page specific to {goal})
 - frontend/app/dashboard/page.tsx  (main dashboard for logged-in users)
