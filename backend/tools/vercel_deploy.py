@@ -26,8 +26,17 @@ def _vercel_cli_deploy(local_path: str, project_name: str = "", token: str = "")
     env["VERCEL_TOKEN"] = token
 
     cmd = [vercel_bin, "deploy", "--prod", "--yes", "--token", token]
+    # --name is deprecated; set project name via vercel.json instead
     if project_name:
-        cmd += ["--name", project_name]
+        import json as _json
+        vj = os.path.join(local_path, "vercel.json")
+        try:
+            cfg = _json.loads(open(vj).read()) if os.path.exists(vj) else {}
+        except Exception:
+            cfg = {}
+        if "name" not in cfg:
+            cfg["name"] = project_name[:52].lower().replace("_", "-").replace(" ", "-")
+            open(vj, "w").write(_json.dumps(cfg, indent=2))
 
     try:
         r = subprocess.run(cmd, cwd=local_path, capture_output=True, text=True, timeout=300, env=env)
