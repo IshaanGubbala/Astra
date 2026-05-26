@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { getSessions, deleteSession, SessionRecord } from "@/lib/history";
+import LiquidGlass from "@/components/LiquidGlass";
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
@@ -35,11 +36,6 @@ const BOTTOM_NAV = [
   { href: "/dashboard/settings",     label: "Settings",     icon: "≡" },
 ];
 
-const GLASS: React.CSSProperties = {
-  background: "rgba(255,255,255,0.60)",
-  backdropFilter: "blur(22px) saturate(160%)",
-  WebkitBackdropFilter: "blur(22px) saturate(160%)",
-};
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -65,17 +61,25 @@ export default function Sidebar() {
   const recentSessions = sessions.slice(0, 8);
 
   return (
-    <aside style={{
-      width: 232,
-      flexShrink: 0,
-      display: "flex",
-      flexDirection: "column",
-      height: "100%",
-      overflow: "hidden",
-      borderRight: "1px solid rgba(255,255,255,0.65)",
-      boxShadow: "1px 0 0 rgba(0,0,0,0.04)",
-      ...GLASS,
-    }}>
+    <LiquidGlass
+      style={{
+        width: 232,
+        flexShrink: 0,
+        height: "100%",
+        borderRight: "1px solid rgba(255,255,255,0.65)",
+        boxShadow: "1px 0 0 rgba(0,0,0,0.04)",
+        borderRadius: 0,
+      }}
+      contentStyle={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        overflow: "hidden",
+      }}
+      borderRadius={0}
+      tint="rgba(255,255,255,0.22)"
+      displacementScale={20}
+    >
 
       {/* Brand */}
       <div style={{ padding: "20px 16px 16px", borderBottom: "1px solid rgba(255,255,255,0.55)" }}>
@@ -219,6 +223,6 @@ export default function Sidebar() {
           <p style={{ fontSize: 11, color: "#a09d9d", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>My workspace</p>
         </div>
       </div>
-    </aside>
+    </LiquidGlass>
   );
 }

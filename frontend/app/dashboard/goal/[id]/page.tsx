@@ -4,6 +4,7 @@ import { use, useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { streamGoal, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder, sortAgentsByOrder } from "@/lib/api";
 import { updateSession } from "@/lib/history";
+import LiquidGlass from "@/components/LiquidGlass";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -545,7 +546,7 @@ function SteerPanel({ sessionId, isRunning }: { sessionId: string; isRunning: bo
     setSent(true); setMsg(""); setTimeout(() => setSent(false), 2000);
   };
   return (
-    <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.68)", background: "rgba(255,255,255,0.54)", backdropFilter: "blur(22px) saturate(160%)", WebkitBackdropFilter: "blur(22px) saturate(160%)", padding: "12px 14px", boxShadow: "0 1px 3px rgba(0,0,0,0.05), 0 8px 28px rgba(0,0,0,0.07)" }}>
+    <LiquidGlass contentStyle={{ padding: "12px 14px" }}>
       <div style={{ fontSize: 11, color: "var(--fg-mute)", marginBottom: 8 }}>Steer agents mid-run</div>
       <div style={{ display: "flex", gap: 8 }}>
         <input value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && send()}
@@ -555,7 +556,7 @@ function SteerPanel({ sessionId, isRunning }: { sessionId: string; isRunning: bo
           {sent ? "Sent" : "Send"}
         </button>
       </div>
-    </div>
+    </LiquidGlass>
   );
 }
 
@@ -568,7 +569,7 @@ function AskPanel({ sessionId, founderId }: { sessionId: string; founderId: stri
     const d = await r.json(); setReply(d.answer ?? d.response ?? JSON.stringify(d)); setLoading(false);
   };
   return (
-    <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.68)", background: "rgba(255,255,255,0.54)", backdropFilter: "blur(22px) saturate(160%)", WebkitBackdropFilter: "blur(22px) saturate(160%)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.05), 0 8px 28px rgba(0,0,0,0.07)" }}>
+    <LiquidGlass contentStyle={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ fontSize: 11, color: "var(--fg-mute)" }}>Ask about your results</div>
       <div style={{ display: "flex", gap: 8 }}>
         <input value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && ask()}
@@ -579,7 +580,7 @@ function AskPanel({ sessionId, founderId }: { sessionId: string; founderId: stri
         </button>
       </div>
       {reply && <div style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.6, padding: "8px 10px", background: "rgba(255,255,255,0.52)", border: "1px solid rgba(255,255,255,0.62)", borderRadius: 8 }}>{reply}</div>}
-    </div>
+    </LiquidGlass>
   );
 }
 
@@ -751,18 +752,18 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
       {agentList.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 12, alignItems: "start" }}>
           {/* Agent sidebar */}
-          <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.68)", background: "rgba(255,255,255,0.54)", backdropFilter: "blur(22px) saturate(160%)", WebkitBackdropFilter: "blur(22px) saturate(160%)", padding: "8px", display: "flex", flexDirection: "column", gap: 2, boxShadow: "0 1px 3px rgba(0,0,0,0.05), 0 8px 28px rgba(0,0,0,0.07)" }}>
+          <LiquidGlass contentStyle={{ padding: "8px", display: "flex", flexDirection: "column", gap: 2 }}>
             <AgentSidebar agentList={agentList} agents={visibleAgents} activeAgent={selected} onSelect={setActiveAgent} />
-          </div>
+          </LiquidGlass>
 
           {/* Detail panel */}
-          <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.68)", background: "rgba(255,255,255,0.54)", backdropFilter: "blur(22px) saturate(160%)", WebkitBackdropFilter: "blur(22px) saturate(160%)", padding: "24px", minHeight: 480, boxShadow: "0 1px 3px rgba(0,0,0,0.05), 0 8px 28px rgba(0,0,0,0.07)" }}>
+          <LiquidGlass contentStyle={{ padding: "24px", minHeight: 480 }}>
             {selectedState ? (
               <AgentDetail state={selectedState} planTask={selectedPlanTask} />
             ) : (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: "var(--fg-mute)", fontSize: 13 }}>Select an agent</div>
             )}
-          </div>
+          </LiquidGlass>
         </div>
       )}
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useUser, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { submitGoal } from "@/lib/api";
 import { saveSession } from "@/lib/history";
+import LiquidGlass from "@/components/LiquidGlass";
 
 const STACK_OPTIONS = {
   frontend: ["Next.js", "React + Vite", "SvelteKit", "Remix"],
@@ -92,7 +93,7 @@ export default function Home() {
 
       {/* Form or sign-in prompt */}
       {isSignedIn ? (
-        <div className="site-card" style={{ width: "100%", maxWidth: 580, padding: "28px 32px" }}>
+        <LiquidGlass style={{ width: "100%", maxWidth: 580 }} contentStyle={{ padding: "28px 32px" }}>
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* Company + domain */}
             <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
@@ -206,9 +207,9 @@ export default function Home() {
               </p>
             )}
           </form>
-        </div>
+        </LiquidGlass>
       ) : (
-        <div className="site-card" style={{ width: "100%", maxWidth: 420, padding: "36px 40px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
+        <LiquidGlass style={{ width: "100%", maxWidth: 420 }} contentStyle={{ padding: "36px 40px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <p style={{ margin: 0, fontSize: 16, color: "var(--fg)" }}>Sign in to launch your company</p>
             <p className="site-muted" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
@@ -233,7 +234,7 @@ export default function Home() {
           >
             Learn more at astracreates.com →
           </a>
-        </div>
+        </LiquidGlass>
       )}
     </div>
   );
