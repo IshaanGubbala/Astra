@@ -90,7 +90,7 @@ function ResearchPreview({ state }: { state: AgentState }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
       {current && (
         <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(0,0,0,0.09)", background: "#FFFFFF" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid rgba(0,0,0,0.07)", background: "rgba(255,255,255,0.52)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid rgba(0,0,0,0.07)", background: "rgba(180,205,228,0.10)" }}>
             <img src={faviconUrl(current)} width={12} height={12} style={{ opacity: 0.6 }} onError={e => (e.currentTarget.style.display = "none")} />
             <span style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{current}</span>
             <a href={current} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#2563EB", textDecoration: "none" }}>↗</a>
@@ -109,7 +109,7 @@ function ResearchPreview({ state }: { state: AgentState }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto" }}>
         <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", marginBottom: 4 }}>Sites visited ({urls.length})</span>
         {urls.map((u, i) => (
-          <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 6, padding: "5px 8px", background: u === current ? "rgba(255,255,255,0.52)" : "rgba(255,255,255,0.28)", border: `1px solid ${u === current ? "rgba(255,255,255,0.62)" : "rgba(255,255,255,0.45)"}`, textDecoration: "none" }}>
+          <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 6, padding: "5px 8px", background: u === current ? "rgba(180,205,228,0.10)" : "rgba(255,255,255,0.28)", border: `1px solid ${u === current ? "rgba(180,205,228,0.22)" : "rgba(255,255,255,0.45)"}`, textDecoration: "none" }}>
             <img src={faviconUrl(u)} width={12} height={12} onError={e => (e.currentTarget.style.display = "none")} />
             <span style={{ fontSize: 11, color: "var(--fg-dim)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.replace(/^https?:\/\//, "").slice(0, 60)}</span>
           </a>
@@ -131,7 +131,7 @@ function WebPreview({ state }: { state: AgentState }) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
         <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(0,0,0,0.09)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(255,255,255,0.52)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(180,205,228,0.10)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
             <div style={{ display: "flex", gap: 5 }}>
               {["#ff5f57","#febc2e","#28c840"].map(c => <div key={c} style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />)}
             </div>
@@ -174,7 +174,7 @@ function TechnicalPreview({ state }: { state: AgentState }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {deploy && (
         <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(37,99,235,0.18)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(255,255,255,0.52)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(180,205,228,0.10)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
             <div style={{ display: "flex", gap: 5 }}>
               {["#ff5f57","#febc2e","#28c840"].map(c => <div key={c} style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />)}
             </div>
@@ -253,7 +253,7 @@ function DesignPreview({ state }: { state: AgentState }) {
       {spec && (
         <div>
           <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", display: "block", marginBottom: 6 }}>Design Spec</span>
-          <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 200, overflowY: "auto", padding: "10px 12px", background: "rgba(255,255,255,0.52)", borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)" }}>
+          <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 200, overflowY: "auto", padding: "10px 12px", background: "rgba(180,205,228,0.10)", borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)" }}>
             {typeof spec === "string" ? spec.slice(0, 600) : JSON.stringify(spec, null, 2).slice(0, 600)}
           </div>
         </div>
@@ -293,8 +293,8 @@ function LegalPreview({ state }: { state: AgentState }) {
   if (!r || !text) return <BuildingIndicator label="Drafting documents…" />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {path && <div style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-dim)", padding: "4px 8px", background: "rgba(255,255,255,0.52)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.62)" }}>📄 {String(path)}</div>}
-      <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(255,255,255,0.52)", borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)" }}>
+      {path && <div style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-dim)", padding: "4px 8px", background: "rgba(180,205,228,0.10)", borderRadius: 6, border: "1px solid rgba(180,205,228,0.22)" }}>📄 {String(path)}</div>}
+      <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(180,205,228,0.10)", borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)" }}>
         {String(text).slice(0, 1200)}
       </div>
     </div>
@@ -309,7 +309,7 @@ function SalesPreview({ state }: { state: AgentState }) {
   const steps: unknown[] = Array.isArray(seq) ? seq : typeof seq === "string" ? JSON.parse(seq.startsWith("[") ? seq : "[]") : [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(255,255,255,0.52)", border: "1px solid rgba(255,255,255,0.62)" }}>
+      <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)" }}>
         <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)", marginBottom: 3 }}>Target Lead</div>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{lead}</div>
       </div>
@@ -317,7 +317,7 @@ function SalesPreview({ state }: { state: AgentState }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>Email Sequence ({steps.length} steps)</span>
           {(steps as Record<string, unknown>[]).slice(0, 4).map((s, i) => (
-            <div key={i} style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(255,255,255,0.52)", border: "1px solid rgba(255,255,255,0.62)" }}>
+            <div key={i} style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)" }}>
               <div style={{ fontSize: 10, color: "#2563EB", marginBottom: 3 }}>Day {String(s.send_day ?? i + 1)}</div>
               <div style={{ fontSize: 11, fontWeight: 500, color: "var(--fg)" }}>{String(s.subject ?? "").slice(0, 60)}</div>
               <div style={{ fontSize: 10, color: "var(--fg-mute)", marginTop: 2 }}>{String(s.body ?? "").slice(0, 80)}…</div>
@@ -337,7 +337,7 @@ function OpsPreview({ state }: { state: AgentState }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {title && <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{title}</div>}
-      <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(255,255,255,0.52)", borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)" }}>
+      <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(180,205,228,0.10)", borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)" }}>
         {String(sop).slice(0, 1200)}
       </div>
     </div>
@@ -382,8 +382,8 @@ function AgentDetail({ state, planTask }: { state: AgentState; planTask: AgentTa
 
   const TAB_STYLE = (active: boolean): React.CSSProperties => ({
     fontSize: 11, fontWeight: 500, letterSpacing: "0.04em", padding: "5px 14px", borderRadius: 6,
-    cursor: "pointer", border: active ? "1px solid rgba(255,255,255,0.62)" : "1px solid transparent",
-    background: active ? "rgba(255,255,255,0.52)" : "transparent",
+    cursor: "pointer", border: active ? "1px solid rgba(180,205,228,0.22)" : "1px solid transparent",
+    background: active ? "rgba(180,205,228,0.10)" : "transparent",
     color: active ? "var(--fg)" : "var(--fg-mute)", transition: "all 0.15s",
     boxShadow: active ? "0 1px 3px rgba(0,0,0,0.05)" : "none",
   });
@@ -422,7 +422,7 @@ function AgentDetail({ state, planTask }: { state: AgentState; planTask: AgentTa
 
       {/* Current action pill */}
       {isRunning && state.currentAction && (
-        <div style={{ display: "flex", alignItems: "center", gap: 7, borderRadius: 8, background: "rgba(255,255,255,0.52)", padding: "6px 11px", fontSize: 11, color: "var(--fg-dim)", border: "1px solid rgba(255,255,255,0.62)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, borderRadius: 8, background: "rgba(180,205,228,0.10)", padding: "6px 11px", fontSize: 11, color: "var(--fg-dim)", border: "1px solid rgba(180,205,228,0.22)" }}>
           <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#2563EB", flexShrink: 0 }} className="animate-pulse" />
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {state.currentTool ? `${state.currentTool.replace(/_/g, " ")}` : state.currentAction}
@@ -445,13 +445,13 @@ function AgentDetail({ state, planTask }: { state: AgentState; planTask: AgentTa
         {tab === "plan" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {planTask && (
-              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(255,255,255,0.52)", border: "1px solid rgba(0,0,0,0.08)" }}>
+              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(180,205,228,0.10)", border: "1px solid rgba(0,0,0,0.08)" }}>
                 <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)", marginBottom: 5 }}>Task instruction</div>
                 <p style={{ margin: 0, fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.6 }}>{planTask.instruction}</p>
               </div>
             )}
             {state.result && (
-              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(255,255,255,0.52)", border: "1px solid rgba(0,0,0,0.08)" }}>
+              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(180,205,228,0.10)", border: "1px solid rgba(0,0,0,0.08)" }}>
                 <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)", marginBottom: 5 }}>Output</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {Object.entries(state.result).filter(([, v]) => v !== null && v !== undefined).slice(0, 8).map(([k, v]) => (
@@ -502,8 +502,8 @@ function AgentSidebar({ agentList, agents, activeAgent, onSelect }: {
         return (
           <button key={name} onClick={() => onSelect(name)} style={{
             display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8,
-            border: isActive ? "1px solid rgba(255,255,255,0.62)" : "1px solid transparent",
-            background: isActive ? "rgba(255,255,255,0.52)" : "transparent",
+            border: isActive ? "1px solid rgba(180,205,228,0.22)" : "1px solid transparent",
+            background: isActive ? "rgba(180,205,228,0.10)" : "transparent",
             cursor: "pointer", textAlign: "left", transition: "background 0.15s",
             boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.05)" : "none",
           }}>
@@ -551,8 +551,8 @@ function SteerPanel({ sessionId, isRunning }: { sessionId: string; isRunning: bo
       <div style={{ display: "flex", gap: 8 }}>
         <input value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && send()}
           placeholder="e.g. focus on B2B customers"
-          style={{ flex: 1, background: "rgba(255,255,255,0.74)", border: "1px solid rgba(255,255,255,0.68)", borderRadius: 8, padding: "7px 12px", fontSize: 12, color: "var(--fg)", outline: "none" }} />
-        <button onClick={send} style={{ padding: "7px 14px", borderRadius: 8, background: sent ? "#3D9E5F" : "rgba(30,28,28,0.90)", border: "1px solid rgba(0,0,0,0.08)", color: "rgba(255,255,255,0.94)", fontSize: 12, cursor: "pointer" }}>
+          style={{ flex: 1, background: "rgba(180,205,228,0.13)", border: "1px solid rgba(255,255,255,0.68)", borderRadius: 8, padding: "7px 12px", fontSize: 12, color: "var(--fg)", outline: "none" }} />
+        <button onClick={send} style={{ padding: "7px 14px", borderRadius: 8, background: sent ? "#3D9E5F" : "rgba(30,28,28,0.90)", border: "1px solid rgba(0,0,0,0.08)", color: "rgba(10,14,22,0.92)", fontSize: 12, cursor: "pointer" }}>
           {sent ? "Sent" : "Send"}
         </button>
       </div>
@@ -574,12 +574,12 @@ function AskPanel({ sessionId, founderId }: { sessionId: string; founderId: stri
       <div style={{ display: "flex", gap: 8 }}>
         <input value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && ask()}
           placeholder="What are the top competitors?"
-          style={{ flex: 1, background: "rgba(255,255,255,0.74)", border: "1px solid rgba(255,255,255,0.68)", borderRadius: 8, padding: "7px 12px", fontSize: 12, color: "var(--fg)", outline: "none" }} />
-        <button onClick={ask} style={{ padding: "7px 14px", borderRadius: 8, background: "rgba(30,28,28,0.90)", border: "1px solid rgba(0,0,0,0.08)", color: "rgba(255,255,255,0.94)", fontSize: 12, cursor: "pointer" }}>
+          style={{ flex: 1, background: "rgba(180,205,228,0.13)", border: "1px solid rgba(255,255,255,0.68)", borderRadius: 8, padding: "7px 12px", fontSize: 12, color: "var(--fg)", outline: "none" }} />
+        <button onClick={ask} style={{ padding: "7px 14px", borderRadius: 8, background: "rgba(30,28,28,0.90)", border: "1px solid rgba(0,0,0,0.08)", color: "rgba(10,14,22,0.92)", fontSize: 12, cursor: "pointer" }}>
           {loading ? "…" : "Ask"}
         </button>
       </div>
-      {reply && <div style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.6, padding: "8px 10px", background: "rgba(255,255,255,0.52)", border: "1px solid rgba(255,255,255,0.62)", borderRadius: 8 }}>{reply}</div>}
+      {reply && <div style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.6, padding: "8px 10px", background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)", borderRadius: 8 }}>{reply}</div>}
     </LiquidGlass>
   );
 }
