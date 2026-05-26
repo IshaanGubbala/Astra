@@ -102,12 +102,12 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
     const deploy = result.deployment_url ?? result.project_url;
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {repo && typeof repo === "string" && (
+        {typeof repo === "string" && repo && (
           <a href={repo} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", padding: "6px 10px", color: "#8BA8C8", textDecoration: "none", fontSize: 12, fontFamily: "var(--font-mono)" }}>
             🐙 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repo}</span> <span style={{ opacity: 0.6 }}>↗</span>
           </a>
         )}
-        {deploy && typeof deploy === "string" && (
+        {typeof deploy === "string" && deploy && (
           <a href={deploy} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 8, border: "1px solid rgba(30,106,255,0.22)", background: "rgba(30,106,255,0.08)", padding: "6px 10px", color: "#8BA8C8", textDecoration: "none", fontSize: 12, fontFamily: "var(--font-mono)" }}>
             🚀 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deploy}</span> <span style={{ opacity: 0.6 }}>↗</span>
           </a>
@@ -117,7 +117,7 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
   }
   if (agent === "web") {
     const url = result.url ?? result.site_url ?? result.deployment_url;
-    return url && typeof url === "string" ? (
+    return typeof url === "string" && url ? (
       <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 8, border: "1px solid rgba(30,106,255,0.22)", background: "rgba(30,106,255,0.08)", padding: "6px 10px", color: "#8BA8C8", textDecoration: "none", fontSize: 12, fontFamily: "var(--font-mono)" }}>
         🌐 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{url}</span> <span style={{ opacity: 0.6 }}>↗</span>
       </a>

@@ -102,13 +102,13 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
     const deploy = result.deployment_url ?? result.project_url;
     return (
       <div className="flex flex-col gap-2 text-sm">
-        {repo && typeof repo === "string" && (
+        {typeof repo === "string" && repo && (
           <a href={repo} target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-2 rounded-xl border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.04)] px-3 py-2 text-indigo-300 hover:border-indigo-500/40 transition-colors">
             🐙 <span className="font-mono text-xs truncate">{repo}</span> <span className="ml-auto opacity-60">↗</span>
           </a>
         )}
-        {deploy && typeof deploy === "string" && (
+        {typeof deploy === "string" && deploy && (
           <a href={deploy} target="_blank" rel="noopener noreferrer"
             className="flex items-center gap-2 rounded-xl border border-[rgba(99,102,241,0.3)] bg-[rgba(99,102,241,0.08)] px-3 py-2 text-indigo-300 hover:border-indigo-500/50 transition-colors">
             🚀 <span className="font-mono text-xs truncate">{deploy}</span> <span className="ml-auto opacity-60">↗</span>
@@ -119,7 +119,7 @@ function ResultView({ agent, result }: { agent: string; result: Record<string, u
   }
   if (agent === "web") {
     const url = result.url ?? result.site_url ?? result.deployment_url;
-    return url && typeof url === "string" ? (
+    return typeof url === "string" && url ? (
       <a href={url} target="_blank" rel="noopener noreferrer"
         className="flex items-center gap-2 rounded-xl border border-[rgba(99,102,241,0.3)] bg-[rgba(99,102,241,0.08)] px-3 py-2 text-indigo-300 hover:border-indigo-500/50 transition-colors text-sm">
         🌐 <span className="font-mono text-xs">{url}</span> <span className="ml-auto opacity-60">↗</span>
