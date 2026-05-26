@@ -129,6 +129,13 @@ def track_outreach(
     Log an outreach touchpoint (email sent, reply received, call scheduled).
     action: intro_sent | follow_up_1 | follow_up_2 | break_up | reply_received | meeting_booked | closed_won | closed_lost
     """
+    _aliases = {
+        "send_intro_email": "intro_sent", "intro": "intro_sent",
+        "follow_up": "follow_up_1", "breakup": "break_up",
+        "reply": "reply_received", "meeting": "meeting_booked",
+        "won": "closed_won", "lost": "closed_lost",
+    }
+    action = _aliases.get(action, action)
     valid_actions = {
         "intro_sent", "follow_up_1", "follow_up_2", "break_up",
         "reply_received", "meeting_booked", "closed_won", "closed_lost",

@@ -12,12 +12,14 @@ _VERCEL_API = "https://api.vercel.com"
 
 def vercel_deploy_from_github(
     repo_url: str,
-    project_name: str,
+    project_name: str = "",
     env_vars: dict = None,
     framework: str = "nextjs",
     root_directory: str = "",
     install_command: str = "",
     build_command: str = "",
+    founder_id: str = "",
+    **kwargs,
 ) -> dict:
     """
     Create a Vercel project linked to a GitHub repo and trigger a production deployment.
@@ -34,6 +36,8 @@ def vercel_deploy_from_github(
 
     Returns: {deployed, project_url, deployment_url, project_id, error?}
     """
+    if not project_name:
+        project_name = repo_url.rstrip("/").split("/")[-1]
     token = getattr(settings, "vercel_token", None)
     if not token:
         return {
@@ -92,7 +96,17 @@ def vercel_deploy_from_github(
             proj_resp = requests.get(get_url, headers=headers, timeout=10)
 
         if not proj_resp.ok:
-            return {"deployed": False, "error": f"Project creation failed: {proj_resp.text[:300]}"}
+            err_text = proj_resp.text[:400]
+            # GitHub not connected to Vercel account — return actionable manual instructions
+            if "Login Connection" in err_text or "login" in err_text.lower():
+                return {
+                    "deployed": False,
+                    "error": "Vercel account not linked to GitHub.",
+                    "fix": "Go to vercel.com/account/login-connections → connect GitHub",
+                    "manual_deploy": f"After linking: vercel.com/new → import {repo_url}",
+                    "repo_url": repo_url,
+                }
+            return {"deployed": False, "error": f"Project creation failed: {err_text}"}
 
         proj = proj_resp.json()
         project_id = proj.get("id", "")
