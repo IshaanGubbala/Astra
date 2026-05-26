@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { getSessions, deleteSession, SessionRecord } from "@/lib/history";
 import LiquidGlass from "@/components/LiquidGlass";
+import ThemeToggle from "@/components/ThemeToggle";
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts;
@@ -220,7 +221,8 @@ export default function Sidebar() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 10px 0", marginTop: 4, borderTop: "1px solid rgba(180,205,228,0.12)" }}>
           <UserButton appearance={{ elements: { avatarBox: "w-7 h-7 rounded-full" } }} />
-          <p style={{ fontSize: 11, color: "#4e5f70", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>My workspace</p>
+          <p style={{ fontSize: 11, color: "var(--text-3)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>My workspace</p>
+          <ThemeToggle />
         </div>
       </div>
     </LiquidGlass>

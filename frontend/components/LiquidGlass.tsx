@@ -185,8 +185,8 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
           style={{
             position: "absolute",
             inset: 0,
-            background: tint,
-            border: "1px solid rgba(180,205,228,0.22)",
+            background: tint ?? "var(--glass)",
+            border: "1px solid var(--glass-bdr)",
             boxShadow:
               "inset 0 1.5px 0 rgba(200,220,240,0.25), inset 0 -1px 0 rgba(180,205,228,0.08), 0 1px 3px rgba(0,0,0,0.35), 0 8px 28px rgba(0,0,0,0.30)",
             borderRadius,
