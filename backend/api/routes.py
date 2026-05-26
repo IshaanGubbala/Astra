@@ -64,16 +64,24 @@ async def submit_goal(body: GoalRequest):
 
 
 @router.get("/stream/{session_id}")
-async def stream_goal(session_id: str):
+async def stream_goal(session_id: str, request: Request):
+    raw_last = request.headers.get("Last-Event-ID") or request.query_params.get("lastEventId")
+    last_event_id: int | None = None
+    if raw_last:
+        try:
+            last_event_id = int(raw_last)
+        except ValueError:
+            pass
+
     async def _gen():
-        async for chunk in stream_events(session_id):
+        async for chunk in stream_events(session_id, last_event_id=last_event_id):
             yield chunk
     return StreamingResponse(_gen(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Headers": "Last-Event-ID, *",
     })
 
 

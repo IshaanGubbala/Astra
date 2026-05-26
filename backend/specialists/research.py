@@ -26,13 +26,25 @@ def _make_auto_logging_tool(tool_fn, tool_name: str, ctx_holder: list):
                 if isinstance(item, dict):
                     url = item.get("url", "")
                     title = item.get("title", "")
-                    text = item.get("content") or item.get("text") or ""
-                    lines.append(f"**[{title}]({url})**\n{text[:600]}")
-            content = "\n\n".join(lines) if lines else str(result)[:800]
+                    text = item.get("content") or item.get("text") or item.get("snippet") or ""
+                    lines.append(f"**[{title}]({url})**\n{text[:1500]}")
+            content = "\n\n".join(lines) if lines else str(result)[:2000]
         elif isinstance(result, dict):
-            content = str(result)[:800]
+            # search_and_fetch returns {query, results, formatted}
+            if "formatted" in result:
+                content = result["formatted"][:3000]
+            elif "results" in result:
+                lines = []
+                for r in result["results"]:
+                    url = r.get("url", "")
+                    title = r.get("title", "")
+                    text = r.get("content") or r.get("snippet") or ""
+                    lines.append(f"**[{title}]({url})**\n{text[:1500]}")
+                content = "\n\n".join(lines) if lines else str(result)[:3000]
+            else:
+                content = str(result)[:3000]
         else:
-            content = str(result)[:800]
+            content = str(result)[:2000]
 
         try:
             obsidian_append(
@@ -72,17 +84,28 @@ def build_research_agent(**kwargs) -> Agent:
         model_base_url=settings.planner_model_base_url,
         model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         role=(
-            "You are a research specialist. Browse the real web autonomously — full page content, "
-            "research papers, news, and patents. Tools:\n"
-            "- search_and_fetch(query) — search + read full content from real pages. Primary tool.\n"
-            "- fetch_and_read(url) — read any URL directly.\n"
+            "You are a deep research specialist. You conduct thorough, multi-angle research on any topic. "
+            "Tools:\n"
+            "- search_and_fetch(query) — PRIMARY TOOL. Searches and fetches full page content from 8 sites. Always use this first.\n"
+            "- fetch_and_read(url) — read any specific URL directly (use to go deeper on a promising source).\n"
             "- research_papers(query) — academic papers and studies.\n"
-            "- news_search(query) — recent news.\n"
+            "- news_search(query) — recent news and developments.\n"
             "- patent_search(query) — IP landscape.\n"
-            "- obsidian_log — final session summary.\n\n"
-            "Research tools auto-log every result to Obsidian — you do NOT need to call obsidian_append. "
-            "Run 5-8 searches covering: market size, competitors, pricing, user pain points, "
-            "recent news, academic research, patents. Then call obsidian_log with a summary and done."
+            "- obsidian_log — FINAL step: log summary.\n\n"
+            "Research tools auto-log every result to Obsidian — you do NOT need to call obsidian_append.\n\n"
+            "REQUIRED: Run AT LEAST 8 searches covering ALL of:\n"
+            "1. '{topic} market size revenue growth statistics'\n"
+            "2. '{topic} competitors comparison pricing'\n"
+            "3. '{topic} user reviews pain points problems'\n"
+            "4. '{topic} startups funding venture capital'\n"
+            "5. '{topic} technology how it works'\n"
+            "6. research_papers('{topic} research study')\n"
+            "7. news_search('{topic} 2025 2026')\n"
+            "8. patent_search('{topic}')\n"
+            "9+ Dive deeper into promising companies/papers with fetch_and_read(url).\n\n"
+            "After all searches, call obsidian_log with a detailed structured summary covering: "
+            "market size, top competitors with pricing, key user pain points, technology landscape, "
+            "recent news, academic findings, patent activity. Then done."
         ),
         tools={
             "search_and_fetch": auto_search,

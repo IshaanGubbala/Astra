@@ -58,7 +58,7 @@ def _http_get(url: str, timeout: float = 20.0) -> str:
         raise
 
 
-def _extract_text(html: str, max_chars: int = 3000) -> str:
+def _extract_text(html: str, max_chars: int = 6000) -> str:
     """Strip HTML tags, collapse whitespace, return readable text."""
     # Remove scripts, styles, nav, header, footer blocks
     html = re.sub(r"<(script|style|nav|header|footer|aside)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
@@ -94,7 +94,7 @@ def fetch_and_read(url: str) -> dict:
 
         title_match = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
         title = title_match.group(1).strip() if title_match else ""
-        content = _extract_text(html, max_chars=4000)
+        content = _extract_text(html, max_chars=8000)
 
         return {
             "url": url,
@@ -109,7 +109,7 @@ def fetch_and_read(url: str) -> dict:
         return {"url": url, "error": str(e), "content": ""}
 
 
-def search_and_fetch(query: str, max_results: int = 5) -> dict:
+def search_and_fetch(query: str, max_results: int = 8) -> dict:
     """
     Search DuckDuckGo for the query, then fetch and read the actual content
     of each result page. Returns rich page content, not just snippets.
@@ -122,12 +122,12 @@ def search_and_fetch(query: str, max_results: int = 5) -> dict:
     except Exception as e:
         return {"query": query, "results": [], "error": f"Search failed: {e}"}
 
-    urls = [r.get("href", "") for r in raw if r.get("href", "").startswith("http") and not _is_blocked(r.get("href", ""))][:max_results]
+    urls = [r.get("href", "") for r in raw if r.get("href", "").startswith("http") and not _is_blocked(r.get("href", ""))][:max_results + 2]
     snippets = {r.get("href", ""): r.get("body", "") for r in raw}
     titles = {r.get("href", ""): r.get("title", "") for r in raw}
 
     results = []
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         futures = {ex.submit(fetch_and_read, url): url for url in urls}
         for fut in as_completed(futures, timeout=60):
             url = futures[fut]
@@ -151,7 +151,7 @@ def search_and_fetch(query: str, max_results: int = 5) -> dict:
         formatted.append(f"\n### {r['title'] or r['url']}")
         formatted.append(f"URL: {r['url']}")
         if r.get("content"):
-            formatted.append(r["content"][:800])
+            formatted.append(r["content"][:2000])
         elif r.get("snippet"):
             formatted.append(r["snippet"])
 

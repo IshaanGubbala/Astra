@@ -443,18 +443,29 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
   const [planTasks, setPlanTasks] = useState<AgentTask[]>([]);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
   const [connected, setConnected] = useState(false);
   const everConnected = useRef(false);
   const notified = useRef(false);
+  const errorCount = useRef(0);
 
   useEffect(() => {
     if (!sessionId || sessionId === "undefined") return;
     const es = streamGoal(sessionId);
-    es.onopen = () => { setConnected(true); everConnected.current = true; };
+    es.onopen = () => {
+      setConnected(true);
+      setReconnecting(false);
+      errorCount.current = 0;
+      everConnected.current = true;
+    };
     es.onerror = () => {
       setConnected(false);
-      if (everConnected.current) setError("Connection lost — refresh to reconnect.");
-      else setError("Could not connect. Is the backend running?");
+      errorCount.current += 1;
+      if (errorCount.current >= 5) {
+        setError(everConnected.current ? "Connection lost — refresh to reconnect." : "Could not connect. Is the backend running?");
+      } else {
+        setReconnecting(true);
+      }
     };
 
     es.onmessage = (e) => {
@@ -480,25 +491,27 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
         const cur = next[agent] ?? { task_id: "", agent, instruction: "", status: "waiting" as const, currentAction: null, currentTool: null, reasoning: null, result: null, log: [] };
         const addLog = (type: string, text: string): LogEntry[] => [...cur.log, { ts: Date.now(), type, text }];
 
+        const SEARCH_TOOLS = new Set(["web_search", "search_and_read", "news_search", "fetch_page", "patent_search", "search_and_fetch", "fetch_and_read", "research_papers"]);
+
         if (event.type === "agent_start") {
           next[agent] = { ...cur, status: "running", instruction: event.instruction ?? cur.instruction, task_id: event.task_id ?? cur.task_id, log: addLog("info", "Started") };
         } else if (event.type === "agent_action") {
-          const searchTools = new Set(["web_search", "search_and_read", "news_search", "fetch_page", "patent_search"]);
           const baseText = humanizeToolLog(event.action, event.tool);
-          const args = event.args && typeof event.args === "string" ? event.args.slice(0, 80) : null;
-          const text = args && event.tool && searchTools.has(event.tool) ? `${baseText}: "${args}"` : baseText;
+          const rawArgs = event.args;
+          const argsStr = typeof rawArgs === "string" ? rawArgs : (rawArgs?.query ?? rawArgs?.url ?? rawArgs?.url ?? null);
+          const text = argsStr && event.tool && SEARCH_TOOLS.has(event.tool) ? `${baseText}: "${String(argsStr).slice(0, 80)}"` : baseText;
           next[agent] = { ...cur, currentAction: event.action, currentTool: event.tool ?? null, reasoning: event.reasoning ?? null, log: addLog("action", text) };
         } else if (event.type === "agent_action_result") {
           const ok = !event.result?.error;
-          const searchTools = new Set(["web_search", "search_and_read", "news_search", "fetch_page", "patent_search"]);
           let text: string;
           if (!ok) {
             text = `✗ ${event.tool}: ${event.result?.error ?? "failed"}`;
-          } else if (searchTools.has(event.tool) && event.result && typeof event.result === "string") {
-            // Show first URL or snippet from search result preview
-            const urlMatch = event.result.match(/https?:\/\/[^\s"')]+/);
-            const snippet = event.result.slice(0, 120).replace(/\n/g, " ").trim();
-            text = urlMatch ? `✓ Read ${urlMatch[0].slice(0, 60)}…` : `✓ ${snippet || TOOL_DESCRIPTIONS[event.tool] ?? event.tool}`;
+          } else if (SEARCH_TOOLS.has(event.tool)) {
+            // Show first URL found in result
+            const resultStr = typeof event.result === "string" ? event.result : JSON.stringify(event.result ?? "");
+            const urlMatch = resultStr.match(/https?:\/\/[^\s"')\]]+/);
+            const snippet = resultStr.slice(0, 120).replace(/\n/g, " ").trim();
+            text = urlMatch ? `✓ Read ${urlMatch[0].slice(0, 70)}…` : `✓ ${snippet || TOOL_DESCRIPTIONS[event.tool] ?? event.tool}`;
           } else {
             text = `✓ ${TOOL_DESCRIPTIONS[event.tool] ?? event.tool ?? "Done"}`;
           }
@@ -556,11 +569,11 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
           <h1 style={{ fontSize: 20, fontWeight: 600, color: "var(--fg)", margin: 0, lineHeight: 1.2 }}>{title}</h1>
           <span style={{
             fontSize: 11, letterSpacing: "0.08em", padding: "3px 10px", borderRadius: 999,
-            color: done ? "#6DC98A" : error ? "#C97070" : connected ? "#8BA8C8" : "var(--fg-mute)",
-            background: done ? "rgba(50,160,90,0.12)" : error ? "rgba(180,60,60,0.12)" : connected ? "rgba(30,106,255,0.12)" : "rgba(255,255,255,0.05)",
-            border: `1px solid ${done ? "rgba(70,180,110,0.28)" : error ? "rgba(180,60,60,0.28)" : connected ? "rgba(30,106,255,0.28)" : "rgba(255,255,255,0.1)"}`,
+            color: done ? "#6DC98A" : error ? "#C97070" : reconnecting ? "#C9A870" : connected ? "#8BA8C8" : "var(--fg-mute)",
+            background: done ? "rgba(50,160,90,0.12)" : error ? "rgba(180,60,60,0.12)" : reconnecting ? "rgba(180,140,60,0.12)" : connected ? "rgba(30,106,255,0.12)" : "rgba(255,255,255,0.05)",
+            border: `1px solid ${done ? "rgba(70,180,110,0.28)" : error ? "rgba(180,60,60,0.28)" : reconnecting ? "rgba(180,140,60,0.28)" : connected ? "rgba(30,106,255,0.28)" : "rgba(255,255,255,0.1)"}`,
           }}>
-            {done ? "✦ complete" : error ? "error" : connected ? "running" : "connecting"}
+            {done ? "✦ complete" : error ? "error" : reconnecting ? "reconnecting…" : connected ? "running" : "connecting"}
           </span>
           <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-mono)" }}>{sessionId}</span>
         </div>
