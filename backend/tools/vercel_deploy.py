@@ -1,5 +1,7 @@
 import hashlib
 import logging
+import os
+import subprocess
 import time
 import requests
 
@@ -8,6 +10,38 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 _VERCEL_API = "https://api.vercel.com"
+
+
+def _vercel_cli_deploy(local_path: str, project_name: str = "", token: str = "") -> dict:
+    """Deploy from local directory using Vercel CLI. No GitHub connection needed."""
+    token = token or getattr(settings, "vercel_token", "")
+    if not token:
+        return {"deployed": False, "error": "VERCEL_TOKEN not set"}
+
+    vercel_bin = subprocess.run(["which", "vercel"], capture_output=True, text=True).stdout.strip()
+    if not vercel_bin:
+        return {"deployed": False, "error": "vercel CLI not found"}
+
+    env = os.environ.copy()
+    env["VERCEL_TOKEN"] = token
+
+    cmd = [vercel_bin, "deploy", "--prod", "--yes", "--token", token]
+    if project_name:
+        cmd += ["--name", project_name]
+
+    try:
+        r = subprocess.run(cmd, cwd=local_path, capture_output=True, text=True, timeout=300, env=env)
+        output = (r.stdout + r.stderr).strip()
+        # Extract URL from output — Vercel CLI prints the deployment URL on stdout
+        url = next((line.strip() for line in r.stdout.splitlines() if line.strip().startswith("https://")), "")
+        if r.returncode == 0 and url:
+            return {"deployed": True, "deployment_url": url, "project_url": url, "via": "vercel-cli"}
+        logger.warning("vercel CLI deploy output: %s", output[:400])
+        return {"deployed": False, "error": output[:300], "via": "vercel-cli"}
+    except subprocess.TimeoutExpired:
+        return {"deployed": False, "error": "vercel CLI timed out (300s)"}
+    except Exception as e:
+        return {"deployed": False, "error": str(e)}
 
 
 def vercel_deploy_from_github(
@@ -97,13 +131,23 @@ def vercel_deploy_from_github(
 
         if not proj_resp.ok:
             err_text = proj_resp.text[:400]
-            # GitHub not connected to Vercel account — return actionable manual instructions
             if "Login Connection" in err_text or "login" in err_text.lower():
+                # GitHub not linked to Vercel — fall back to CLI deploy from local clone
+                logger.info("GitHub not linked to Vercel — trying CLI deploy from local clone")
+                try:
+                    from backend.tools.git_tools import _clones
+                    local = next(
+                        (v for k, v in _clones.items() if repo_url in k and os.path.isdir(v)),
+                        None,
+                    )
+                    if local:
+                        return _vercel_cli_deploy(local, project_name, token)
+                except Exception as cli_err:
+                    logger.warning("CLI fallback failed: %s", cli_err)
                 return {
                     "deployed": False,
-                    "error": "Vercel account not linked to GitHub.",
-                    "fix": "Go to vercel.com/account/login-connections → connect GitHub",
-                    "manual_deploy": f"After linking: vercel.com/new → import {repo_url}",
+                    "error": "Vercel not linked to GitHub and CLI fallback unavailable.",
+                    "fix": "vercel.com/account/login-connections → connect GitHub",
                     "repo_url": repo_url,
                 }
             return {"deployed": False, "error": f"Project creation failed: {err_text}"}
