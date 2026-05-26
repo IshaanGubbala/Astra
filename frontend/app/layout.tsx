@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const clarityId = process.env.NEXT_PUBLIC_CLARITY_PROJECT_ID ?? "";
 
   return (
-    <html lang="en" className={`${geist.variable} ${jetBrainsMono.variable} antialiased`}>
+    <html lang="en" className={`${geist.variable} ${jetBrainsMono.variable} antialiased`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('astra-theme');document.documentElement.setAttribute('data-theme',t||'dark');})();` }} />
         {posthogKey && (
