@@ -31,6 +31,8 @@ interface AgentState {
   previewUrl?: string;
   colors?: string[];
   commits?: string[];
+  filesPreview?: string[];
+  filesCount?: number;
   socialContent?: Record<string, string>;
   legalText?: string;
   salesLead?: string;
@@ -204,54 +206,85 @@ function WebPreview({ state }: { state: AgentState }) {
 }
 
 function TechnicalPreview({ state }: { state: AgentState }) {
-  const repo = (state.result?.repo_url ?? state.result?.github_url) as string | undefined;
-  const deploy = (state.result?.deployment_url ?? state.result?.project_url) as string | undefined;
-  const files = (state.result?.files_preview ?? state.result?.files_in_repo) as unknown;
+  const r = state.result ?? {};
+  // LLM role says return deploy_url; also check other key variants
+  const deploy = (r.deploy_url ?? r.deployment_url ?? r.project_url ?? r.url) as string | undefined;
+  const repo = (r.repo_url ?? r.github_url) as string | undefined;
+  const roundsRun = (r.rounds_run ?? r.rounds) as number | undefined;
+  const filesCount = (r.files_in_repo as number) ?? state.filesCount;
+  const files = state.filesPreview ?? (Array.isArray(r.files_preview) ? r.files_preview as string[] : undefined);
   const commits = state.commits ?? [];
+  const isBuilding = state.status === "running";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Live site iframe */}
       {deploy && (
-        <div style={{ borderRadius: 28, overflow: "hidden", border: "1px solid rgba(37,99,235,0.18)" }}>
+        <div style={{ borderRadius: 20, overflow: "hidden", border: "1px solid rgba(37,99,235,0.18)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(180,205,228,0.10)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
-            <div style={{ display: "flex", gap: 5 }}>
-              {["#ff5f57","#febc2e","#28c840"].map(c => <div key={c} style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />)}
+            <div style={{ display: "flex", gap: 4 }}>
+              {["#ff5f57","#febc2e","#28c840"].map(c => <div key={c} style={{ width: 9, height: 9, borderRadius: "50%", background: c }} />)}
             </div>
-            <span style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", flex: 1, textAlign: "center" }}>{deploy}</span>
-            <a href={deploy} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#2563EB", textDecoration: "none" }}>↗</a>
+            <span style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deploy.replace(/^https?:\/\//, "")}</span>
+            <a href={deploy} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#2563EB", textDecoration: "none", flexShrink: 0 }}>↗</a>
           </div>
-          <div style={{ height: 260 }}>
-            <iframe src={deploy} style={{ width: "100%", height: "100%", border: "none" }} title="App preview" />
-          </div>
+          <iframe src={deploy} style={{ width: "100%", height: 280, border: "none", display: "block" }} title="Live MVP" />
         </div>
       )}
+
+      {/* Stats row */}
+      {(repo || filesCount || roundsRun || commits.length > 0) && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          {[
+            ["Commits", commits.length || "—"],
+            ["Files", filesCount ?? "—"],
+            ["Rounds", roundsRun ?? "—"],
+          ].map(([label, val]) => (
+            <div key={label as string} style={{ padding: "8px 10px", borderRadius: 12, background: "rgba(180,205,228,0.08)", border: "1px solid rgba(180,205,228,0.14)", textAlign: "center" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--fg)", fontFamily: "var(--font-jetbrains-mono)" }}>{val}</div>
+              <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--fg-mute)", marginTop: 2 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* GitHub repo link */}
       {repo && (
-        <a href={repo} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 24, border: "1px solid rgba(0,0,0,0.1)", background: "rgba(0,0,0,0.03)", padding: "8px 12px", color: "#2563EB", textDecoration: "none", fontSize: 12 }}>
-          🐙 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repo}</span> <span style={{ opacity: 0.5 }}>↗</span>
+        <a href={repo} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 20, border: "1px solid rgba(0,0,0,0.1)", background: "rgba(0,0,0,0.03)", padding: "8px 14px", color: "#2563EB", textDecoration: "none", fontSize: 12 }}>
+          <span>🐙</span>
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repo.replace("https://github.com/", "")}</span>
+          <span style={{ opacity: 0.5, flexShrink: 0 }}>↗</span>
         </a>
       )}
-      {commits.length > 0 && (
+
+      {/* File tree */}
+      {files && files.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 1, maxHeight: 180, overflowY: "auto" }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", marginBottom: 4 }}>Files built ({files.length})</span>
+          {files.map((f, i) => (
+            <div key={i} style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", padding: "2px 6px", display: "flex", alignItems: "center", gap: 6 }}>
+              <span>{f.startsWith("frontend/") ? "🔷" : f.startsWith("backend/") ? "🔶" : "📄"}</span>
+              <span>{f}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Commits log */}
+      {commits.length > 0 && !deploy && (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)" }}>Commits ({commits.length})</span>
-          {commits.map((c, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.08)" }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)" }}>Build commits</span>
+          {commits.slice(-5).map((c, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.07)" }}>
               <span style={{ fontFamily: "var(--font-jetbrains-mono)", fontSize: 10, color: "#2563EB" }}>{c.slice(0, 7)}</span>
-              <span style={{ fontSize: 11, color: "var(--fg-mute)" }}>round committed</span>
+              <span style={{ fontSize: 10, color: "var(--fg-mute)" }}>committed</span>
             </div>
           ))}
         </div>
       )}
-      {Array.isArray(files) && files.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 140, overflowY: "auto" }}>
-          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", marginBottom: 4 }}>Files</span>
-          {(files as string[]).map((f, i) => (
-            <div key={i} style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", padding: "2px 6px" }}>
-              {f.startsWith("frontend/") ? "🔷" : f.startsWith("backend/") ? "🔶" : "📄"} {f}
-            </div>
-          ))}
-        </div>
-      )}
-      {!repo && !deploy && <BuildingIndicator label="Building MVP…" />}
+
+      {!repo && !deploy && !isBuilding && <ResultDump result={state.result} />}
+      {!repo && !deploy && isBuilding && <BuildingIndicator label="Building MVP with openclaude…" />}
     </div>
   );
 }
@@ -1083,7 +1116,10 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
           const newCommits = newCommit
             ? [...(cur.commits ?? []), ...(Array.isArray(newCommit) ? newCommit : [String(newCommit)])]
             : cur.commits;
-          next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text), visitedUrls: newVisited, currentUrl: newUrl ?? cur.currentUrl, commits: newCommits };
+          // Capture files from run_mvp_loop result
+          const newFiles = Array.isArray(event.result?.files_preview) ? event.result.files_preview as string[] : cur.filesPreview;
+          const newFilesCount = (event.result?.files_in_repo as number) ?? cur.filesCount;
+          next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text), visitedUrls: newVisited, currentUrl: newUrl ?? cur.currentUrl, commits: newCommits, filesPreview: newFiles, filesCount: newFilesCount };
         } else if (event.type === "agent_thinking") {
           next[agent] = { ...cur, log: addLog("info", `Thinking… (step ${event.iteration})`) };
         } else if (event.type === "agent_done") {
