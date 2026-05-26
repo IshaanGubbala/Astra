@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     clerk_webhook_secret: str = ""
     deepinfra_api_key: str = ""
+    notion_token: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

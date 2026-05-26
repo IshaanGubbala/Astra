@@ -19,10 +19,11 @@ def build_ops_agent(**kwargs) -> Agent:
             "generate_pdf creates pitch decks, one-pagers, and investor docs. "
             "composio_gmail_send sends investor outreach emails. "
             "composio_calendar_create_event schedules meetings. "
-            "composio_notion_create_page documents decisions and SOPs. "
-            "composio_linear_create_issue tracks action items and milestones. "
+            "composio_notion_create_page documents decisions and SOPs — if it returns an error, skip it and use obsidian_log instead. "
+            "composio_linear_create_issue tracks action items — if it returns an error (e.g. not connected), skip and continue. "
             "resend_send_email sends transactional email. "
             "Always produce a concrete output — don't describe what should be done, do it. "
+            "If any tool fails, use obsidian_log as fallback and still call done with your results. "
             "Call obsidian_log then done."
         ),
         tools={

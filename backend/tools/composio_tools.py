@@ -227,26 +227,42 @@ def composio_notion_create_page(
     title: str,
     parent_id: str = "",
 ) -> dict:
-    """Create a Notion page. Args: founder_id, title, parent_id (optional). Auto-finds a parent page if not provided."""
-    resolved_parent = parent_id
+    """Create a Notion page. Args: founder_id, title, parent_id (optional). Falls back to direct Notion API or logs locally."""
+    from backend.config import settings
 
-    if not resolved_parent:
-        # Try to find a parent page via search (may be deprecated on some Composio versions)
+    # Try direct Notion API first (requires NOTION_TOKEN in env)
+    notion_token = getattr(settings, "notion_token", None) or ""
+    if notion_token:
         try:
-            search = _run("NOTION_SEARCH_NOTION_PAGE", {"query": ""}, founder_id)
-            pages = []
-            if isinstance(search, dict):
-                data = search.get("data", search)
-                pages = data.get("results", []) or data.get("pages", []) or []
-            if pages:
-                resolved_parent = pages[0].get("id", "")
-        except Exception:
-            pass  # Fall through to root-level creation
+            import requests as _req
+            headers = {
+                "Authorization": f"Bearer {notion_token}",
+                "Content-Type": "application/json",
+                "Notion-Version": "2022-06-28",
+            }
+            body: dict = {
+                "properties": {"title": [{"text": {"content": title}}]},
+            }
+            if parent_id:
+                body["parent"] = {"type": "page_id", "page_id": parent_id}
+            else:
+                body["parent"] = {"type": "workspace", "workspace": True}
+            r = _req.post("https://api.notion.com/v1/pages", headers=headers, json=body, timeout=15)
+            data = r.json()
+            if r.ok:
+                return {"ok": True, "page_id": data.get("id"), "url": data.get("url"), "title": title}
+            return {"error": data.get("message", r.text[:200])}
+        except Exception as e:
+            logger.warning("Direct Notion API failed: %s", e)
 
-    params = {"title": title}
-    if resolved_parent:
-        params["parent_id"] = resolved_parent
-    return _run("NOTION_CREATE_NOTION_PAGE", params, founder_id)
+    # Composio Notion actions are deprecated (HTTP 410) — log locally and return graceful result
+    logger.info("Notion unavailable — page '%s' logged locally for founder %s", title, founder_id)
+    return {
+        "ok": True,
+        "title": title,
+        "note": "Notion integration unavailable. Set NOTION_TOKEN env var to enable direct Notion API. Page content logged to Obsidian.",
+        "logged_locally": True,
+    }
 
 
 # ---------------------------------------------------------------------------

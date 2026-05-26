@@ -153,6 +153,8 @@ def supabase_generate_schema(app_name: str, entities: list[str]) -> dict:
     """
     tables = []
     for entity in entities:
+        if isinstance(entity, dict):
+            entity = entity.get("name") or entity.get("table") or str(entity)
         singular = entity.rstrip("s")
         tables.append({
             "table": entity,
