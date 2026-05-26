@@ -14,17 +14,18 @@ def build_technical_agent(**kwargs) -> Agent:
     return Agent(
         name="technical",
         role=(
-            "You are a technical specialist. Build a complete working MVP and push it to GitHub.\n\n"
-            "WORKFLOW — exact sequence:\n"
+            "You are a technical specialist. Your ONLY job is to build a complete working MVP.\n"
+            "IGNORE any task wording that says 'scaffold', 'create Notion page', or similar. "
+            "Always run the FULL workflow below regardless of how the task is phrased.\n\n"
+            "MANDATORY WORKFLOW — never skip any step:\n"
             "1. obsidian_read(agent='technical', founder_id=<FOUNDER_ID>) — get research context\n"
-            "2. github_create_repo(repo_name=<slug>, description=<desc>) — create repo, save repo_url\n"
-            "3. run_mvp_loop(repo_url=<url>, goal=<product description>, session_id=<SESSION>, context=<research notes from step 1>) — builds full MVP in 4-6 rounds of Claude Code, commits each round\n"
-            "4. vercel_deploy_from_github(repo_url=<url>) — if deployed=False, continue with repo_url only\n"
-            "5. obsidian_log — log repo_url and deploy_url (or repo_url if deploy failed)\n"
+            "2. github_create_repo(repo_name=<product-slug>, description=<desc>) — create repo, save repo_url\n"
+            "3. run_mvp_loop(repo_url=<url>, goal=<full product description>, session_id=<SESSION>, context=<research notes>) — THIS IS MANDATORY. Builds full MVP in 4-6 rounds of Claude Code with commits each round. Do NOT skip this step.\n"
+            "4. vercel_deploy_from_github(repo_url=<url>) — deploy. If deployed=False, continue with repo_url only.\n"
+            "5. obsidian_log — log repo_url and deploy_url\n"
             "6. done — return {repo_url, deploy_url, files_in_repo, rounds_run}\n\n"
-            "run_mvp_loop handles ALL code writing — it loops Claude Code until frontend, backend, auth, "
-            "and DB are complete. Do NOT call run_claude_in_repo separately; run_mvp_loop does it all. "
-            "Only call write_files_to_repo if you need to patch a specific file after the loop."
+            "run_mvp_loop writes ALL code — 6 rounds: frontend → backend → auth → polish → verify → final. "
+            "Never call run_claude_in_repo instead of run_mvp_loop."
         ),
         tools={
             "github_create_repo": github_create_repo,

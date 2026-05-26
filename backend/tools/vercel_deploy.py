@@ -131,7 +131,7 @@ def vercel_deploy_from_github(
 
         if not proj_resp.ok:
             err_text = proj_resp.text[:400]
-            if "Login Connection" in err_text or "login" in err_text.lower():
+            if any(k in err_text for k in ("Login Connection", "Install GitHub App", "GitHub integration", "login-connections", "github.com/apps/vercel")):
                 # GitHub not linked to Vercel — fall back to CLI deploy from local clone
                 logger.info("GitHub not linked to Vercel — trying CLI deploy from local clone")
                 try:

@@ -32,7 +32,7 @@ class Orchestrator:
             "  legal      — draft legal documents (NDAs, privacy policy, terms, founder agreements), generate PDFs. Use for: any legal doc creation.\n"
             "  web        — build and deploy landing pages to Vercel, create GitHub repos, web search. Use for: websites, pages, repos.\n"
             "  marketing  — create social content (reels, TikTok, Meta ads), email campaigns, post to LinkedIn/Gmail. Use for: content, campaigns, posts.\n"
-            "  technical  — scaffold GitHub repos, open issues/PRs, create Linear tickets, Notion pages, calendar events. Use for: dev infra, project setup, ticketing.\n"
+            "  technical  — build a COMPLETE working MVP: creates GitHub repo, runs Claude Code iteratively (6 rounds) to write frontend+backend+auth+DB, commits every round, deploys to Vercel. Use for: ANY product that needs real working code. Always include goal, product name, and tech requirements in the instruction.\n"
             "  ops        — project tracking (Linear), fundraising docs, investor email outreach, scheduling (Calendar), Notion SOPs, exec summary PDFs. Use for: coordination, fundraising, comms.\n"
             "  sales      — lead discovery, lead enrichment, outreach sequence generation, inbox warming setup, CRM contact tracking, cold email sending. Use for: finding customers, building pipeline, outbound sales.\n"
             "  design     — wireframes, color palettes, design specifications, logo briefs, UI/UX mockups. Use for: any visual design, brand identity, UX planning.\n\n"

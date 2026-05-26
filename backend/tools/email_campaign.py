@@ -44,7 +44,16 @@ def send_email_campaign(
         )
         if resp.status_code in (200, 202):
             return {"sent": True, "to": to_email, "subject": subject}
-        return {"sent": False, "error": resp.text, "status_code": resp.status_code}
+        err = resp.text
+        if "Sender Identity" in err or "verified" in err.lower():
+            logger.warning("SendGrid unverified sender — email queued locally")
+            return {
+                "sent": False,
+                "queued": True,
+                "note": "SendGrid sender not verified. Email content saved — verify sender at sendgrid.com/settings/sender_auth.",
+                "preview": {"to": to_email, "subject": subject},
+            }
+        return {"sent": False, "error": err[:300], "status_code": resp.status_code}
     except Exception as e:
         logger.error("send_email_campaign failed: %s", e)
         return {"sent": False, "error": str(e)}
