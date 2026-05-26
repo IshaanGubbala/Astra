@@ -2,17 +2,14 @@
 
 import { use, useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { streamGoal, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder, sortAgentsByOrder } from "@/lib/api";
 import { updateSession } from "@/lib/history";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-interface AgentTask {
-  id: string;
-  agent: string;
-  instruction: string;
-}
+interface AgentTask { id: string; agent: string; instruction: string; }
+
+interface LogEntry { ts: number; type: string; text: string; }
 
 interface AgentState {
   task_id: string;
@@ -26,12 +23,16 @@ interface AgentState {
   log: LogEntry[];
   mirrorVerdict?: "pass" | "flag" | "block";
   mirrorCritique?: string;
-}
-
-interface LogEntry {
-  ts: number;
-  type: string;
-  text: string;
+  // live preview data
+  currentUrl?: string;
+  visitedUrls?: string[];
+  previewUrl?: string;
+  colors?: string[];
+  commits?: string[];
+  socialContent?: Record<string, string>;
+  legalText?: string;
+  salesLead?: string;
+  designSpec?: string;
 }
 
 const AGENT_ICONS: Record<string, string> = {
@@ -39,398 +40,548 @@ const AGENT_ICONS: Record<string, string> = {
   legal: "⚖️", ops: "🚀", sales: "🤝", design: "🎨",
 };
 
-function humanizeToolLog(action: string, tool?: string | null): string {
-  if (action === "tool" && tool) return TOOL_DESCRIPTIONS[tool] ?? tool.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-  if (action === "computer_use") return "Browser action";
-  if (action === "delegate") return "Delegating to sub-agent";
-  return action;
+const STATUS_COLOR = {
+  waiting: "rgba(255,255,255,0.18)",
+  running: "#1E6AFF",
+  done: "#6DC98A",
+  error: "#C97070",
+};
+
+function pct(state: AgentState): number {
+  if (state.status === "done") return 100;
+  if (state.status === "waiting") return 0;
+  const steps = Math.max(state.log.filter(l => l.type === "result" || l.type === "action").length, 1);
+  return Math.min(90, Math.round((steps / 12) * 90));
 }
 
-interface Artifact {
-  label: string;
-  value: string;
-  href?: string;
-  icon: string;
+function extractColors(log: LogEntry[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const l of log) {
+    const matches = l.text.match(/#([0-9a-fA-F]{6})\b/g) ?? [];
+    for (const c of matches) { if (!seen.has(c)) { seen.add(c); out.push(c); } }
+  }
+  return out;
 }
 
-function extractArtifacts(agents: Record<string, AgentState>): Artifact[] {
-  const arts: Artifact[] = [];
-  for (const [agentName, state] of Object.entries(agents)) {
-    if (state.status !== "done" || !state.result) continue;
-    const r = state.result;
-    if (agentName === "technical") {
-      const repo = r.repo_url ?? r.github_url;
-      if (repo && typeof repo === "string") arts.push({ label: "GitHub Repo", value: repo, href: repo, icon: "🐙" });
-      const deploy = r.deployment_url ?? r.project_url;
-      if (deploy && typeof deploy === "string") arts.push({ label: "Live App", value: deploy, href: deploy, icon: "🚀" });
-    }
-    if (agentName === "web") {
-      const url = r.url ?? r.site_url ?? r.deployment_url;
-      if (url && typeof url === "string") arts.push({ label: "Landing Page", value: url, href: url, icon: "🌐" });
-    }
-    if (agentName === "legal") {
-      const path = r.path ?? r.filename;
-      if (path) arts.push({ label: "Legal Doc", value: String(path), icon: "⚖️" });
-    }
-    if (agentName === "ops") {
-      const pdf = r.pdf_path ?? r.output_path;
-      if (pdf) arts.push({ label: "Pitch Deck", value: String(pdf), icon: "📄" });
-    }
-    if (agentName === "research") {
-      const tam = r.tam ?? r.market_size;
-      if (tam) arts.push({ label: "TAM", value: String(tam), icon: "📊" });
+function extractUrls(log: LogEntry[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const l of log) {
+    const matches = l.text.match(/https?:\/\/[^\s"')\]]+/g) ?? [];
+    for (const u of matches) {
+      const clean = u.replace(/[.,;]+$/, "");
+      if (!seen.has(clean) && !clean.includes("localhost")) { seen.add(clean); out.push(clean); }
     }
   }
-  return arts;
+  return out;
 }
 
-function ResultView({ agent, result }: { agent: string; result: Record<string, unknown> }) {
-  const entries = Object.entries(result).filter(([, v]) => v !== null && v !== undefined && v !== "");
-  function fmt(v: unknown, max = 180): string {
-    if (!v && v !== 0) return "";
-    if (typeof v === "string") return v.slice(0, max);
-    if (typeof v === "number" || typeof v === "boolean") return String(v);
-    if (Array.isArray(v)) {
-      const strs = v.map(i => typeof i === "object" && i ? ((i as Record<string, unknown>).name ?? JSON.stringify(i).slice(0, 60)) : String(i));
-      return strs.slice(0, 3).join(", ") + (v.length > 3 ? ` +${v.length - 3}` : "");
-    }
-    return JSON.stringify(v).slice(0, max);
-  }
+function faviconUrl(url: string): string {
+  try { return `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=16`; } catch { return ""; }
+}
 
-  if (agent === "technical") {
-    const repo = result.repo_url ?? result.github_url;
-    const deploy = result.deployment_url ?? result.project_url;
+// ── Agent-specific preview panels ──────────────────────────────────────────
+
+function ResearchPreview({ state }: { state: AgentState }) {
+  const urls = extractUrls(state.log);
+  const current = state.currentUrl ?? urls[urls.length - 1];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%" }}>
+      {current && (
+        <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)", background: "rgba(0,0,0,0.3)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(0,0,0,0.2)" }}>
+            <img src={faviconUrl(current)} width={12} height={12} style={{ opacity: 0.7 }} onError={e => (e.currentTarget.style.display = "none")} />
+            <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.5)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{current}</span>
+            <a href={current} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#5E9AE0", textDecoration: "none" }}>↗</a>
+          </div>
+          <div style={{ height: 280, position: "relative" }}>
+            <iframe
+              src={current}
+              sandbox="allow-scripts allow-same-origin"
+              style={{ width: "100%", height: "100%", border: "none", opacity: 0.9 }}
+              title="Research preview"
+            />
+            <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(to bottom, transparent 80%, rgba(6,8,15,0.6))" }} />
+          </div>
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto" }}>
+        <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 4 }}>Sites visited ({urls.length})</span>
+        {urls.map((u, i) => (
+          <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 6, padding: "5px 8px", background: u === current ? "rgba(30,106,255,0.1)" : "rgba(255,255,255,0.03)", border: `1px solid ${u === current ? "rgba(30,106,255,0.25)" : "rgba(255,255,255,0.05)"}`, textDecoration: "none" }}>
+            <img src={faviconUrl(u)} width={12} height={12} onError={e => (e.currentTarget.style.display = "none")} />
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.replace(/^https?:\/\//, "").slice(0, 60)}</span>
+          </a>
+        ))}
+        {urls.length === 0 && state.status === "running" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#1E6AFF" }} className="animate-pulse" /> Searching…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WebPreview({ state }: { state: AgentState }) {
+  const url = state.previewUrl ?? (state.result?.url ?? state.result?.deployment_url ?? state.result?.project_url) as string | undefined;
+  const commits = state.commits ?? [];
+  if (url) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {typeof repo === "string" && repo && (
-          <a href={repo} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", padding: "6px 10px", color: "#8BA8C8", textDecoration: "none", fontSize: 12, fontFamily: "var(--font-mono)" }}>
-            🐙 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repo}</span> <span style={{ opacity: 0.6 }}>↗</span>
-          </a>
-        )}
-        {typeof deploy === "string" && deploy && (
-          <a href={deploy} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 8, border: "1px solid rgba(30,106,255,0.22)", background: "rgba(30,106,255,0.08)", padding: "6px 10px", color: "#8BA8C8", textDecoration: "none", fontSize: 12, fontFamily: "var(--font-mono)" }}>
-            🚀 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{deploy}</span> <span style={{ opacity: 0.6 }}>↗</span>
-          </a>
-        )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
+        <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(0,0,0,0.3)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ display: "flex", gap: 5 }}>
+              {["#ff5f57","#febc2e","#28c840"].map(c => <div key={c} style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />)}
+            </div>
+            <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.4)", flex: 1, textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{url}</span>
+            <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#5E9AE0", textDecoration: "none" }}>↗</a>
+          </div>
+          <div style={{ height: 340, background: "rgba(0,0,0,0.2)" }}>
+            <iframe src={url} style={{ width: "100%", height: "100%", border: "none" }} title="Site preview" />
+          </div>
+        </div>
       </div>
     );
   }
-  if (agent === "web") {
-    const url = result.url ?? result.site_url ?? result.deployment_url;
-    return typeof url === "string" && url ? (
-      <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 8, border: "1px solid rgba(30,106,255,0.22)", background: "rgba(30,106,255,0.08)", padding: "6px 10px", color: "#8BA8C8", textDecoration: "none", fontSize: 12, fontFamily: "var(--font-mono)" }}>
-        🌐 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{url}</span> <span style={{ opacity: 0.6 }}>↗</span>
-      </a>
-    ) : null;
-  }
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {entries.slice(0, 4).map(([k, v]) => (
-        <div key={k} style={{ fontSize: 12 }}>
-          <span className="site-label">{k.replace(/_/g, " ")}: </span>
-          <span style={{ color: "var(--fg)" }}>{fmt(v)}</span>
-        </div>
-      ))}
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {commits.length > 0 ? (
+        <>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)" }}>Recent commits</span>
+          {commits.map((c, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#5E9AE0" }}>●</span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>{c}</span>
+            </div>
+          ))}
+        </>
+      ) : (
+        <BuildingIndicator label="Building site…" />
+      )}
     </div>
   );
 }
 
-function AgentCard({ state }: { state: AgentState }) {
-  const label = AGENT_LABELS[state.agent] ?? state.agent;
-  const icon = AGENT_ICONS[state.agent] ?? "🤖";
+function TechnicalPreview({ state }: { state: AgentState }) {
+  const repo = (state.result?.repo_url ?? state.result?.github_url) as string | undefined;
+  const deploy = (state.result?.deployment_url ?? state.result?.project_url) as string | undefined;
+  const files = (state.result?.files_preview ?? state.result?.files_in_repo) as unknown;
+  const commits = state.commits ?? [];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {deploy && (
+        <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(30,106,255,0.2)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(0,0,0,0.3)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ display: "flex", gap: 5 }}>
+              {["#ff5f57","#febc2e","#28c840"].map(c => <div key={c} style={{ width: 10, height: 10, borderRadius: "50%", background: c }} />)}
+            </div>
+            <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.4)", flex: 1, textAlign: "center" }}>{deploy}</span>
+            <a href={deploy} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#5E9AE0", textDecoration: "none" }}>↗</a>
+          </div>
+          <div style={{ height: 260 }}>
+            <iframe src={deploy} style={{ width: "100%", height: "100%", border: "none" }} title="App preview" />
+          </div>
+        </div>
+      )}
+      {repo && (
+        <a href={repo} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", padding: "8px 12px", color: "#8BA8C8", textDecoration: "none", fontSize: 12 }}>
+          🐙 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repo}</span> <span style={{ opacity: 0.5 }}>↗</span>
+        </a>
+      )}
+      {commits.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)" }}>Commits ({commits.length})</span>
+          {commits.map((c, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "#5E9AE0" }}>{c.slice(0, 7)}</span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>round committed</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(files) && files.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 140, overflowY: "auto" }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", marginBottom: 4 }}>Files</span>
+          {(files as string[]).map((f, i) => (
+            <div key={i} style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.4)", padding: "2px 6px" }}>
+              {f.startsWith("frontend/") ? "🔷" : f.startsWith("backend/") ? "🔶" : "📄"} {f}
+            </div>
+          ))}
+        </div>
+      )}
+      {!repo && !deploy && <BuildingIndicator label="Building MVP…" />}
+    </div>
+  );
+}
+
+function DesignPreview({ state }: { state: AgentState }) {
+  const colors = extractColors(state.log);
+  const spec = state.designSpec ?? (state.result?.design_spec as string | undefined);
+  const palette = state.result?.color_palette as Record<string, string> | undefined;
+
+  const allColors = palette ? Object.values(palette).filter(v => typeof v === "string" && v.startsWith("#")) : colors;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {allColors.length > 0 && (
+        <div>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", display: "block", marginBottom: 8 }}>Color Palette</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {allColors.map((c, i) => (
+              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 10, background: c, border: "1px solid rgba(255,255,255,0.12)", boxShadow: `0 4px 12px ${c}44` }} />
+                <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.4)" }}>{c}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {palette && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {Object.entries(palette).map(([k, v]) => (
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(255,255,255,0.03)" }}>
+              {typeof v === "string" && v.startsWith("#") && <div style={{ width: 14, height: 14, borderRadius: 3, background: v, flexShrink: 0 }} />}
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", textTransform: "capitalize" }}>{k.replace(/_/g, " ")}</span>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.6)", marginLeft: "auto" }}>{String(v).slice(0, 40)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {spec && (
+        <div>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", display: "block", marginBottom: 6 }}>Design Spec</span>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 200, overflowY: "auto", padding: "8px 10px", background: "rgba(0,0,0,0.2)", borderRadius: 8 }}>
+            {typeof spec === "string" ? spec.slice(0, 600) : JSON.stringify(spec, null, 2).slice(0, 600)}
+          </div>
+        </div>
+      )}
+      {allColors.length === 0 && !spec && <BuildingIndicator label="Designing…" />}
+    </div>
+  );
+}
+
+function MarketingPreview({ state }: { state: AgentState }) {
+  const r = state.result;
+  const reel = r?.instagram_reel as string | undefined;
+  const tiktok = r?.tiktok as string | undefined;
+  const ad = r?.meta_ad as string | undefined;
+  const email = r?.email as string | undefined;
+
+  if (!r || (!reel && !tiktok && !ad && !email)) return <BuildingIndicator label="Creating content…" />;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {[["📸 Instagram Reel", reel], ["🎵 TikTok", tiktok], ["📣 Meta Ad", ad], ["📧 Email", email]].map(([label, content]) =>
+        content ? (
+          <div key={String(label)} style={{ borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: "10px 12px" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.7)", marginBottom: 6 }}>{label}</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, maxHeight: 80, overflowY: "auto", whiteSpace: "pre-wrap" }}>{String(content).slice(0, 300)}</div>
+          </div>
+        ) : null
+      )}
+    </div>
+  );
+}
+
+function LegalPreview({ state }: { state: AgentState }) {
+  const r = state.result;
+  const text = (r?.formatted_text ?? r?.content ?? r?.document_text) as string | undefined;
+  const path = (r?.path ?? r?.privacy_policy_path ?? r?.filename) as string | undefined;
+  if (!r || !text) return <BuildingIndicator label="Drafting documents…" />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {path && <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#5E9AE0", padding: "4px 8px", background: "rgba(30,106,255,0.08)", borderRadius: 6, border: "1px solid rgba(30,106,255,0.15)" }}>📄 {String(path)}</div>}
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(0,0,0,0.2)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)" }}>
+        {String(text).slice(0, 1200)}
+      </div>
+    </div>
+  );
+}
+
+function SalesPreview({ state }: { state: AgentState }) {
+  const r = state.result;
+  const lead = (r?.lead ?? r?.company) as string | undefined;
+  const seq = r?.sequence;
+  if (!r || !lead) return <BuildingIndicator label="Building outreach…" />;
+  const steps: unknown[] = Array.isArray(seq) ? seq : typeof seq === "string" ? JSON.parse(seq.startsWith("[") ? seq : "[]") : [];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(30,106,255,0.08)", border: "1px solid rgba(30,106,255,0.15)" }}>
+        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.3)", marginBottom: 3 }}>Target Lead</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{lead}</div>
+      </div>
+      {steps.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.3)" }}>Email Sequence ({steps.length} steps)</span>
+          {(steps as Record<string, unknown>[]).slice(0, 4).map((s, i) => (
+            <div key={i} style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div style={{ fontSize: 10, color: "#5E9AE0", marginBottom: 3 }}>Day {String(s.send_day ?? i + 1)}</div>
+              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--fg)" }}>{String(s.subject ?? "").slice(0, 60)}</div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{String(s.body ?? "").slice(0, 80)}…</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OpsPreview({ state }: { state: AgentState }) {
+  const r = state.result;
+  const sop = (r?.SOP ?? r?.content ?? r?.sop) as string | undefined;
+  const title = (r?.title) as string | undefined;
+  if (!r || !sop) return <BuildingIndicator label="Handling operations…" />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {title && <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{title}</div>}
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(0,0,0,0.2)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)" }}>
+        {String(sop).slice(0, 1200)}
+      </div>
+    </div>
+  );
+}
+
+function BuildingIndicator({ label }: { label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 0", color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1E6AFF", flexShrink: 0 }} className="animate-pulse" />
+      {label}
+    </div>
+  );
+}
+
+function AgentPreview({ state }: { state: AgentState }) {
+  switch (state.agent) {
+    case "research": return <ResearchPreview state={state} />;
+    case "web": return <WebPreview state={state} />;
+    case "technical": return <TechnicalPreview state={state} />;
+    case "design": return <DesignPreview state={state} />;
+    case "marketing": return <MarketingPreview state={state} />;
+    case "legal": return <LegalPreview state={state} />;
+    case "sales": return <SalesPreview state={state} />;
+    case "ops": return <OpsPreview state={state} />;
+    default: return <BuildingIndicator label="Working…" />;
+  }
+}
+
+// ── Agent detail panel ──────────────────────────────────────────────────────
+
+type DetailTab = "preview" | "plan" | "log";
+
+function AgentDetail({ state, planTask }: { state: AgentState; planTask: AgentTask | undefined }) {
+  const [tab, setTab] = useState<DetailTab>("preview");
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [state.log.length]);
 
-  const isWaiting = state.status === "waiting";
+  const p = pct(state);
   const isRunning = state.status === "running";
   const isDone = state.status === "done";
-  const isError = state.status === "error";
 
-  const borderColor = isDone ? "rgba(60,170,100,0.22)" : isRunning ? "rgba(30,106,255,0.32)" : isError ? "rgba(200,80,80,0.22)" : "rgba(255,255,255,0.08)";
-  const glowColor = isDone ? "0 0 24px rgba(60,170,100,0.06)" : isRunning ? "0 0 24px rgba(30,106,255,0.08)" : "none";
-  const dotColor = isDone ? "#6DC98A" : isRunning ? "#1E6AFF" : isError ? "#C97070" : "rgba(255,255,255,0.2)";
+  const TAB_STYLE = (active: boolean): React.CSSProperties => ({
+    fontSize: 11, fontWeight: 500, letterSpacing: "0.06em", padding: "5px 14px", borderRadius: 6,
+    cursor: "pointer", border: "none", background: active ? "rgba(30,106,255,0.18)" : "transparent",
+    color: active ? "#8BA8C8" : "rgba(255,255,255,0.35)", transition: "all 0.15s",
+  });
 
   return (
-    <article style={{
-      background: "rgba(255,255,255,0.07)",
-      backdropFilter: "blur(28px) saturate(190%)",
-      WebkitBackdropFilter: "blur(28px) saturate(190%)",
-      border: `1px solid ${borderColor}`,
-      boxShadow: `inset 0 1px 0 rgba(255,255,255,0.22), 0 8px 32px rgba(0,0,0,0.3), ${glowColor}`,
-      borderRadius: 14, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10, transition: "border-color 0.4s, box-shadow 0.4s",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", flexShrink: 0, background: dotColor, boxShadow: isRunning ? `0 0 6px ${dotColor}` : "none" }} className={isRunning ? "animate-pulse" : ""} />
-          <span style={{ fontSize: 16, lineHeight: 1 }}>{icon}</span>
-          <span style={{ fontSize: 13, fontWeight: 500, color: isWaiting ? "var(--fg-dim)" : "var(--fg)", letterSpacing: "0.01em" }}>{label}</span>
-        </div>
-        <span style={{
-          fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "var(--font-mono)",
-          color: isDone ? "#6DC98A" : isRunning ? "#8BA8C8" : isError ? "#C97070" : "rgba(255,255,255,0.25)",
-        }}>
-          {state.status}
-        </span>
-      </div>
-
-      {state.instruction && (
-        <p style={{ fontSize: 11, color: "var(--fg-mute)", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-          {state.instruction}
-        </p>
-      )}
-
-      {isRunning && state.currentAction && (
-        <div style={{ display: "flex", alignItems: "center", gap: 7, borderRadius: 8, background: "rgba(30,106,255,0.07)", padding: "6px 11px", fontSize: 11, color: "rgba(200,220,240,0.8)" }}>
-          <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#5E9AE0", flexShrink: 0 }} className="animate-pulse" />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{humanizeToolLog(state.currentAction, state.currentTool)}</span>
-        </div>
-      )}
-
-      {state.log.length > 0 && (
-        <div ref={logRef} style={{ maxHeight: 90, overflowY: "auto", borderRadius: 8, background: "rgba(0,0,0,0.25)", padding: "8px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
-          {state.log.map((entry, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 10, lineHeight: 1.5 }}>
-              <span style={{ fontFamily: "var(--font-mono)", flexShrink: 0, color: "rgba(255,255,255,0.2)", minWidth: 60 }}>
-                {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-              </span>
-              <span style={{ color: entry.type === "error" ? "#C97070" : entry.type === "result" ? "#6DC98A" : "rgba(255,255,255,0.45)" }}>{entry.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {state.status === "done" && state.result && (
-        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-          <ResultView agent={state.agent} result={state.result} />
-          {state.mirrorVerdict && (
-            <div style={{
-              borderRadius: 8,
-              background: state.mirrorVerdict === "pass" ? "rgba(60,170,100,0.06)" : state.mirrorVerdict === "block" ? "rgba(180,60,60,0.08)" : "rgba(200,140,50,0.07)",
-              border: `1px solid ${state.mirrorVerdict === "pass" ? "rgba(60,170,100,0.18)" : state.mirrorVerdict === "block" ? "rgba(180,60,60,0.2)" : "rgba(200,140,50,0.18)"}`,
-              padding: "8px 11px",
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: state.mirrorCritique ? 5 : 0 }}>
-                <span style={{ fontSize: 10, color: state.mirrorVerdict === "pass" ? "#6DC98A" : state.mirrorVerdict === "block" ? "#C97070" : "#E8A44A" }}>
-                  {state.mirrorVerdict === "pass" ? "✓" : state.mirrorVerdict === "block" ? "✗" : "⚑"}
-                </span>
-                <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase", color: state.mirrorVerdict === "pass" ? "#6DC98A" : state.mirrorVerdict === "block" ? "#C97070" : "#E8A44A" }}>
-                  Mirror · {state.mirrorVerdict}
-                </span>
-              </div>
-              {state.mirrorCritique && (
-                <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                  {state.mirrorCritique}
-                </p>
-              )}
-            </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, height: "100%" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 20 }}>{AGENT_ICONS[state.agent] ?? "🤖"}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>{AGENT_LABELS[state.agent] ?? state.agent}</span>
+            <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase", color: STATUS_COLOR[state.status] }}>{state.status}</span>
+          </div>
+          {state.instruction && (
+            <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--fg-mute)", lineHeight: 1.4 }}>{state.instruction.slice(0, 100)}</p>
           )}
         </div>
-      )}
-    </article>
-  );
-}
-
-function PlanPreview({ tasks }: { tasks: AgentTask[] }) {
-  const orderedTasks = sortAgentsByOrder(tasks);
-  return (
-    <div style={{ background: "rgba(12,20,42,0.55)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)", border: "1px solid rgba(255,255,255,0.07)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <span style={{ fontSize: 14 }}>📋</span>
-        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)" }}>Plan</span>
-        <span style={{ fontSize: 11, color: "var(--fg-mute)", marginLeft: 4 }}>{tasks.length} agents in parallel</span>
+        {/* % badge */}
+        <div style={{ position: "relative", width: 40, height: 40, flexShrink: 0 }}>
+          <svg viewBox="0 0 40 40" style={{ transform: "rotate(-90deg)" }}>
+            <circle cx="20" cy="20" r="17" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="3" />
+            <circle cx="20" cy="20" r="17" fill="none" stroke={isDone ? "#6DC98A" : "#1E6AFF"} strokeWidth="3"
+              strokeDasharray={`${2 * Math.PI * 17}`}
+              strokeDashoffset={`${2 * Math.PI * 17 * (1 - p / 100)}`}
+              style={{ transition: "stroke-dashoffset 0.6s" }} />
+          </svg>
+          <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 600, fontFamily: "var(--font-mono)", color: isDone ? "#6DC98A" : "rgba(255,255,255,0.6)" }}>{p}%</span>
+        </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {orderedTasks.map((t, i) => (
-          <div key={t.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, borderRadius: 6, border: "1px solid var(--line)", background: "rgba(255,255,255,0.02)", padding: "8px 12px" }}>
-            <span className="site-label" style={{ width: 20, flexShrink: 0, marginTop: 1 }}>{String(i + 1).padStart(2, "0")}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontSize: 12, color: "var(--fg)", display: "flex", alignItems: "center", gap: 6 }}>
-                {AGENT_ICONS[t.agent] ?? "🤖"} {AGENT_LABELS[t.agent] ?? t.agent}
-              </span>
-              <span style={{ fontSize: 11, color: "var(--fg-mute)", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{t.instruction}</span>
-            </div>
-          </div>
+
+      {/* Progress bar */}
+      <div style={{ height: 3, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+        <div style={{ height: "100%", borderRadius: 999, width: `${p}%`, background: isDone ? "linear-gradient(90deg,#3EA870,#6DC98A)" : "linear-gradient(90deg,#1E6AFF,#5E9AE0)", transition: "width 0.6s" }} />
+      </div>
+
+      {/* Current action pill */}
+      {isRunning && state.currentAction && (
+        <div style={{ display: "flex", alignItems: "center", gap: 7, borderRadius: 8, background: "rgba(30,106,255,0.07)", padding: "6px 11px", fontSize: 11, color: "rgba(200,220,240,0.8)", border: "1px solid rgba(30,106,255,0.15)" }}>
+          <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#5E9AE0", flexShrink: 0 }} className="animate-pulse" />
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {state.currentTool ? `${state.currentTool.replace(/_/g, " ")}` : state.currentAction}
+            {state.currentUrl ? ` — ${state.currentUrl.replace(/^https?:\/\//, "").slice(0, 50)}` : ""}
+          </span>
+        </div>
+      )}
+
+      {/* Sub-tabs */}
+      <div style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 8 }}>
+        {(["preview", "plan", "log"] as DetailTab[]).map(t => (
+          <button key={t} onClick={() => setTab(t)} style={TAB_STYLE(tab === t)}>{t.charAt(0).toUpperCase() + t.slice(1)}</button>
         ))}
+      </div>
+
+      {/* Tab content */}
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        {tab === "preview" && <AgentPreview state={state} />}
+
+        {tab === "plan" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {planTask && (
+              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.3)", marginBottom: 5 }}>Task instruction</div>
+                <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.6 }}>{planTask.instruction}</p>
+              </div>
+            )}
+            {state.result && (
+              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.3)", marginBottom: 5 }}>Output</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {Object.entries(state.result).filter(([, v]) => v !== null && v !== undefined).slice(0, 8).map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", gap: 8, fontSize: 11 }}>
+                      <span style={{ color: "rgba(255,255,255,0.3)", minWidth: 100, flexShrink: 0 }}>{k.replace(/_/g, " ")}</span>
+                      <span style={{ color: "rgba(255,255,255,0.65)", wordBreak: "break-all" }}>{typeof v === "string" ? v.slice(0, 120) : JSON.stringify(v).slice(0, 80)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "log" && (
+          <div ref={logRef} style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 380, overflowY: "auto" }}>
+            {state.log.length === 0 && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>Waiting to start…</span>}
+            {state.log.map((entry, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 10, lineHeight: 1.5, padding: "2px 0" }}>
+                <span style={{ fontFamily: "var(--font-mono)", flexShrink: 0, color: "rgba(255,255,255,0.2)", minWidth: 56 }}>
+                  {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+                <span style={{ color: entry.type === "error" ? "#C97070" : entry.type === "result" ? "#6DC98A" : "rgba(255,255,255,0.45)" }}>{entry.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function CompletionSummary({ agents, instruction }: { agents: Record<string, AgentState>; instruction: string }) {
-  const artifacts = extractArtifacts(agents);
-  const doneCount = Object.values(agents).filter(a => a.status === "done").length;
+// ── Sidebar agent list ──────────────────────────────────────────────────────
+
+function AgentSidebar({ agentList, agents, activeAgent, onSelect }: {
+  agentList: string[];
+  agents: Record<string, AgentState>;
+  activeAgent: string;
+  onSelect: (a: string) => void;
+}) {
   return (
-    <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(24px) saturate(180%)", WebkitBackdropFilter: "blur(24px) saturate(180%)", border: "1px solid rgba(60,170,100,0.28)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.16), 0 0 30px rgba(60,170,100,0.06)", borderRadius: 12, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span style={{ fontSize: 16 }}>✦</span>
-          <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>Complete</span>
-          <span style={{ fontSize: 11, color: "var(--fg-mute)" }}>{doneCount} agents · {artifacts.length} artifacts</span>
-        </div>
-        {instruction && (
-          <p style={{ fontSize: 12, color: "var(--fg-mute)", fontStyle: "italic", borderLeft: "2px solid rgba(30,106,255,0.28)", paddingLeft: 10, margin: 0 }}>
-            &ldquo;{instruction.slice(0, 120)}{instruction.length > 120 ? "…" : ""}&rdquo;
-          </p>
-        )}
-      </div>
-      {artifacts.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {artifacts.map((art, i) => art.href ? (
-            <a key={i} href={art.href} target="_blank" rel="noopener noreferrer"
-              style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", padding: "10px 14px", textDecoration: "none", transition: "all 0.15s" }}>
-              <span style={{ fontSize: 18 }}>{art.icon}</span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 10, color: "var(--fg-mute)", letterSpacing: "0.1em", textTransform: "uppercase" }}>{art.label}</div>
-                <div style={{ fontSize: 12, color: "#8BA8C8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono)" }}>{art.value}</div>
-              </div>
-              <span style={{ marginLeft: "auto", color: "var(--fg-mute)", fontSize: 14 }}>↗</span>
-            </a>
-          ) : (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 8, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)", padding: "10px 14px" }}>
-              <span style={{ fontSize: 18 }}>{art.icon}</span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 10, color: "var(--fg-mute)", letterSpacing: "0.1em", textTransform: "uppercase" }}>{art.label}</div>
-                <div style={{ fontSize: 12, color: "var(--fg)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{art.value}</div>
-              </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {agentList.map(name => {
+        const state = agents[name];
+        const status = state?.status ?? "waiting";
+        const isActive = name === activeAgent;
+        const p = state ? pct(state) : 0;
+        return (
+          <button key={name} onClick={() => onSelect(name)} style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, border: "none",
+            background: isActive ? "rgba(30,106,255,0.14)" : "transparent",
+            cursor: "pointer", textAlign: "left", transition: "background 0.15s",
+            outline: isActive ? "1px solid rgba(30,106,255,0.35)" : "none",
+          }}>
+            <div style={{ position: "relative", width: 28, height: 28, flexShrink: 0 }}>
+              <svg viewBox="0 0 28 28" style={{ transform: "rotate(-90deg)", width: 28, height: 28 }}>
+                <circle cx="14" cy="14" r="11" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="2.5" />
+                <circle cx="14" cy="14" r="11" fill="none" stroke={status === "done" ? "#6DC98A" : status === "running" ? "#1E6AFF" : status === "error" ? "#C97070" : "transparent"}
+                  strokeWidth="2.5"
+                  strokeDasharray={`${2 * Math.PI * 11}`}
+                  strokeDashoffset={`${2 * Math.PI * 11 * (1 - p / 100)}`}
+                  style={{ transition: "stroke-dashoffset 0.5s" }} />
+              </svg>
+              <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>{AGENT_ICONS[name] ?? "🤖"}</span>
             </div>
-          ))}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 8, paddingTop: 4, borderTop: "1px solid var(--line)" }}>
-        <Link href="/dashboard" className="site-btn site-btn-accent" style={{ fontSize: 13, padding: "0 18px" }}>New goal →</Link>
-        <Link href="/dashboard/integrations" className="site-btn site-btn-ghost" style={{ fontSize: 13, padding: "0 18px" }}>Manage accounts</Link>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: isActive ? "var(--fg)" : "rgba(255,255,255,0.55)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {AGENT_LABELS[name] ?? name}
+              </div>
+              <div style={{ fontSize: 10, color: STATUS_COLOR[status] ?? "rgba(255,255,255,0.2)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{status}</div>
+            </div>
+            {status === "running" && (
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#1E6AFF", flexShrink: 0 }} className="animate-pulse" />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Steer + Ask panels (unchanged) ─────────────────────────────────────────
+
+function SteerPanel({ sessionId, isRunning }: { sessionId: string; isRunning: boolean }) {
+  const [msg, setMsg] = useState("");
+  const [sent, setSent] = useState(false);
+  if (!isRunning) return null;
+  const send = async () => {
+    if (!msg.trim()) return;
+    await fetch(`${BASE}/steer/${sessionId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: msg }) });
+    setSent(true); setMsg(""); setTimeout(() => setSent(false), 2000);
+  };
+  return (
+    <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(0,0,0,0.25)", padding: "12px 14px" }}>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Steer agents mid-run</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && send()}
+          placeholder="e.g. focus on B2B customers"
+          style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "7px 12px", fontSize: 12, color: "var(--fg)", outline: "none" }} />
+        <button onClick={send} style={{ padding: "7px 14px", borderRadius: 8, background: sent ? "#3EA870" : "rgba(30,106,255,0.7)", border: "none", color: "#fff", fontSize: 12, cursor: "pointer" }}>
+          {sent ? "Sent" : "Send"}
+        </button>
       </div>
     </div>
   );
 }
 
 function AskPanel({ sessionId, founderId }: { sessionId: string; founderId: string }) {
-  const [target, setTarget] = useState("research");
-  const [question, setQuestion] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [response, setResponse] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function ask(e: React.FormEvent) {
-    e.preventDefault();
-    if (!question.trim()) return;
-    setLoading(true);
-    setError(null);
-    setResponse(null);
-    try {
-      const res = await fetch(`${BASE}/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_agent: target, question, founder_id: founderId, context: `session_id: ${sessionId}` }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setResponse(typeof data.response === "string" ? data.response : JSON.stringify(data.response, null, 2));
-      setQuestion("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Ask failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  const [msg, setMsg] = useState(""); const [reply, setReply] = useState(""); const [loading, setLoading] = useState(false);
+  const ask = async () => {
+    if (!msg.trim()) return;
+    setLoading(true); setReply("");
+    const r = await fetch(`${BASE}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, founder_id: founderId, question: msg }) });
+    const d = await r.json(); setReply(d.answer ?? d.response ?? JSON.stringify(d)); setLoading(false);
+  };
   return (
-    <div style={{ background: "rgba(12,20,42,0.55)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)", border: "1px solid rgba(255,255,255,0.07)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 12, marginBottom: 12 }}>
-        <span style={{ fontSize: 14 }}>💬</span>
-        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)" }}>Ask an agent</span>
-        <span style={{ fontSize: 11, color: "var(--fg-mute)", marginLeft: "auto" }}>Follow-up after run</span>
-      </div>
-      <form onSubmit={ask} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", gap: 8 }}>
-          <select value={target} onChange={e => setTarget(e.target.value)}
-            className="site-input" style={{ padding: "8px 10px", fontSize: 12, width: 140, flexShrink: 0, background: "rgba(255,255,255,0.04)" }}>
-            {Object.entries(AGENT_LABELS).map(([k, v]) => (
-              <option key={k} value={k} style={{ background: "#0d1117" }}>{v}</option>
-            ))}
-          </select>
-          <input value={question} onChange={e => setQuestion(e.target.value)}
-            placeholder="What competitors should I watch?"
-            className="site-input" style={{ padding: "8px 12px", fontSize: 12, flex: 1 }}
-            disabled={loading} />
-          <button type="submit" disabled={loading || !question.trim()}
-            className="site-btn site-btn-primary" style={{ padding: "0 16px", fontSize: 13, flexShrink: 0 }}>
-            {loading ? "…" : "Ask →"}
-          </button>
-        </div>
-        {error && <p style={{ fontSize: 11, color: "#C97070" }}>{error}</p>}
-        {response && (
-          <div style={{ borderRadius: 8, border: "1px solid var(--line)", background: "rgba(255,255,255,0.03)", padding: "12px 14px", fontSize: 12, color: "var(--fg-dim)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
-            {response}
-          </div>
-        )}
-      </form>
-    </div>
-  );
-}
-
-function SteerPanel({ sessionId, isRunning }: { sessionId: string; isRunning: boolean }) {
-  const [message, setMessage] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState<string[]>([]);
-
-  async function steer(e: React.FormEvent) {
-    e.preventDefault();
-    const msg = message.trim();
-    if (!msg) return;
-    setSending(true);
-    try {
-      await fetch(`${BASE}/steer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, message: msg }),
-      });
-      setSent(prev => [...prev, msg]);
-      setMessage("");
-    } catch {
-      /* ignore */
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(24px) saturate(180%)", WebkitBackdropFilter: "blur(24px) saturate(180%)", border: "1px solid rgba(30,106,255,0.20)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)", borderRadius: 12, padding: "14px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 10, marginBottom: 12 }}>
-        <span style={{ fontSize: 14 }}>✦</span>
-        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)" }}>Steer</span>
-        <span style={{ fontSize: 11, color: "var(--fg-mute)", marginLeft: "auto" }}>
-          {isRunning ? "Live — agents will pick up your directive" : "Run finished"}
-        </span>
-      </div>
-
-      {sent.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
-          {sent.map((m, i) => (
-            <div key={i} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "rgba(30,106,255,0.08)", color: "rgba(200,220,240,0.8)", borderLeft: "2px solid rgba(30,106,255,0.35)" }}>
-              {m}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <form onSubmit={steer} style={{ display: "flex", gap: 8 }}>
-        <input
-          value={message}
-          onChange={e => setMessage(e.target.value)}
-          placeholder={isRunning ? "Focus on B2B SaaS companies only…" : "Run a new goal to steer"}
-          disabled={!isRunning || sending}
-          className="site-input"
-          style={{ flex: 1, padding: "8px 12px", fontSize: 12 }}
-        />
-        <button type="submit" disabled={!isRunning || sending || !message.trim()}
-          className="site-btn site-btn-primary" style={{ padding: "0 16px", fontSize: 13, flexShrink: 0 }}>
-          {sending ? "…" : "Send →"}
+    <div style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(0,0,0,0.25)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>Ask about your results</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={msg} onChange={e => setMsg(e.target.value)} onKeyDown={e => e.key === "Enter" && ask()}
+          placeholder="What are the top competitors?"
+          style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "7px 12px", fontSize: 12, color: "var(--fg)", outline: "none" }} />
+        <button onClick={ask} style={{ padding: "7px 14px", borderRadius: 8, background: "rgba(30,106,255,0.7)", border: "none", color: "#fff", fontSize: 12, cursor: "pointer" }}>
+          {loading ? "…" : "Ask"}
         </button>
-      </form>
+      </div>
+      {reply && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", lineHeight: 1.6, padding: "8px 10px", background: "rgba(0,0,0,0.2)", borderRadius: 8 }}>{reply}</div>}
     </div>
   );
 }
+
+// ── Main page ───────────────────────────────────────────────────────────────
 
 export default function GoalPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: sessionId } = use(params);
@@ -441,6 +592,7 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
 
   const [agents, setAgents] = useState<Record<string, AgentState>>({});
   const [planTasks, setPlanTasks] = useState<AgentTask[]>([]);
+  const [activeAgent, setActiveAgent] = useState<string>("");
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
@@ -452,103 +604,101 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     if (!sessionId || sessionId === "undefined") return;
     const es = streamGoal(sessionId);
-    es.onopen = () => {
-      setConnected(true);
-      setReconnecting(false);
-      errorCount.current = 0;
-      everConnected.current = true;
-    };
+    es.onopen = () => { setConnected(true); setReconnecting(false); errorCount.current = 0; everConnected.current = true; };
     es.onerror = () => {
-      setConnected(false);
-      errorCount.current += 1;
-      if (errorCount.current >= 5) {
-        setError(everConnected.current ? "Connection lost — refresh to reconnect." : "Could not connect. Is the backend running?");
-      } else {
-        setReconnecting(true);
-      }
+      setConnected(false); errorCount.current += 1;
+      if (errorCount.current >= 5) setError(everConnected.current ? "Connection lost — refresh to reconnect." : "Could not connect. Is the backend running?");
+      else setReconnecting(true);
     };
 
     es.onmessage = (e) => {
       const event = JSON.parse(e.data);
-      if (event.type === "ping") return;
-      if (event.type === "founder_steer") return;
+      if (event.type === "ping" || event.type === "founder_steer") return;
       if (event.type === "session_expired") { setError("Session expired — backend was restarted. Run a new goal."); es.close(); return; }
 
       setAgents((prev) => {
         const next = { ...prev };
+        const SEARCH_TOOLS = new Set(["web_search", "search_and_read", "news_search", "fetch_page", "patent_search", "search_and_fetch", "fetch_and_read", "research_papers"]);
 
         if (event.type === "plan_done") {
           setPlanTasks(event.tasks);
           for (const t of event.tasks) {
-            next[t.agent] = { task_id: t.id, agent: t.agent, instruction: t.instruction, status: "waiting", currentAction: null, currentTool: null, reasoning: null, result: null, log: [] };
+            next[t.agent] = { task_id: t.id, agent: t.agent, instruction: t.instruction, status: "waiting", currentAction: null, currentTool: null, reasoning: null, result: null, log: [], visitedUrls: [], commits: [] };
           }
+          // Auto-select first running agent
+          if (!activeAgent && event.tasks.length > 0) setActiveAgent(event.tasks[0].agent);
           return next;
         }
 
         const agent = event.agent;
         if (!agent) return next;
 
-        const cur = next[agent] ?? { task_id: "", agent, instruction: "", status: "waiting" as const, currentAction: null, currentTool: null, reasoning: null, result: null, log: [] };
+        const cur: AgentState = next[agent] ?? { task_id: "", agent, instruction: "", status: "waiting", currentAction: null, currentTool: null, reasoning: null, result: null, log: [], visitedUrls: [], commits: [] };
         const addLog = (type: string, text: string): LogEntry[] => [...cur.log, { ts: Date.now(), type, text }];
 
-        const SEARCH_TOOLS = new Set(["web_search", "search_and_read", "news_search", "fetch_page", "patent_search", "search_and_fetch", "fetch_and_read", "research_papers"]);
-
         if (event.type === "agent_start") {
+          setActiveAgent(agent);
           next[agent] = { ...cur, status: "running", instruction: event.instruction ?? cur.instruction, task_id: event.task_id ?? cur.task_id, log: addLog("info", "Started") };
         } else if (event.type === "agent_action") {
-          const baseText = humanizeToolLog(event.action, event.tool);
           const rawArgs = event.args;
-          const argsStr = typeof rawArgs === "string" ? rawArgs : (rawArgs?.query ?? rawArgs?.url ?? rawArgs?.url ?? null);
-          const text = argsStr && event.tool && SEARCH_TOOLS.has(event.tool) ? `${baseText}: "${String(argsStr).slice(0, 80)}"` : baseText;
-          next[agent] = { ...cur, currentAction: event.action, currentTool: event.tool ?? null, reasoning: event.reasoning ?? null, log: addLog("action", text) };
+          const argsStr = typeof rawArgs === "string" ? rawArgs : (rawArgs?.query ?? rawArgs?.url ?? null);
+          const isFetch = event.tool === "fetch_and_read" || event.tool === "fetch_page";
+          const urlArg = isFetch ? (rawArgs?.url ?? argsStr ?? "") : "";
+          const text = argsStr && event.tool && SEARCH_TOOLS.has(event.tool)
+            ? `${event.tool.replace(/_/g, " ")}: "${String(argsStr).slice(0, 80)}"` : event.tool ?? event.action;
+          next[agent] = {
+            ...cur,
+            currentAction: event.action, currentTool: event.tool ?? null, reasoning: event.reasoning ?? null,
+            currentUrl: urlArg || cur.currentUrl,
+            log: addLog("action", text),
+          };
         } else if (event.type === "agent_action_result") {
           const ok = !event.result?.error;
           let text: string;
+          let newUrl: string | undefined;
           if (!ok) {
             text = `✗ ${event.tool}: ${event.result?.error ?? "failed"}`;
           } else if (SEARCH_TOOLS.has(event.tool)) {
-            // Show first URL found in result
             const resultStr = typeof event.result === "string" ? event.result : JSON.stringify(event.result ?? "");
             const urlMatch = resultStr.match(/https?:\/\/[^\s"')\]]+/);
-            const snippet = resultStr.slice(0, 120).replace(/\n/g, " ").trim();
-            text = urlMatch ? `✓ Read ${urlMatch[0].slice(0, 70)}…` : `✓ ${snippet || TOOL_DESCRIPTIONS[event.tool] ?? event.tool}`;
+            newUrl = urlMatch?.[0]?.replace(/[.,;]+$/, "");
+            text = newUrl ? `✓ Read ${newUrl.slice(0, 70)}…` : `✓ ${resultStr.slice(0, 80).replace(/\n/g, " ")}`;
           } else {
             text = `✓ ${TOOL_DESCRIPTIONS[event.tool] ?? event.tool ?? "Done"}`;
           }
-          next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text) };
+          const newVisited = newUrl ? [...(cur.visitedUrls ?? []), newUrl] : cur.visitedUrls;
+          // Extract commit SHA from run_mvp_loop/run_claude_in_repo results
+          const newCommit = event.result?.commit ?? event.result?.commits;
+          const newCommits = newCommit
+            ? [...(cur.commits ?? []), ...(Array.isArray(newCommit) ? newCommit : [String(newCommit)])]
+            : cur.commits;
+          next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text), visitedUrls: newVisited, currentUrl: newUrl ?? cur.currentUrl, commits: newCommits };
         } else if (event.type === "agent_thinking") {
           next[agent] = { ...cur, log: addLog("info", `Thinking… (step ${event.iteration})`) };
         } else if (event.type === "agent_done") {
-          next[agent] = { ...cur, status: "done", currentAction: null, currentTool: null, result: event.result ?? {}, log: addLog("result", "Complete") };
+          const result = event.result ?? {};
+          const previewUrl = (result.url ?? result.deployment_url ?? result.project_url ?? result.github_url) as string | undefined;
+          next[agent] = { ...cur, status: "done", currentAction: null, currentTool: null, result, previewUrl, log: addLog("result", "Complete") };
         } else if (event.type === "agent_error") {
           next[agent] = { ...cur, status: "error", log: addLog("error", event.error ?? "Error") };
         } else if (event.type === "mirror_verdict") {
           next[agent] = { ...cur, mirrorVerdict: event.verdict, mirrorCritique: event.critique };
-        } else if (event.type === "goal_done") {
-          setDone(true);
-        } else if (event.type === "goal_error") {
-          setError(event.error ?? "Unknown error");
-        }
+        } else if (event.type === "goal_done") { setDone(true); }
+        else if (event.type === "goal_error") { setError(event.error ?? "Unknown error"); }
 
         return next;
       });
     };
-
     return () => es.close();
   }, [sessionId]);
 
   useEffect(() => {
     if (!done || notified.current) return;
     notified.current = true;
-    const arts = extractArtifacts(agents);
-    updateSession(sessionId, { status: "done", artifacts: arts });
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      new Notification("Astra — goal complete", {
-        body: `Your company is live. ${arts.length} artifacts ready.`,
-        icon: "/favicon.ico",
-      });
+      new Notification("Astra — goal complete", { body: "Your company is live.", icon: "/favicon.ico" });
     }
-  }, [done, agents, sessionId]);
+  }, [done, sessionId]);
 
   const agentList = planTasks.length > 0 ? sortAgentNamesByOrder(planTasks.map(t => t.agent)) : AGENT_ORDER;
   const doneCount = Object.values(agents).filter(a => a.status === "done").length;
@@ -556,17 +706,20 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
 
   const visibleAgents: Record<string, AgentState> = { ...agents };
   for (const a of agentList) {
-    if (!visibleAgents[a]) visibleAgents[a] = { task_id: "", agent: a, instruction: "", status: "waiting", currentAction: null, currentTool: null, reasoning: null, result: null, log: [] };
+    if (!visibleAgents[a]) visibleAgents[a] = { task_id: "", agent: a, instruction: "", status: "waiting", currentAction: null, currentTool: null, reasoning: null, result: null, log: [], visitedUrls: [], commits: [] };
   }
 
+  const selected = activeAgent || agentList[0] || "";
+  const selectedState = visibleAgents[selected];
+  const selectedPlanTask = planTasks.find(t => t.agent === selected);
   const title = company || instruction.slice(0, 48) || "Goal";
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Compact header */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: "var(--fg)", margin: 0, lineHeight: 1.2 }}>{title}</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 600, color: "var(--fg)", margin: 0 }}>{title}</h1>
           <span style={{
             fontSize: 11, letterSpacing: "0.08em", padding: "3px 10px", borderRadius: 999,
             color: done ? "#6DC98A" : error ? "#C97070" : reconnecting ? "#C9A870" : connected ? "#8BA8C8" : "var(--fg-mute)",
@@ -577,62 +730,45 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
           </span>
           <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-mono)" }}>{sessionId}</span>
         </div>
-
-        {instruction && (
-          <p style={{ fontSize: 12, color: "var(--fg-mute)", margin: 0, lineHeight: 1.5, borderLeft: "2px solid rgba(30,106,255,0.3)", paddingLeft: 10 }}>
-            {instruction.slice(0, 140)}{instruction.length > 140 ? "…" : ""}
-          </p>
-        )}
-
-        {/* Progress bar */}
         {total > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ flex: 1, height: 4, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-              <div style={{
-                height: "100%", borderRadius: 999, transition: "width 0.7s",
-                width: `${(doneCount / total) * 100}%`,
-                background: done ? "linear-gradient(90deg,#3EA870,#6DC98A)" : "linear-gradient(90deg,#1E6AFF,#5E9AE0)",
-              }} />
+            <div style={{ flex: 1, height: 3, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+              <div style={{ height: "100%", borderRadius: 999, transition: "width 0.7s", width: `${(doneCount / total) * 100}%`, background: done ? "linear-gradient(90deg,#3EA870,#6DC98A)" : "linear-gradient(90deg,#1E6AFF,#5E9AE0)" }} />
             </div>
-            <span style={{ fontSize: 12, color: "var(--fg-dim)", flexShrink: 0, fontFamily: "var(--font-mono)" }}>{doneCount}/{total}</span>
+            <span style={{ fontSize: 11, color: "var(--fg-dim)", flexShrink: 0, fontFamily: "var(--font-mono)" }}>{doneCount}/{total}</span>
           </div>
         )}
-
-        {/* Planning spinner */}
         {total === 0 && connected && !error && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--fg-mute)" }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1E6AFF", flexShrink: 0 }} className="animate-pulse" />
-            Planner breaking goal into tasks… (~30–60s)
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1E6AFF" }} className="animate-pulse" />
+            Planner building task graph…
           </div>
         )}
-
-        {error && (
-          <p style={{ borderRadius: 8, border: "1px solid rgba(180,60,60,0.35)", background: "rgba(80,20,20,0.3)", padding: "8px 14px", fontSize: 12, color: "#fca5a5", margin: 0 }}>{error}</p>
-        )}
+        {error && <p style={{ borderRadius: 8, border: "1px solid rgba(180,60,60,0.35)", background: "rgba(80,20,20,0.3)", padding: "8px 14px", fontSize: 12, color: "#fca5a5", margin: 0 }}>{error}</p>}
       </div>
 
-      {/* Completion summary */}
-      {done && <CompletionSummary agents={visibleAgents} instruction={instruction} />}
+      {/* Main layout: sidebar + detail */}
+      {agentList.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 12, alignItems: "start" }}>
+          {/* Sidebar */}
+          <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.04)", padding: "8px", display: "flex", flexDirection: "column", gap: 2 }}>
+            <AgentSidebar agentList={agentList} agents={visibleAgents} activeAgent={selected} onSelect={setActiveAgent} />
+          </div>
 
-      {/* Plan preview — while running */}
-      {planTasks.length > 0 && !done && <PlanPreview tasks={planTasks} />}
-
-      {/* Agent grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10 }}>
-        {agentList.map((agent) => (
-          <AgentCard key={agent} state={visibleAgents[agent]} />
-        ))}
-      </div>
-
-      {/* Steer panel — live while running */}
-      {connected && !error && (
-        <SteerPanel sessionId={sessionId} isRunning={!done} />
+          {/* Detail panel */}
+          <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.04)", padding: "18px 20px", minHeight: 480 }}>
+            {selectedState ? (
+              <AgentDetail state={selectedState} planTask={selectedPlanTask} />
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: "rgba(255,255,255,0.25)", fontSize: 13 }}>Select an agent</div>
+            )}
+          </div>
+        </div>
       )}
 
-      {/* Ask panel — follow-up after done */}
-      {planTasks.length > 0 && (
-        <AskPanel sessionId={sessionId} founderId={founderId} />
-      )}
+      {/* Bottom panels */}
+      {connected && !error && <SteerPanel sessionId={sessionId} isRunning={!done} />}
+      {planTasks.length > 0 && <AskPanel sessionId={sessionId} founderId={founderId} />}
     </div>
   );
 }
