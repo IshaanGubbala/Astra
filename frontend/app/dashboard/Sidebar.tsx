@@ -18,28 +18,34 @@ function timeAgo(ts: number): string {
 }
 
 function statusColor(status: SessionRecord["status"]) {
-  if (status === "done") return "#3D9E5F";
-  if (status === "error") return "#C0392B";
-  return "#2563EB";
+  if (status === "done") return "#5a9e72";
+  if (status === "error") return "#b05555";
+  return "#7a7777";
 }
 
 const NAV = [
-  { href: "/dashboard", label: "Overview", icon: "⊞" },
-  { href: "/dashboard/goals", label: "Goals", icon: "◎" },
-  { href: "/dashboard/artifacts", label: "Artifacts", icon: "⬡" },
-  { href: "/dashboard/knowledge", label: "Knowledge", icon: "◈" },
+  { href: "/dashboard",             label: "Overview",     icon: "○" },
+  { href: "/dashboard/goals",       label: "Goals",        icon: "◇" },
+  { href: "/dashboard/artifacts",   label: "Artifacts",    icon: "□" },
+  { href: "/dashboard/knowledge",   label: "Knowledge",    icon: "△" },
 ];
 
 const BOTTOM_NAV = [
-  { href: "/dashboard/integrations", label: "Integrations", icon: "⚡" },
-  { href: "/dashboard/settings", label: "Settings", icon: "⊙" },
+  { href: "/dashboard/integrations", label: "Integrations", icon: "+" },
+  { href: "/dashboard/settings",     label: "Settings",     icon: "≡" },
 ];
+
+const GLASS: React.CSSProperties = {
+  background: "rgba(255,255,255,0.60)",
+  backdropFilter: "blur(22px) saturate(160%)",
+  WebkitBackdropFilter: "blur(22px) saturate(160%)",
+};
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
+  const router   = useRouter();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
-  const [mounted, setMounted] = useState(false);
+  const [mounted,  setMounted]  = useState(false);
 
   useEffect(() => {
     setSessions(getSessions());
@@ -60,63 +66,70 @@ export default function Sidebar() {
 
   return (
     <aside style={{
-      width: 240,
+      width: 232,
       flexShrink: 0,
       display: "flex",
       flexDirection: "column",
       height: "100%",
       overflow: "hidden",
-      borderRight: "1px solid rgba(0,0,0,0.09)",
-      background: "#FFFFFF",
+      borderRight: "1px solid rgba(255,255,255,0.65)",
+      boxShadow: "1px 0 0 rgba(0,0,0,0.04)",
+      ...GLASS,
     }}>
 
       {/* Brand */}
-      <div style={{ padding: "18px 16px 14px", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
-        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none" }}>
+      <div style={{ padding: "20px 16px 16px", borderBottom: "1px solid rgba(255,255,255,0.55)" }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
           <span style={{
-            width: 22, height: 22, borderRadius: 5, flexShrink: 0,
-            background: "var(--fg)", color: "#FFFFFF",
+            width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+            background: "rgba(30,28,28,0.92)", color: "rgba(255,255,255,0.94)",
             display: "grid", placeItems: "center",
             fontSize: 13, fontWeight: 600, lineHeight: 1,
           }}>A</span>
-          <span style={{ fontSize: 12, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--fg)", fontFamily: "var(--font-geist-sans)", fontWeight: 500 }}>
+          <span style={{ fontSize: 12, letterSpacing: "0.16em", textTransform: "uppercase", color: "#1e1c1c", fontWeight: 500 }}>
             Astra
           </span>
         </Link>
       </div>
 
       {/* New goal */}
-      <div style={{ padding: "10px 10px 6px" }}>
+      <div style={{ padding: "12px 12px 8px" }}>
         <Link href="/dashboard" style={{
           display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-          padding: "7px 0", borderRadius: 999, fontSize: 13, fontWeight: 500,
-          background: "var(--fg)", color: "#FFFFFF", textDecoration: "none",
-          transition: "opacity 0.15s",
+          padding: "9px 16px", borderRadius: 8, fontSize: 13, fontWeight: 500,
+          background: "rgba(30,28,28,0.90)", color: "rgba(255,255,255,0.94)",
+          textDecoration: "none", letterSpacing: "0.01em",
+          border: "1px solid rgba(0,0,0,0.08)",
+          transition: "opacity 0.18s ease",
         }}
-          onMouseEnter={e => (e.currentTarget.style.opacity = "0.85")}
+          onMouseEnter={e => (e.currentTarget.style.opacity = "0.84")}
           onMouseLeave={e => (e.currentTarget.style.opacity = "1")}
         >
-          <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> New goal
+          + New goal
         </Link>
       </div>
 
       {/* Primary nav */}
       <nav style={{ padding: "4px 8px 0" }}>
         {NAV.map(({ href, label, icon }) => {
-          const active = href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
+          const active = href === "/dashboard"
+            ? pathname === "/dashboard"
+            : pathname.startsWith(href);
           return (
             <Link key={href} href={href} style={{
-              display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
-              borderRadius: 7, marginBottom: 1, textDecoration: "none",
-              fontSize: 13, color: active ? "var(--fg)" : "var(--fg-mute)",
-              background: active ? "rgba(0,0,0,0.07)" : "transparent",
-              fontWeight: active ? 500 : 400,
-              transition: "background 0.12s, color 0.12s",
+              display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+              borderRadius: 8, marginBottom: 1, textDecoration: "none",
+              fontSize: 13, fontWeight: active ? 500 : 400,
+              color: active ? "#1e1c1c" : "#7a7777",
+              background: active ? "rgba(255,255,255,0.52)" : "transparent",
+              boxShadow: active ? "0 1px 3px rgba(0,0,0,0.05)" : "none",
+              border: active ? "1px solid rgba(255,255,255,0.62)" : "1px solid transparent",
+              transition: "background 0.15s ease, color 0.15s ease",
             }}
-              onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.04)"; }}
-              onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              onMouseEnter={e => { if (!active) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.32)"; (e.currentTarget as HTMLElement).style.color = "#1e1c1c"; } }}
+              onMouseLeave={e => { if (!active) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#7a7777"; } }}
             >
-              <span style={{ fontSize: 13, opacity: active ? 0.8 : 0.4, width: 18, textAlign: "center" }}>{icon}</span>
+              <span style={{ fontSize: 11, opacity: active ? 0.7 : 0.4, width: 16, textAlign: "center", fontFamily: "monospace" }}>{icon}</span>
               {label}
             </Link>
           );
@@ -124,18 +137,24 @@ export default function Sidebar() {
       </nav>
 
       {/* Divider */}
-      <div style={{ margin: "10px 12px", height: 1, background: "rgba(0,0,0,0.07)" }} />
+      <div style={{ margin: "10px 12px", height: 1, background: "rgba(255,255,255,0.55)" }} />
 
       {/* Recent runs */}
       <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 10px", marginBottom: 4 }}>
-          <p style={{ fontSize: 9, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(0,0,0,0.3)", margin: 0, fontFamily: "var(--font-jetbrains-mono)" }}>Recent</p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 10px", marginBottom: 6 }}>
+          <p style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "#a09d9d", margin: 0, fontFamily: "var(--font-jetbrains-mono)" }}>Recent</p>
           {mounted && recentSessions.length > 0 && (
-            <button onClick={() => { localStorage.removeItem("astra_sessions"); setSessions([]); }} style={{ background: "none", border: "none", fontSize: 9, color: "rgba(0,0,0,0.3)", cursor: "pointer", padding: 0, letterSpacing: "0.06em" }}>clear all</button>
+            <button
+              onClick={() => { localStorage.removeItem("astra_sessions"); setSessions([]); }}
+              style={{ background: "none", border: "none", fontSize: 9, color: "#a09d9d", cursor: "pointer", padding: 0, letterSpacing: "0.06em", transition: "color 0.15s" }}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = "#7a7777")}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = "#a09d9d")}
+            >clear</button>
           )}
         </div>
+
         {!mounted || recentSessions.length === 0 ? (
-          <p style={{ fontSize: 12, color: "rgba(0,0,0,0.3)", padding: "8px 10px", lineHeight: 1.5 }}>No runs yet.</p>
+          <p style={{ fontSize: 12, color: "#a09d9d", padding: "8px 10px", lineHeight: 1.5, margin: 0 }}>No runs yet.</p>
         ) : recentSessions.map(s => {
           const isActive = pathname.includes(s.sessionId);
           const label = s.companyName || s.instruction.slice(0, 28);
@@ -144,24 +163,26 @@ export default function Sidebar() {
               key={s.sessionId}
               href={`/dashboard/goal/${s.sessionId}?instruction=${encodeURIComponent(s.instruction)}&founder=${encodeURIComponent(s.founderId)}&company=${encodeURIComponent(s.companyName)}`}
               style={{
-                display: "flex", alignItems: "center", gap: 8, borderRadius: 7,
-                padding: "6px 10px", textDecoration: "none", marginBottom: 1,
-                background: isActive ? "rgba(0,0,0,0.07)" : "transparent",
-                transition: "background 0.12s",
+                display: "flex", alignItems: "center", gap: 8, borderRadius: 8,
+                padding: "7px 10px", textDecoration: "none", marginBottom: 1,
+                background: isActive ? "rgba(255,255,255,0.52)" : "transparent",
+                border: isActive ? "1px solid rgba(255,255,255,0.62)" : "1px solid transparent",
+                boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.05)" : "none",
+                transition: "background 0.15s ease",
               }}
-              onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.04)"; }}
+              onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.32)"; }}
               onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
             >
               <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: statusColor(s.status) }} />
-              <span style={{ flex: 1, fontSize: 12, color: isActive ? "var(--fg)" : "var(--fg-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.3 }}>
+              <span style={{ flex: 1, fontSize: 12, color: isActive ? "#1e1c1c" : "#7a7777", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.3 }}>
                 {label}
               </span>
-              <span style={{ fontSize: 10, color: "rgba(0,0,0,0.3)", flexShrink: 0, fontFamily: "var(--font-jetbrains-mono)" }}>
+              <span style={{ fontSize: 10, color: "#a09d9d", flexShrink: 0, fontFamily: "var(--font-jetbrains-mono)" }}>
                 {timeAgo(s.startedAt)}
               </span>
               <button
                 onClick={e => remove(e, s.sessionId)}
-                style={{ display: "none", background: "none", border: "none", padding: "0 2px", color: "rgba(0,0,0,0.3)", cursor: "pointer", fontSize: 11, lineHeight: 1 }}
+                style={{ display: "none", background: "none", border: "none", padding: "0 2px", color: "#a09d9d", cursor: "pointer", fontSize: 11, lineHeight: 1 }}
                 className="sidebar-delete-btn"
                 aria-label="Delete"
               >✕</button>
@@ -171,31 +192,31 @@ export default function Sidebar() {
       </div>
 
       {/* Bottom nav + user */}
-      <div style={{ borderTop: "1px solid rgba(0,0,0,0.07)", padding: "8px 8px 12px" }}>
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.55)", padding: "8px 8px 14px" }}>
         {BOTTOM_NAV.map(({ href, label, icon }) => {
           const active = pathname === href;
           return (
             <Link key={href} href={href} style={{
-              display: "flex", alignItems: "center", gap: 9, padding: "7px 10px",
-              borderRadius: 7, marginBottom: 1, textDecoration: "none",
-              fontSize: 13, color: active ? "var(--fg)" : "var(--fg-mute)",
-              background: active ? "rgba(0,0,0,0.07)" : "transparent",
-              transition: "background 0.12s, color 0.12s",
+              display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+              borderRadius: 8, marginBottom: 1, textDecoration: "none",
+              fontSize: 13, fontWeight: active ? 500 : 400,
+              color: active ? "#1e1c1c" : "#7a7777",
+              background: active ? "rgba(255,255,255,0.52)" : "transparent",
+              border: active ? "1px solid rgba(255,255,255,0.62)" : "1px solid transparent",
+              transition: "background 0.15s ease, color 0.15s ease",
             }}
-              onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.04)"; }}
-              onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              onMouseEnter={e => { if (!active) { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.32)"; (e.currentTarget as HTMLElement).style.color = "#1e1c1c"; } }}
+              onMouseLeave={e => { if (!active) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "#7a7777"; } }}
             >
-              <span style={{ fontSize: 12, opacity: active ? 0.8 : 0.4, width: 18, textAlign: "center" }}>{icon}</span>
+              <span style={{ fontSize: 11, opacity: active ? 0.7 : 0.4, width: 16, textAlign: "center", fontFamily: "monospace" }}>{icon}</span>
               {label}
             </Link>
           );
         })}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px 0", marginTop: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 10px 0", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.45)" }}>
           <UserButton appearance={{ elements: { avatarBox: "w-7 h-7 rounded-full" } }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 11, color: "var(--fg-mute)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>My workspace</p>
-          </div>
+          <p style={{ fontSize: 11, color: "#a09d9d", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>My workspace</p>
         </div>
       </div>
     </aside>
