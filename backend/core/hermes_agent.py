@@ -250,16 +250,19 @@ class HermesAgent:
             if result_holder:
                 output = result_holder[-1]
             else:
-                # Fall back: try to parse last assistant message as JSON
-                response_text = (
-                    raw.get("response", "") if isinstance(raw, dict) else str(raw)
-                )
-                try:
-                    start = response_text.rfind("{")
-                    end = response_text.rfind("}") + 1
-                    output = json.loads(response_text[start:end]) if start >= 0 else {}
-                except Exception:
-                    output = {"response": response_text[:2000]}
+                if isinstance(raw, dict):
+                    if raw.get("failed") or raw.get("error"):
+                        output = {"error": raw.get("error", "Agent failed"), "agent": self.name}
+                    else:
+                        response_text = raw.get("final_response") or raw.get("response") or ""
+                        try:
+                            start = response_text.rfind("{")
+                            end = response_text.rfind("}") + 1
+                            output = json.loads(response_text[start:end]) if start >= 0 else {"response": response_text[:2000]}
+                        except Exception:
+                            output = {"response": response_text[:2000]}
+                else:
+                    output = {"response": str(raw)[:2000]}
 
             await self._emit(ctx, "agent_done", result=output)
             return output
