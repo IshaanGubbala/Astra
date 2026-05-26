@@ -104,7 +104,7 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
       contentStyle,
       borderRadius = 16,
       displacementScale = 28,
-      tint = "rgba(255,255,255,0.20)",
+      tint = "rgba(215,228,242,0.20)",
     },
     ref,
   ) => {
@@ -186,9 +186,9 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
             position: "absolute",
             inset: 0,
             background: tint,
-            border: "1px solid rgba(255,255,255,0.70)",
+            border: "1px solid rgba(200,214,228,0.72)",
             boxShadow:
-              "inset 0 1.5px 0 rgba(255,255,255,0.72), inset 0 -1px 0 rgba(255,255,255,0.18), 0 1px 3px rgba(0,0,0,0.05), 0 8px 28px rgba(0,0,0,0.08)",
+              "inset 0 1.5px 0 rgba(240,246,252,0.80), inset 0 -1px 0 rgba(180,200,220,0.22), 0 1px 3px rgba(0,0,10,0.07), 0 8px 28px rgba(0,0,10,0.10)",
             borderRadius,
             zIndex: 1,
             pointerEvents: "none",
@@ -204,7 +204,7 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
             right: 0,
             height: "46%",
             background:
-              "linear-gradient(180deg, rgba(255,255,255,0.38) 0%, rgba(255,255,255,0.06) 60%, transparent 100%)",
+              "linear-gradient(180deg, rgba(230,242,255,0.44) 0%, rgba(210,230,248,0.08) 60%, transparent 100%)",
             borderRadius: `${borderRadius}px ${borderRadius}px 0 0`,
             pointerEvents: "none",
             zIndex: 2,

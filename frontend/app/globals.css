@@ -1,36 +1,35 @@
 @import "tailwindcss";
 
 /* ═══════════════════════════════════════════════════════════════
-   ASTRA — Frosted Glass / Organic
-   Two brand colours: #ededed (field) · #7a7777 (muted text)
-   8-point spacing rhythm · single shadow style · 12px radius
-   No transforms · no purple · no sparkles · no vibe code
+   ASTRA — Industrial Glass / Silver
+   Field: #c8cdd4 (cool steel) · Muted: #4e5d6b (slate)
+   8-point spacing · single shadow · 12px radius · no warmth
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
   /* ── Palette ─────────────────────────────────────────────── */
-  --field:       #ededed;          /* page background */
-  --field-deep:  #e5e3e3;          /* slightly deeper surface */
-  --text:        #1e1c1c;          /* primary text */
-  --text-2:      #7a7777;          /* secondary — brand muted */
-  --text-3:      #a09d9d;          /* placeholder / disabled */
+  --field:       #c9ced6;          /* cool steel-silver */
+  --field-deep:  #bcc2cb;          /* deeper steel */
+  --text:        #0b0e13;          /* near-black, cool */
+  --text-2:      #4e5d6b;          /* slate blue-gray */
+  --text-3:      #7d8e9c;          /* lighter slate */
 
   /* ── Glass system ────────────────────────────────────────── */
-  --glass:       rgba(255,255,255,0.54);
-  --glass-hi:    rgba(255,255,255,0.74);   /* more opaque surface */
-  --glass-lo:    rgba(255,255,255,0.34);   /* subtle overlay */
-  --glass-bdr:   rgba(255,255,255,0.68);
+  --glass:       rgba(235,240,246,0.52);
+  --glass-hi:    rgba(242,246,250,0.74);
+  --glass-lo:    rgba(228,235,243,0.32);
+  --glass-bdr:   rgba(200,212,226,0.72);
   --glass-blur:  blur(22px) saturate(160%);
 
   /* ── Single shadow style ─────────────────────────────────── */
-  --shadow-sm:   0 1px 2px rgba(0,0,0,0.04), 0 2px 10px rgba(0,0,0,0.04);
-  --shadow:      0 1px 3px rgba(0,0,0,0.05), 0 8px 28px rgba(0,0,0,0.07);
-  --shadow-lg:   0 2px 8px rgba(0,0,0,0.06), 0 20px 56px rgba(0,0,0,0.09);
+  --shadow-sm:   0 1px 2px rgba(0,0,10,0.06), 0 2px 10px rgba(0,0,10,0.05);
+  --shadow:      0 1px 3px rgba(0,0,10,0.07), 0 8px 28px rgba(0,0,10,0.09);
+  --shadow-lg:   0 2px 8px rgba(0,0,10,0.08), 0 20px 56px rgba(0,0,10,0.12);
 
   /* ── Borders ─────────────────────────────────────────────── */
-  --bdr-glass:   1px solid rgba(255,255,255,0.68);
-  --bdr-soft:    1px solid rgba(0,0,0,0.07);
-  --bdr-mid:     1px solid rgba(0,0,0,0.11);
+  --bdr-glass:   1px solid rgba(200,212,226,0.72);
+  --bdr-soft:    1px solid rgba(0,8,20,0.08);
+  --bdr-mid:     1px solid rgba(0,8,20,0.13);
 
   /* ── Radius — two values only ────────────────────────────── */
   --r-sm:        8px;   /* inputs · buttons · pills */
@@ -40,28 +39,28 @@
   --sp-1:  8px;   --sp-2:  16px;  --sp-3:  24px;  --sp-4:  32px;
   --sp-5:  40px;  --sp-6:  48px;  --sp-7:  56px;  --sp-8:  64px;
 
-  /* ── Action colour — near-black (not purple) ─────────────── */
-  --action:      rgba(30,28,28,0.92);
-  --action-hi:   rgba(30,28,28,1);
+  /* ── Action colour — near-black, cool cast ───────────────── */
+  --action:      rgba(10,14,22,0.94);
+  --action-hi:   rgba(10,14,22,1);
 
   /* ── Legacy aliases — keep existing component code working ── */
   --ink:           var(--field);
   --ink-2:         var(--field-deep);
   --ink-3:         var(--glass-hi);
-  --line:          rgba(255,255,255,0.68);
-  --line-2:        rgba(0,0,0,0.09);
+  --line:          rgba(200,212,226,0.72);
+  --line-2:        rgba(0,8,20,0.10);
   --fg:            var(--text);
   --fg-dim:        var(--text-2);
   --fg-mute:       var(--text-3);
   --star:          var(--text);
-  --star-dim:      #3d3a3a;
-  --gold:          #a08050;
-  --aurora:        #6b7a8d;
+  --star-dim:      #2a3340;
+  --gold:          #8090a0;
+  --aurora:        #5a7290;
   --bg:            var(--field);
   --bg-2:          var(--field-deep);
-  --blue:          #6b7a8d;
-  --blue-dim:      #5a6878;
-  --blue-glow:     rgba(107,122,141,0.12);
+  --blue:          #5a7290;
+  --blue-dim:      #4a6080;
+  --blue-glow:     rgba(90,114,144,0.12);
   --glass-bg:      var(--glass);
   --glass-border:  var(--glass-bdr);
   --glass-shadow:  var(--shadow);
@@ -88,12 +87,13 @@ html, body { margin: 0; padding: 0; }
 
 html {
   /*
-    Organic background: subtle radial warmth breaks the flatness
-    without introducing gradients that scream "vibe coded hero".
+    Industrial glass background: cool steel-blue light at top-left,
+    deeper slate at bottom-right. No warmth.
   */
   background:
-    radial-gradient(ellipse 72% 52% at 12% 18%, rgba(255,255,255,0.38) 0%, transparent 68%),
-    radial-gradient(ellipse 60% 48% at 88% 82%, rgba(220,218,218,0.32) 0%, transparent 68%),
+    radial-gradient(ellipse 80% 55% at 10% 15%, rgba(180,200,220,0.38) 0%, transparent 65%),
+    radial-gradient(ellipse 60% 45% at 90% 85%, rgba(140,165,192,0.28) 0%, transparent 65%),
+    radial-gradient(ellipse 40% 30% at 55% 50%, rgba(200,215,230,0.14) 0%, transparent 60%),
     var(--field);
   background-attachment: fixed;
   color: var(--text);
@@ -355,8 +355,8 @@ p { margin: 0; }
 
 .site-input:focus,
 .site-textarea:focus {
-  border-color: rgba(30,28,28,0.28);
-  box-shadow: 0 0 0 3px rgba(30,28,28,0.06);
+  border-color: rgba(90,114,144,0.40);
+  box-shadow: 0 0 0 3px rgba(90,114,144,0.10);
 }
 
 .site-input::placeholder,
