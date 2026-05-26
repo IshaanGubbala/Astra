@@ -76,6 +76,19 @@ function extractHexFromObj(obj: unknown, depth = 0): string[] {
   );
 }
 
+// Find the first nested object that has ≥2 hex string values — that's the color palette
+function findPalette(obj: unknown, depth = 0): Record<string, string> | null {
+  if (depth > 4 || !obj || typeof obj !== "object") return null;
+  const entries = Object.entries(obj as Record<string, unknown>);
+  const hexEntries = entries.filter(([, v]) => typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v as string));
+  if (hexEntries.length >= 2) return Object.fromEntries(hexEntries) as Record<string, string>;
+  for (const [, v] of entries) {
+    const found = findPalette(v, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 function extractUrls(log: LogEntry[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -246,20 +259,14 @@ function TechnicalPreview({ state }: { state: AgentState }) {
 function DesignPreview({ state }: { state: AgentState }) {
   const result = state.result ?? {};
 
-  // The tool returns `colors` not `color_palette` — check both plus fallbacks
-  const rawPalette = (
-    result.color_palette ?? result.colors ?? result.palette ?? result.brand_colors
-  ) as Record<string, unknown> | undefined;
+  // Find the color palette anywhere in the result (LLM may nest under any key)
+  const rawPalette = findPalette(result) ?? null;
 
-  // Collect all hex codes: from palette, from log, from entire result
-  const paletteHexes = rawPalette ? (Object.values(rawPalette).filter(v => typeof v === "string" && (v as string).startsWith("#")) as string[]) : [];
+  const paletteEntries = rawPalette ? Object.entries(rawPalette) : [];
+  const paletteHexes = paletteEntries.map(([, v]) => v);
   const logHexes = extractColors(state.log);
   const resultHexes = extractHexFromObj(result);
   const allColors = [...new Set([...paletteHexes, ...logHexes, ...resultHexes])];
-
-  const paletteEntries = rawPalette
-    ? Object.entries(rawPalette).filter(([, v]) => typeof v === "string" && (v as string).startsWith("#"))
-    : [];
 
   const spec = (
     state.designSpec ??
@@ -290,9 +297,9 @@ function DesignPreview({ state }: { state: AgentState }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {paletteEntries.map(([k, v]) => (
             <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(0,0,0,0.03)" }}>
-              <div style={{ width: 14, height: 14, borderRadius: 3, background: v as string, flexShrink: 0 }} />
+              <div style={{ width: 14, height: 14, borderRadius: 3, background: v, border: "1px solid rgba(0,0,0,0.12)", flexShrink: 0 }} />
               <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "capitalize" }}>{k.replace(/_/g, " ")}</span>
-              <span style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-dim)", marginLeft: "auto" }}>{(v as string).slice(0, 40)}</span>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-dim)", marginLeft: "auto" }}>{v.slice(0, 40)}</span>
             </div>
           ))}
         </div>
@@ -972,27 +979,31 @@ export default function GoalPage({ params }: { params: Promise<{ id: string }> }
   // ── Persistent session cache ──────────────────────────────────────────────
   const CACHE_KEY = `astra_session_${sessionId}`;
 
-  function loadCache(): { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean } | null {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
-  }
-
   function saveCache(a: Record<string, AgentState>, p: AgentTask[], d: boolean) {
-    if (typeof window === "undefined") return;
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d })); } catch {}
   }
 
-  const cached = loadCache();
+  // Always start with empty state to avoid SSR/client hydration mismatch;
+  // load localStorage cache in useEffect after mount.
+  const [agents, setAgents] = useState<Record<string, AgentState>>({});
+  const [planTasks, setPlanTasks] = useState<AgentTask[]>([]);
+  const [activeAgent, setActiveAgent] = useState<string>("");
+  const [done, setDone] = useState(false);
 
-  const [agents, setAgents] = useState<Record<string, AgentState>>(cached?.agents ?? {});
-  const [planTasks, setPlanTasks] = useState<AgentTask[]>(cached?.planTasks ?? []);
-  const [activeAgent, setActiveAgent] = useState<string>(
-    cached?.planTasks?.[0]?.agent ?? Object.keys(cached?.agents ?? {})[0] ?? ""
-  );
-  const [done, setDone] = useState(cached?.done ?? false);
+  // Restore from cache after first render (client-only)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return;
+      const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean };
+      if (cached.agents && Object.keys(cached.agents).length > 0) setAgents(cached.agents);
+      if (cached.planTasks?.length > 0) setPlanTasks(cached.planTasks);
+      if (cached.done) setDone(true);
+      const firstAgent = cached.planTasks?.[0]?.agent ?? Object.keys(cached.agents ?? {})[0] ?? "";
+      if (firstAgent) setActiveAgent(firstAgent);
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [CACHE_KEY]);
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [connected, setConnected] = useState(false);
