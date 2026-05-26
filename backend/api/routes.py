@@ -1,6 +1,13 @@
+import hashlib
+import hmac
+import json
+import logging
+import time
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 from backend.api.schemas import AskRequest, ApproveRequest, GoalRequest, RejectRequest, SetupRequest, SaveCredentialRequest, SteerRequest
 from backend.provisioning.credentials_store import store_credentials
@@ -231,6 +238,79 @@ async def get_vault_note(founder_id: str, session_id: str, agent: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Note not found")
     return {"content": path.read_text(errors="replace"), "agent": agent, "session_id": session_id}
+
+
+@router.post("/webhooks/clerk")
+async def clerk_webhook(request: Request):
+    """
+    Clerk webhook — auto-provisions a user record on user.created.
+    Verify svix signature, then initialize credentials store + DB row.
+    """
+    from backend.config import settings
+    from backend.db.client import get_supabase
+
+    body = await request.body()
+    secret = settings.clerk_webhook_secret
+
+    # Verify Clerk/svix signature when secret is configured
+    if secret:
+        svix_id = request.headers.get("svix-id", "")
+        svix_ts = request.headers.get("svix-timestamp", "")
+        svix_sig = request.headers.get("svix-signature", "")
+
+        # Reject replays older than 5 minutes
+        try:
+            if abs(time.time() - int(svix_ts)) > 300:
+                raise HTTPException(status_code=400, detail="Timestamp too old")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid timestamp")
+
+        signed = f"{svix_id}.{svix_ts}.{body.decode()}"
+        raw_secret = secret.removeprefix("whsec_")
+        import base64
+        key = base64.b64decode(raw_secret)
+        expected = base64.b64encode(
+            hmac.new(key, signed.encode(), hashlib.sha256).digest()
+        ).decode()
+        sigs = [s.removeprefix("v1,") for s in svix_sig.split(" ")]
+        if not any(hmac.compare_digest(expected, s) for s in sigs):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
+    payload = json.loads(body)
+    event_type = payload.get("type")
+
+    if event_type != "user.created":
+        return {"ok": True, "skipped": event_type}
+
+    data = payload.get("data", {})
+    user_id = data.get("id")
+    email = (data.get("email_addresses") or [{}])[0].get("email_address", "")
+    name = f"{data.get('first_name', '')} {data.get('last_name', '')}".strip()
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user id")
+
+    logger.info("clerk webhook: user.created user_id=%s email=%s", user_id, email)
+
+    # 1. Initialize empty credentials store so the user record exists
+    try:
+        from backend.provisioning.credentials_store import store_credentials
+        store_credentials(user_id, "profile", {"email": email, "name": name, "created_at": time.time()})
+    except Exception as e:
+        logger.warning("credentials_store init failed: %s", e)
+
+    # 2. Upsert user row in Supabase (non-fatal if DB not configured)
+    try:
+        db = get_supabase()
+        db.table("users").upsert({
+            "id": user_id,
+            "email": email,
+            "name": name,
+        }).execute()
+    except Exception as e:
+        logger.warning("supabase user upsert failed: %s", e)
+
+    return {"ok": True, "user_id": user_id, "provisioned": True}
 
 
 @router.get("/status/{goal_id}")
