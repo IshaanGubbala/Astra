@@ -18,7 +18,7 @@ function NavLink({ href, children, className = "" }: { href: string; children: R
 
 export default function SiteNav() {
   const pathname = usePathname();
-  if (pathname.startsWith("/dashboard")) return null;
+  if (pathname === "/" || pathname === "/settings" || pathname === "/integrations" || pathname.startsWith("/dashboard")) return null;
 
   return (
     <header className="site-nav">
@@ -31,7 +31,7 @@ export default function SiteNav() {
         <a href="https://astracreates.com">About</a>
 
         <Show when="signed-in">
-          <NavLink href="/dashboard">Dashboard</NavLink>
+          <NavLink href="/">Dashboard</NavLink>
           <NavLink href="/" className="site-btn site-btn-primary">
             New goal <span aria-hidden="true">→</span>
           </NavLink>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { streamGoal, continueSession, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder } from "@/lib/api";
@@ -984,7 +984,7 @@ function ContinuePanel({ sessionId, founderId, company }: { sessionId: string; f
     setError(null);
     try {
       const result = await continueSession(founderId, sessionId, instruction);
-      router.push(`/dashboard/goal/${result.session_id}?instruction=${encodeURIComponent(instruction)}&founder=${encodeURIComponent(founderId)}&company=${encodeURIComponent(company)}`);
+      router.push(`/?session=${encodeURIComponent(result.session_id)}&instruction=${encodeURIComponent(instruction)}&founder=${encodeURIComponent(founderId)}&company=${encodeURIComponent(company)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to continue");
       setLoading(false);
@@ -1043,9 +1043,9 @@ export function GoalWorkspace({
   // ── Persistent session cache ──────────────────────────────────────────────
   const CACHE_KEY = `astra_session_${sessionId}`;
 
-  function saveCache(a: Record<string, AgentState>, p: AgentTask[], d: boolean) {
+  const saveCache = useCallback((a: Record<string, AgentState>, p: AgentTask[], d: boolean) => {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d })); } catch {}
-  }
+  }, [CACHE_KEY]);
 
   // Always start with empty state to avoid SSR/client hydration mismatch;
   // load localStorage cache in useEffect after mount.
@@ -1060,13 +1060,14 @@ export function GoalWorkspace({
       const raw = localStorage.getItem(CACHE_KEY);
       if (!raw) return;
       const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean };
-      if (cached.agents && Object.keys(cached.agents).length > 0) setAgents(cached.agents);
-      if (cached.planTasks?.length > 0) setPlanTasks(cached.planTasks);
-      if (cached.done) setDone(true);
       const firstAgent = cached.planTasks?.[0]?.agent ?? Object.keys(cached.agents ?? {})[0] ?? "";
-      if (firstAgent) setActiveAgent(firstAgent);
+      queueMicrotask(() => {
+        if (cached.agents && Object.keys(cached.agents).length > 0) setAgents(cached.agents);
+        if (cached.planTasks?.length > 0) setPlanTasks(cached.planTasks);
+        if (cached.done) setDone(true);
+        if (firstAgent) setActiveAgent(firstAgent);
+      });
     } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [CACHE_KEY]);
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
@@ -1076,7 +1077,7 @@ export function GoalWorkspace({
   const errorCount = useRef(0);
 
   // Persist to localStorage whenever state changes
-  useEffect(() => { saveCache(agents, planTasks, done); }, [agents, planTasks, done]);
+  useEffect(() => { saveCache(agents, planTasks, done); }, [agents, planTasks, done, saveCache]);
 
   useEffect(() => {
     if (!sessionId || sessionId === "undefined") return;

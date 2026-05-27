@@ -4,13 +4,14 @@ import { useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useUser, SignInButton } from "@clerk/nextjs";
-import { submitGoal } from "@/lib/api";
+import { submitGoal, AGENT_LABELS, AGENT_ORDER } from "@/lib/api";
 import { getSessionSnapshot, saveSession, subscribeSessions } from "@/lib/history";
 import LiquidGlass from "@/components/LiquidGlass";
 import ThemeToggle from "@/components/ThemeToggle";
 import { GoalWorkspace } from "@/components/GoalWorkspace";
 
 import type { SessionRecord } from "@/lib/history";
+
 const EMPTY_RECENT_SESSIONS: SessionRecord[] = [];
 
 const STACK_OPTIONS = {
@@ -115,6 +116,7 @@ export default function AppHome() {
     getSessionSnapshot,
     () => EMPTY_RECENT_SESSIONS,
   );
+
   const runningCount = recentSessions.filter(session => session.status === "running").length;
   const completedCount = recentSessions.filter(session => session.status === "done").length;
   const errorCount = recentSessions.filter(session => session.status === "error").length;
@@ -124,10 +126,12 @@ export default function AppHome() {
   const draftLabel = trimGoalLabel(companyName || instruction, "Current draft");
   const planTracks = buildPlanTracks(instruction, stack);
   const agentFocus = buildAgentFocus(instruction);
-  const activeSessionId = searchParams.get("session") ?? "";
-  const activeInstruction = searchParams.get("instruction") ?? "";
-  const activeFounderId = searchParams.get("founder") ?? user?.id ?? "founder_001";
-  const activeCompany = searchParams.get("company") ?? "";
+  const preRunAgents = AGENT_ORDER.filter((agent) => !agent.startsWith("research_"));
+
+  const activeSessionId = searchParams.get("session") ?? latestSession?.sessionId ?? "";
+  const activeInstruction = searchParams.get("instruction") ?? latestSession?.instruction ?? "";
+  const activeFounderId = searchParams.get("founder") ?? latestSession?.founderId ?? user?.id ?? "founder_001";
+  const activeCompany = searchParams.get("company") ?? latestSession?.companyName ?? "";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -167,115 +171,174 @@ export default function AppHome() {
 
   return (
     <div className="site-shell" style={{ paddingTop: 48, paddingBottom: 88 }}>
-      <div style={{ width: "100%", maxWidth: 1360, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
-        <LiquidGlass contentStyle={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+      <div className="goal-workspace" style={{ width: "100%", maxWidth: 1480, margin: "0 auto", display: "flex", flexDirection: "column", gap: 24 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={{ width: 24, height: 24, borderRadius: 8, display: "grid", placeItems: "center", background: "rgba(168,172,178,0.92)", color: "rgba(10,14,22,0.92)", fontWeight: 600, fontSize: 12, flexShrink: 0 }}>A</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-              <span style={{ fontSize: 12, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--fg)" }}>Astra</span>
-              <span style={{ fontSize: 10, color: "var(--fg-mute)", lineHeight: 1.25 }}>Build, launch, and manage runs in one place</span>
+            <h1 style={{ fontSize: 18, fontWeight: 600, color: "var(--fg)", margin: 0 }}>
+              {isSignedIn && user?.firstName ? `What are you building, ${user.firstName}?` : "What are you building?"}
+            </h1>
+            <span style={{ fontSize: 11, letterSpacing: "0.06em", padding: "3px 10px", borderRadius: 999, color: "var(--fg-mute)", background: "rgba(0,0,0,0.04)", border: "1px solid rgba(0,0,0,0.1)" }}>
+              ready
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Link href="/settings" className="site-btn site-btn-ghost" aria-label="Account settings" title="Account settings" style={{ width: 36, minHeight: 34, padding: 0, fontSize: 17, lineHeight: 1 }}>⚙</Link>
+              <Link href="/integrations" className="site-btn site-btn-ghost" aria-label="Integration settings" title="Integration settings" style={{ width: 36, minHeight: 34, padding: 0, fontSize: 17, lineHeight: 1 }}>⌘</Link>
+              <button
+                type="button"
+                onClick={() => {
+                  if (recentSessions.length === 0) return;
+                  if (confirm("Clear all session history?")) {
+                    localStorage.removeItem("astra_sessions");
+                    window.location.reload();
+                  }
+                }}
+                className="site-btn site-btn-ghost"
+                style={{ minHeight: 34, padding: "0 12px", fontSize: 12, color: "#C97070" }}
+              >
+                Clear sessions
+              </button>
+              <ThemeToggle />
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <Link href="/dashboard/settings" className="site-btn site-btn-ghost" aria-label="Account settings" title="Account settings" style={{ width: 36, minHeight: 34, padding: 0, fontSize: 17, lineHeight: 1 }}>⚙</Link>
-            <Link href="/dashboard/integrations" className="site-btn site-btn-ghost" aria-label="Integration settings" title="Integration settings" style={{ width: 36, minHeight: 34, padding: 0, fontSize: 17, lineHeight: 1 }}>⌘</Link>
-            <button
-              type="button"
-              onClick={() => {
-                if (recentSessions.length === 0) return;
-                if (confirm("Clear all session history?")) {
-                  localStorage.removeItem("astra_sessions");
-                  window.location.reload();
-                }
-              }}
-              className="site-btn site-btn-ghost"
-              style={{ minHeight: 34, padding: "0 12px", fontSize: 12, color: "#C97070" }}
-            >
-              Clear sessions
-            </button>
-            <ThemeToggle />
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ flex: 1, height: 3, borderRadius: 999, background: "rgba(0,0,0,0.08)", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: "0%", borderRadius: 999, background: "#2563EB" }} />
+            </div>
+            <span style={{ fontSize: 11, color: "var(--fg-dim)", flexShrink: 0, fontFamily: "var(--font-jetbrains-mono)" }}>0/{preRunAgents.length}</span>
           </div>
-        </LiquidGlass>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <h1 style={{ fontSize: "clamp(21px,2.2vw,29px)", lineHeight: 1.12, margin: 0 }}>
-            {isSignedIn && user?.firstName ? `What are you building, ${user.firstName}?` : "What are you building?"}
-          </h1>
-          <p style={{ fontSize: 13, color: "var(--fg-dim)", margin: 0, lineHeight: 1.5 }}>
-            Describe the product. Astra fans work out across the agent team and keeps the run history here.
-          </p>
         </div>
 
-        <LiquidGlass contentStyle={{ padding: "24px 28px" }}>
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 12 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label className="site-label">Company</label>
-                <input value={companyName} onChange={e => setCompanyName(e.target.value)} className="site-input" style={{ padding: "9px 12px", fontSize: 14 }} placeholder="Astra" disabled={loading} />
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label className="site-label">Domain</label>
-                <input value={domain} onChange={e => setDomain(e.target.value)} className="site-input" style={{ padding: "9px 12px", fontSize: 14 }} placeholder="astra.ai" disabled={loading} />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label className="site-label">Goal</label>
-              <textarea value={instruction} onChange={e => setInstruction(e.target.value)}
-                placeholder="Build a SaaS for indie hackers to track MRR — landing page, GitHub repo, Supabase backend, Clerk auth, Vercel deploy."
-                rows={3} disabled={loading} className="site-textarea"
-                style={{ padding: "12px 14px", fontSize: 14, lineHeight: 1.65, resize: "none" }} />
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <p className="site-label">Starter prompts</p>
-              {STARTER_PROMPTS.map((item) => (
-                <button
-                  key={item.title}
-                  type="button"
-                  onClick={() => setInstruction(item.prompt)}
-                  disabled={loading}
-                  style={{ textAlign: "left", fontSize: 12, color: "var(--fg-mute)", background: "none", border: "none", padding: "1px 0", cursor: "pointer", lineHeight: 1.6 }}
-                >
-                  · {item.title}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ border: "1px solid var(--line)", borderRadius: 24, padding: "10px 14px" }}>
-              <button type="button" onClick={() => setShowStack(v => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-                <span className="site-label">Tech stack</span>
-                <span style={{ fontSize: 10, color: "var(--fg-mute)" }}>{showStack ? "▲" : "▼"}</span>
-              </button>
-              {showStack && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
-                  {(Object.entries(STACK_OPTIONS) as [string, string[]][]).map(([key, opts]) => (
-                    <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label className="site-label">{key}</label>
-                      <select value={stack[key as keyof typeof stack]} onChange={e => setStack(p => ({ ...p, [key]: e.target.value }))} disabled={loading} className="site-input" style={{ padding: "7px 10px", fontSize: 12, background: "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(180,205,228,0.04)), var(--glass-hi)" }}>
-                        {opts.map(o => <option key={o} value={o} style={{ background: "#0b0e14" }}>{o}</option>)}
-                      </select>
-                    </div>
-                  ))}
+        <div className="goal-workspace-grid" style={{ display: "grid", gridTemplateColumns: "minmax(260px, 320px) minmax(0, 1fr)", gap: 18, alignItems: "stretch" }}>
+          <LiquidGlass style={{ minWidth: 0 }} contentStyle={{ padding: "12px", display: "flex", flexDirection: "column", gap: 4, minHeight: 620 }}>
+            {preRunAgents.map((agent, index) => (
+              <div
+                key={agent}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 12px",
+                  borderRadius: 24,
+                  border: index === 0 ? "1px solid rgba(180,205,228,0.22)" : "1px solid transparent",
+                  background: index === 0 ? "rgba(180,205,228,0.10)" : "transparent",
+                }}
+              >
+                <div style={{ position: "relative", width: 28, height: 28, flexShrink: 0 }}>
+                  <svg viewBox="0 0 28 28" style={{ width: 28, height: 28 }}>
+                    <circle cx="14" cy="14" r="11" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="2.5" />
+                  </svg>
+                  <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--fg-mute)" }}>{index + 1}</span>
                 </div>
-              )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: index === 0 ? "var(--fg)" : "var(--fg-mute)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {AGENT_LABELS[agent] ?? agent}
+                  </div>
+                  <div style={{ fontSize: 10, color: "rgba(0,0,0,0.25)", textTransform: "uppercase", letterSpacing: "0.06em" }}>waiting</div>
+                </div>
+              </div>
+            ))}
+          </LiquidGlass>
+
+          <LiquidGlass style={{ minWidth: 0 }} contentStyle={{ padding: "32px", minHeight: 620, display: "flex", flexDirection: "column", gap: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 20 }}>A</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>New run</span>
+                  <span style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--fg-mute)" }}>ready</span>
+                </div>
+                <p style={{ margin: "2px 0 0", fontSize: 11, color: "var(--fg-mute)", lineHeight: 1.4 }}>
+                  Describe the product. Astra will split the work across the full agent team.
+                </p>
+              </div>
+              <div style={{ position: "relative", width: 40, height: 40, flexShrink: 0 }}>
+                <svg viewBox="0 0 40 40">
+                  <circle cx="20" cy="20" r="17" fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth="3" />
+                </svg>
+                <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 600, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)" }}>0%</span>
+              </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 4 }}>
-              {isSignedIn ? (
-                <button type="submit" disabled={loading || !instruction.trim()} className="site-btn site-btn-primary" style={{ padding: "0 24px", fontSize: 14 }}>
-                  {loading ? "Launching…" : "Launch Astra →"}
+            <div style={{ height: 3, borderRadius: 999, background: "rgba(0,0,0,0.08)", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: "0%", borderRadius: 999, background: "#2563EB" }} />
+            </div>
+
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label className="site-label">Company</label>
+                  <input value={companyName} onChange={e => setCompanyName(e.target.value)} className="site-input" style={{ padding: "9px 12px", fontSize: 14 }} placeholder="Astra" disabled={loading} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label className="site-label">Domain</label>
+                  <input value={domain} onChange={e => setDomain(e.target.value)} className="site-input" style={{ padding: "9px 12px", fontSize: 14 }} placeholder="astra.ai" disabled={loading} />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <label className="site-label">Goal</label>
+                <textarea
+                  value={instruction}
+                  onChange={e => setInstruction(e.target.value)}
+                  placeholder="Build a SaaS for indie hackers to track MRR — landing page, GitHub repo, Supabase backend, Clerk auth, Vercel deploy."
+                  rows={6}
+                  disabled={loading}
+                  className="site-textarea"
+                  style={{ padding: "12px 14px", fontSize: 14, lineHeight: 1.65, resize: "none" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <p className="site-label">Starter prompts</p>
+                {STARTER_PROMPTS.map((item) => (
+                  <button
+                    key={item.title}
+                    type="button"
+                    onClick={() => setInstruction(item.prompt)}
+                    disabled={loading}
+                    style={{ textAlign: "left", fontSize: 12, color: "var(--fg-mute)", background: "none", border: "none", padding: "1px 0", cursor: "pointer", lineHeight: 1.6 }}
+                  >
+                    · {item.title}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ border: "1px solid var(--line)", borderRadius: 24, padding: "10px 14px" }}>
+                <button type="button" onClick={() => setShowStack(v => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                  <span className="site-label">Tech stack</span>
+                  <span style={{ fontSize: 10, color: "var(--fg-mute)" }}>{showStack ? "▲" : "▼"}</span>
                 </button>
-              ) : (
-                <SignInButton mode="modal">
-                  <button type="button" className="site-btn site-btn-primary" style={{ padding: "0 24px", fontSize: 14 }}>Sign in to launch →</button>
-                </SignInButton>
-              )}
-            </div>
+                {showStack && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+                    {(Object.entries(STACK_OPTIONS) as [string, string[]][]).map(([key, opts]) => (
+                      <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <label className="site-label">{key}</label>
+                        <select value={stack[key as keyof typeof stack]} onChange={e => setStack(p => ({ ...p, [key]: e.target.value }))} disabled={loading} className="site-input" style={{ padding: "7px 10px", fontSize: 12, background: "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(180,205,228,0.04)), var(--glass-hi)" }}>
+                          {opts.map(o => <option key={o} value={o} style={{ background: "#0b0e14" }}>{o}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-            {error && <p style={{ borderRadius: 24, border: "1px solid rgba(220,38,38,0.4)", background: "rgba(127,29,29,0.2)", padding: "10px 14px", fontSize: 13, color: "#fca5a5" }}>{error}</p>}
-          </form>
-        </LiquidGlass>
+              <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 4 }}>
+                {isSignedIn ? (
+                  <button type="submit" disabled={loading || !instruction.trim()} className="site-btn site-btn-primary" style={{ padding: "0 24px", fontSize: 14 }}>
+                    {loading ? "Launching…" : "Launch Astra →"}
+                  </button>
+                ) : (
+                  <SignInButton mode="modal">
+                    <button type="button" className="site-btn site-btn-primary" style={{ padding: "0 24px", fontSize: 14 }}>Sign in to launch →</button>
+                  </SignInButton>
+                )}
+              </div>
+
+              {error && <p style={{ borderRadius: 24, border: "1px solid rgba(220,38,38,0.4)", background: "rgba(127,29,29,0.2)", padding: "10px 14px", fontSize: 13, color: "#fca5a5" }}>{error}</p>}
+            </form>
+          </LiquidGlass>
+        </div>
 
         <div className="blob-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, alignItems: "stretch" }}>
           <LiquidGlass contentStyle={{ padding: "30px 32px", display: "flex", flexDirection: "column", gap: 24, minHeight: 420 }}>
@@ -409,7 +472,7 @@ export default function AppHome() {
                 </button>
               )) : (
                 <div style={{ padding: "14px 12px", borderRadius: 22, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(176,180,186,0.10)", color: "var(--fg-mute)", fontSize: 13, lineHeight: 1.6 }}>
-                  Once you launch a goal, saved runs will appear here.
+                  Launch a run and it will appear here.
                 </div>
               )}
             </div>
