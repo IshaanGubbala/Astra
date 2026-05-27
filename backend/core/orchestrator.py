@@ -134,6 +134,53 @@ class Orchestrator:
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         return await self._llm_plan(messages)
 
+    async def _generate_detailed_plan(self, goal: str, research_summary: str, tasks: list[dict]) -> list[dict]:
+        """Generate a rich branching plan tree for the Plan overlay UI."""
+        import json
+        agents_str = ", ".join(t["agent"] for t in tasks)
+        task_instructions = "\n".join(f"- {t['agent']}: {t['instruction']}" for t in tasks)
+        system = (
+            "You are a startup execution planner. Generate a detailed branching plan tree.\n"
+            "Output ONLY valid JSON — no prose, no markdown fences.\n\n"
+            "Each node has:\n"
+            "  id: unique string\n"
+            "  agent: agent name (from the task list)\n"
+            "  title: short phase title (4-6 words)\n"
+            "  description: 1-2 sentences of exactly what will happen, referencing specific research findings\n"
+            "  steps: array of 3-6 concrete subtask strings (each 10-25 words, specific not generic)\n"
+            "  depends_on: [] or [\"id\"] of upstream node this waits for\n"
+            "  estimated_time: e.g. '2-4 hours', '1 day'\n\n"
+            "Format: {\"nodes\": [{...}, ...]}\n"
+            "Rules:\n"
+            "- 1 node per agent. All nodes must be present.\n"
+            "- steps must be concrete: name real tools, real files, real decisions.\n"
+            "- Use actual data from research: competitor names, market size, tech choices, pricing.\n"
+            "- No placeholder text. No 'TBD'. No 'lorem ipsum'.\n"
+        )
+        user = (
+            f"Goal: {goal}\n\n"
+            f"Agents: {agents_str}\n\n"
+            f"Agent instructions:\n{task_instructions}\n\n"
+            f"Research findings (use specific details):\n{research_summary[:5000]}\n\n"
+            "Generate the detailed branching plan tree now."
+        )
+        for attempt in range(3):
+            raw = await asyncio.to_thread(self.planner._call_llm, [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ])
+            try:
+                # strip markdown fences
+                import re as _re
+                clean = _re.sub(r"```(?:json)?|```", "", raw).strip()
+                parsed = json.loads(clean)
+                nodes = parsed.get("nodes", [])
+                if nodes and all("agent" in n and "steps" in n for n in nodes):
+                    return nodes
+            except Exception:
+                pass
+        return []
+
     async def run(self, goal: str, founder_id: str, constraints: dict = None, session_id: str = None) -> dict[str, Any]:
         session_id = session_id or uuid.uuid4().hex[:8]
         shared: dict[str, Any] = {"constraints": constraints or {}}
@@ -293,6 +340,17 @@ class Orchestrator:
                         "planner_model": self.planner.model,
                         "phase": "detailed",
                     })
+                    # Emit rich branching plan tree for the Plan overlay UI
+                    try:
+                        _rs = research_result.get("obsidian_content") or ""
+                        if not _rs:
+                            import json as _json
+                            _rs = _json.dumps(research_result, default=str)[:5000]
+                        tree_nodes = await self._generate_detailed_plan(goal, _rs, detailed_tasks)
+                        if tree_nodes:
+                            await publish(session_id, {"type": "detailed_plan", "nodes": tree_nodes})
+                    except Exception as _dp_err:
+                        logger.warning("detailed_plan generation failed: %s", _dp_err)
                     tasks = parallel_research_tasks + detailed_tasks
                 else:
                     tasks = parallel_research_tasks + other_agents_initial

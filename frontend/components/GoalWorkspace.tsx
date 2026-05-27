@@ -1,11 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
+import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { streamGoal, continueSession, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder } from "@/lib/api";
+import { SignInButton, useUser } from "@clerk/nextjs";
+import { streamGoal, continueSession, submitGoal, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder } from "@/lib/api";
+import { saveSession } from "@/lib/history";
 import LiquidGlass from "@/components/LiquidGlass";
 import CompanyChat from "@/components/CompanyChat";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -50,6 +54,28 @@ const STATUS_COLOR = {
   done: "#3D9E5F",
   error: "#C0392B",
 };
+
+const STACK_OPTIONS = {
+  frontend: ["Next.js", "React + Vite", "SvelteKit", "Remix"],
+  backend: ["FastAPI", "Express / Node", "Django", "Serverless"],
+  database: ["Supabase (Postgres)", "PlanetScale (MySQL)", "MongoDB", "SQLite"],
+  auth: ["Clerk", "Supabase Auth", "NextAuth", "Custom JWT"],
+};
+
+const STARTER_PROMPTS = [
+  {
+    title: "Waitlist SaaS",
+    prompt: "Build a waitlist SaaS for creators — landing page, Next.js app, Supabase DB, Clerk auth, Vercel deploy.",
+  },
+  {
+    title: "Invoice tool",
+    prompt: "Launch a B2B invoice automation tool — repo, database, auth, landing page, three investor emails.",
+  },
+  {
+    title: "Matching platform",
+    prompt: "Build a real-time co-founder matching platform with live URL, auth, and a pitch deck PDF.",
+  },
+];
 
 function pct(state: AgentState): number {
   if (state.status === "done") return 100;
@@ -1026,6 +1052,438 @@ function ContinuePanel({ sessionId, founderId, company }: { sessionId: string; f
   );
 }
 
+function NewGoalOverlay({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const router = useRouter();
+  const { user, isSignedIn } = useUser();
+  const [companyName, setCompanyName] = useState("");
+  const [domain, setDomain] = useState("");
+  const [instruction, setInstruction] = useState("");
+  const [showStack, setShowStack] = useState(false);
+  const [stack, setStack] = useState({ frontend: "Next.js", backend: "FastAPI", database: "Supabase (Postgres)", auth: "Clerk" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) return null;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!instruction.trim()) return;
+    setLoading(true);
+    setError(null);
+    const parts = [
+      companyName.trim() && `Company name: ${companyName.trim()}.`,
+      domain.trim() && `Domain: ${domain.trim()}.`,
+      showStack && `Tech stack: Frontend=${stack.frontend}, Backend=${stack.backend}, Database=${stack.database}, Auth=${stack.auth}.`,
+    ].filter(Boolean);
+    const full = parts.length ? `${parts.join(" ")}\n\n${instruction}` : instruction;
+    const founderId = user?.id ?? "anon";
+    try {
+      const result = await submitGoal(founderId, full);
+      saveSession({
+        sessionId: result.session_id,
+        founderId,
+        companyName: companyName.trim() || instruction.slice(0, 40),
+        instruction,
+        startedAt: Date.now(),
+        status: "running",
+        artifacts: [],
+      });
+      if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission();
+      router.push(`/?session=${encodeURIComponent(result.session_id)}&instruction=${encodeURIComponent(instruction)}&founder=${encodeURIComponent(founderId)}&company=${encodeURIComponent(companyName)}`);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit goal");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 120, display: "grid", placeItems: "center", padding: 24, background: "rgba(5,8,13,0.52)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)" }}>
+      <LiquidGlass style={{ width: "min(1120px, 100%)" }} contentStyle={{ padding: "28px 30px", display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+          <div style={{ flex: 1, display: "grid", gap: 5 }}>
+            <span className="site-label">New goal</span>
+            <h2 style={{ margin: 0, fontSize: 22, letterSpacing: "-0.03em" }}>Launch a new agent run</h2>
+            <p style={{ margin: 0, color: "var(--fg-dim)", fontSize: 13, lineHeight: 1.55 }}>
+              Describe the product once. Astra will split it into research, build, launch, and handoff lanes.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="site-btn site-btn-ghost" style={{ minHeight: 34, padding: "0 13px", fontSize: 12 }}>
+            Close
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label className="site-label">Company</label>
+              <input value={companyName} onChange={e => setCompanyName(e.target.value)} className="site-input" style={{ padding: "10px 13px", fontSize: 14 }} placeholder="Astra" disabled={loading} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label className="site-label">Domain</label>
+              <input value={domain} onChange={e => setDomain(e.target.value)} className="site-input" style={{ padding: "10px 13px", fontSize: 14 }} placeholder="astra.ai" disabled={loading} />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label className="site-label">Goal</label>
+            <textarea
+              value={instruction}
+              onChange={e => setInstruction(e.target.value)}
+              placeholder="Build a SaaS for indie hackers to track MRR — landing page, GitHub repo, Supabase backend, Clerk auth, Vercel deploy."
+              rows={5}
+              disabled={loading}
+              className="site-textarea"
+              style={{ padding: "13px 14px", fontSize: 14, lineHeight: 1.65, resize: "none" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {STARTER_PROMPTS.map((item) => (
+              <button key={item.title} type="button" onClick={() => setInstruction(item.prompt)} disabled={loading}
+                style={{ borderRadius: 999, border: "1px solid var(--line)", background: "rgba(255,255,255,0.03)", color: "var(--fg-dim)", padding: "7px 12px", fontSize: 12, cursor: "pointer" }}>
+                {item.title}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ border: "1px solid var(--line)", borderRadius: 24, padding: "10px 14px" }}>
+            <button type="button" onClick={() => setShowStack(v => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+              <span className="site-label">Tech stack</span>
+              <span style={{ fontSize: 10, color: "var(--fg-mute)" }}>{showStack ? "▲" : "▼"}</span>
+            </button>
+            {showStack && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+                {(Object.entries(STACK_OPTIONS) as [string, string[]][]).map(([key, opts]) => (
+                  <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <label className="site-label">{key}</label>
+                    <select value={stack[key as keyof typeof stack]} onChange={e => setStack(p => ({ ...p, [key]: e.target.value }))} disabled={loading} className="site-input" style={{ padding: "8px 10px", fontSize: 12, background: "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(180,205,228,0.04)), var(--glass-hi)" }}>
+                      {opts.map(o => <option key={o} value={o} style={{ background: "#0b0e14" }}>{o}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 4 }}>
+            {isSignedIn ? (
+              <button type="submit" disabled={loading || !instruction.trim()} className="site-btn site-btn-primary" style={{ padding: "0 24px", fontSize: 14 }}>
+                {loading ? "Launching..." : "Launch Astra ->"}
+              </button>
+            ) : (
+              <SignInButton mode="modal">
+                <button type="button" className="site-btn site-btn-primary" style={{ padding: "0 24px", fontSize: 14 }}>Sign in to launch -&gt;</button>
+              </SignInButton>
+            )}
+          </div>
+
+          {error && <p style={{ borderRadius: 24, border: "1px solid rgba(220,38,38,0.4)", background: "rgba(127,29,29,0.2)", padding: "10px 14px", fontSize: 13, color: "#fca5a5", margin: 0 }}>{error}</p>}
+        </form>
+      </LiquidGlass>
+    </div>
+  );
+}
+
+function WorkspaceSidebar({
+  title,
+  status,
+  sessionId,
+  onNewGoal,
+  onOpenPlan,
+}: {
+  title: string;
+  status: string;
+  sessionId: string;
+  onNewGoal: () => void;
+  onOpenPlan: () => void;
+}) {
+  const navItemStyle: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    minHeight: 42,
+    padding: "0 13px",
+    borderRadius: 22,
+    border: "1px solid rgba(176,180,186,0.10)",
+    background: "rgba(255,255,255,0.025)",
+    color: "var(--fg-dim)",
+    fontSize: 13,
+    textDecoration: "none",
+    cursor: "pointer",
+  };
+
+  return (
+    <LiquidGlass style={{ minWidth: 0 }} contentStyle={{ padding: 14, display: "flex", flexDirection: "column", gap: 14, minHeight: "100%" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 4px 10px" }}>
+        <div style={{ width: 28, height: 28, borderRadius: 10, display: "grid", placeItems: "center", background: "rgba(168,172,178,0.92)", color: "rgba(10,14,22,0.92)", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>A</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, letterSpacing: "0.16em", textTransform: "uppercase", color: "var(--fg)", whiteSpace: "nowrap" }}>Astra</div>
+          <div style={{ fontSize: 10, color: "var(--fg-mute)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{status}</div>
+        </div>
+      </div>
+
+      <button type="button" onClick={onNewGoal} className="site-btn site-btn-primary" style={{ width: "100%", minHeight: 42, justifyContent: "flex-start", padding: "0 14px", fontSize: 13 }}>
+        <span aria-hidden="true">＋</span>
+        New goal
+      </button>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <a href="#current-run" style={{ ...navItemStyle, color: "var(--fg)" }}>
+          <span aria-hidden="true">●</span>
+          Current run
+        </a>
+        <button type="button" onClick={onOpenPlan} style={navItemStyle}>
+          <span aria-hidden="true">▣</span>
+          Plan
+        </button>
+        <Link href="/settings" style={navItemStyle}>
+          <span aria-hidden="true">⚙</span>
+          Account settings
+        </Link>
+        <Link href="/integrations" style={navItemStyle}>
+          <span aria-hidden="true">⌘</span>
+          Integrations
+        </Link>
+        <a href="https://astracreates.com/" style={navItemStyle}>
+          <span aria-hidden="true">↗</span>
+          About
+        </a>
+      </div>
+
+      <div style={{ marginTop: "auto", display: "grid", gap: 10 }}>
+        <div style={{ padding: "12px 13px", borderRadius: 22, border: "1px solid rgba(176,180,186,0.10)", background: "rgba(255,255,255,0.025)", display: "grid", gap: 5 }}>
+          <span style={{ fontSize: 10, color: "var(--fg-mute)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Session</span>
+          <span style={{ fontSize: 12, color: "var(--fg)", lineHeight: 1.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          <span style={{ fontSize: 10, color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sessionId || "new draft"}</span>
+        </div>
+        <ThemeToggle />
+      </div>
+    </LiquidGlass>
+  );
+}
+
+interface PlanNode {
+  id: string;
+  agent: string;
+  title: string;
+  description: string;
+  steps: string[];
+  depends_on: string[];
+  estimated_time?: string;
+}
+
+function PlanTreeNode({
+  node,
+  agentStatus,
+  depth,
+  onEdit,
+}: {
+  node: PlanNode;
+  agentStatus: "waiting" | "running" | "done" | "error" | undefined;
+  depth: number;
+  onEdit: (id: string, field: "title" | "description" | "steps", value: string | string[]) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [editingStep, setEditingStep] = useState<number | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingDesc, setEditingDesc] = useState(false);
+
+  const statusColor = agentStatus === "done" ? "#3D9E5F" : agentStatus === "running" ? "#2563EB" : agentStatus === "error" ? "#C0392B" : "rgba(176,180,186,0.3)";
+  const statusBg = agentStatus === "done" ? "rgba(61,158,95,0.12)" : agentStatus === "running" ? "rgba(37,99,235,0.12)" : "rgba(255,255,255,0.03)";
+  const icon = AGENT_ICONS[node.agent] ?? "◆";
+  const completedSteps = agentStatus === "done" ? node.steps.length : agentStatus === "running" ? Math.ceil(node.steps.length * 0.5) : 0;
+
+  return (
+    <div style={{ marginLeft: depth * 20, position: "relative" }}>
+      {depth > 0 && (
+        <div style={{ position: "absolute", left: -16, top: 20, width: 12, height: 1, background: "rgba(176,180,186,0.2)" }} />
+      )}
+      <div style={{ borderRadius: 14, border: `1px solid ${statusColor}`, background: statusBg, overflow: "hidden", marginBottom: 8 }}>
+        {/* Node header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", cursor: "pointer" }} onClick={() => setExpanded(e => !e)}>
+          <span style={{ fontSize: 16, flexShrink: 0 }}>{icon}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {editingTitle ? (
+              <input
+                autoFocus
+                defaultValue={node.title}
+                style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(180,205,228,0.22)", borderRadius: 6, padding: "2px 8px", fontSize: 13, fontWeight: 600, color: "var(--fg)" }}
+                onBlur={e => { onEdit(node.id, "title", e.target.value); setEditingTitle(false); }}
+                onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                onClick={e => e.stopPropagation()}
+              />
+            ) : (
+              <span
+                style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}
+                onDoubleClick={e => { e.stopPropagation(); setEditingTitle(true); }}
+              >{node.title}</span>
+            )}
+            <span style={{ fontSize: 10, color: "var(--fg-mute)", marginLeft: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>{AGENT_LABELS[node.agent] ?? node.agent}</span>
+          </div>
+          {node.estimated_time && <span style={{ fontSize: 10, color: "var(--fg-mute)", flexShrink: 0 }}>{node.estimated_time}</span>}
+          {/* Progress bar */}
+          <div style={{ width: 60, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.08)", flexShrink: 0, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${node.steps.length ? (completedSteps / node.steps.length) * 100 : 0}%`, background: statusColor, borderRadius: 2, transition: "width 0.4s" }} />
+          </div>
+          <span style={{ fontSize: 12, color: "var(--fg-mute)", flexShrink: 0 }}>{expanded ? "▾" : "▸"}</span>
+        </div>
+
+        {expanded && (
+          <div style={{ borderTop: "1px solid rgba(176,180,186,0.08)", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {/* Description */}
+            {editingDesc ? (
+              <textarea
+                autoFocus
+                defaultValue={node.description}
+                rows={2}
+                style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(180,205,228,0.22)", borderRadius: 6, padding: "6px 8px", fontSize: 12, color: "var(--fg-dim)", resize: "vertical" }}
+                onBlur={e => { onEdit(node.id, "description", e.target.value); setEditingDesc(false); }}
+              />
+            ) : (
+              <p style={{ margin: 0, fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.55, cursor: "text" }} onDoubleClick={() => setEditingDesc(true)}>{node.description}</p>
+            )}
+
+            {/* Steps */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {node.steps.map((step, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${i < completedSteps ? statusColor : "rgba(176,180,186,0.25)"}`, background: i < completedSteps ? statusColor : "transparent", flexShrink: 0, marginTop: 1, display: "grid", placeItems: "center" }}>
+                    {i < completedSteps && <span style={{ fontSize: 9, color: "#fff" }}>✓</span>}
+                  </div>
+                  {editingStep === i ? (
+                    <input
+                      autoFocus
+                      defaultValue={step}
+                      style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(180,205,228,0.22)", borderRadius: 4, padding: "2px 6px", fontSize: 11, color: "var(--fg)" }}
+                      onBlur={e => {
+                        const newSteps = [...node.steps];
+                        newSteps[i] = e.target.value;
+                        onEdit(node.id, "steps", newSteps);
+                        setEditingStep(null);
+                      }}
+                      onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 11, color: i < completedSteps ? "var(--fg-mute)" : "var(--fg-dim)", lineHeight: 1.5, textDecoration: i < completedSteps ? "line-through" : "none", cursor: "text" }} onDoubleClick={() => setEditingStep(i)}>{step}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlanOverlay({
+  open,
+  onClose,
+  title,
+  planTasks,
+  detailedNodes,
+  agents,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  planTasks: AgentTask[];
+  detailedNodes: PlanNode[];
+  agents: Record<string, AgentState>;
+}) {
+  const [nodes, setNodes] = useState<PlanNode[]>([]);
+
+  useEffect(() => {
+    if (detailedNodes.length > 0) setNodes(detailedNodes);
+  }, [detailedNodes]);
+
+  const handleEdit = (id: string, field: "title" | "description" | "steps", value: string | string[]) => {
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, [field]: value } : n));
+  };
+
+  if (!open) return null;
+
+  const totalSteps = nodes.reduce((s, n) => s + n.steps.length, 0);
+  const doneSteps = nodes.reduce((s, n) => {
+    const st = agents[n.agent]?.status;
+    return s + (st === "done" ? n.steps.length : st === "running" ? Math.ceil(n.steps.length * 0.5) : 0);
+  }, 0);
+  const overallPct = totalSteps ? Math.round((doneSteps / totalSteps) * 100) : 0;
+  const doneCount = nodes.filter(n => agents[n.agent]?.status === "done").length;
+
+  // Build dependency tree: group by depth (nodes with no deps first, then their dependents)
+  const roots = nodes.filter(n => !n.depends_on?.length);
+  const rest = nodes.filter(n => n.depends_on?.length > 0);
+
+  const renderNodes = (subset: PlanNode[], depth: number) =>
+    subset.map(n => (
+      <div key={n.id}>
+        <PlanTreeNode node={n} agentStatus={agents[n.agent]?.status} depth={depth} onEdit={handleEdit} />
+        {renderNodes(rest.filter(r => r.depends_on?.includes(n.id)), depth + 1)}
+      </div>
+    ));
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 130, display: "grid", placeItems: "center", padding: 24, background: "rgba(5,8,13,0.56)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)" }}>
+      <LiquidGlass style={{ width: "min(1480px, 100%)" }} contentStyle={{ padding: "28px 32px", height: "min(820px, calc(100vh - 48px))", display: "flex", flexDirection: "column", gap: 18 }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 18 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span className="site-label">Execution Plan</span>
+            <h2 style={{ margin: "4px 0 0", fontSize: "clamp(20px, 2.4vw, 30px)", lineHeight: 1.1, letterSpacing: "-0.04em", overflowWrap: "anywhere" }}>{title || "Launch plan"}</h2>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+            {nodes.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 120, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${overallPct}%`, background: "#2563EB", borderRadius: 2, transition: "width 0.4s" }} />
+                </div>
+                <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)" }}>{doneCount}/{nodes.length} agents · {overallPct}%</span>
+              </div>
+            )}
+            <button type="button" onClick={onClose} className="site-btn site-btn-ghost" style={{ minHeight: 32, padding: "0 14px", fontSize: 12 }}>Close</button>
+          </div>
+        </div>
+
+        {/* Tree or loading */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
+          {nodes.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              {renderNodes(roots, 0)}
+              {renderNodes(rest.filter(r => !nodes.some(n => n.id !== r.id && r.depends_on?.includes(n.id) === false) && roots.every(root => !r.depends_on?.includes(root.id))), 0)}
+            </div>
+          ) : planTasks.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ padding: "12px 16px", borderRadius: 12, background: "rgba(37,99,235,0.08)", border: "1px solid rgba(37,99,235,0.2)", fontSize: 12, color: "var(--fg-dim)" }}>
+                ⏳ Detailed plan generates after research completes…
+              </div>
+              {planTasks.map((task, i) => (
+                <div key={task.id} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "10px 14px", borderRadius: 12, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)" }}>
+                  <span style={{ width: 26, height: 26, borderRadius: 999, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.05)", fontSize: 10, color: "var(--fg-mute)", flexShrink: 0 }}>{i + 1}</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{AGENT_LABELS[task.agent] ?? task.agent}</div>
+                    <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.5, marginTop: 2 }}>{task.instruction}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--fg-mute)", fontSize: 13 }}>
+              Plan will appear here once the session starts.
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontSize: 10, color: "var(--fg-mute)", borderTop: "1px solid rgba(176,180,186,0.08)", paddingTop: 10 }}>
+          Double-click any title, description, or step to edit · Progress updates live as agents complete
+        </div>
+      </LiquidGlass>
+    </div>
+  );
+}
+
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export function GoalWorkspace({
@@ -1033,19 +1491,22 @@ export function GoalWorkspace({
   instruction = "",
   founderId = "founder_001",
   company = "",
+  startNew = false,
 }: {
   sessionId: string;
   instruction?: string;
   founderId?: string;
   company?: string;
+  startNew?: boolean;
 }) {
 
   // ── Persistent session cache ──────────────────────────────────────────────
   const CACHE_KEY = `astra_session_${sessionId}`;
 
   const saveCache = useCallback((a: Record<string, AgentState>, p: AgentTask[], d: boolean) => {
+    if (!sessionId) return;
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d })); } catch {}
-  }, [CACHE_KEY]);
+  }, [CACHE_KEY, sessionId]);
 
   // Always start with empty state to avoid SSR/client hydration mismatch;
   // load localStorage cache in useEffect after mount.
@@ -1056,6 +1517,7 @@ export function GoalWorkspace({
 
   // Restore from cache after first render (client-only)
   useEffect(() => {
+    if (!sessionId) return;
     try {
       const raw = localStorage.getItem(CACHE_KEY);
       if (!raw) return;
@@ -1068,7 +1530,13 @@ export function GoalWorkspace({
         if (firstAgent) setActiveAgent(firstAgent);
       });
     } catch {}
-  }, [CACHE_KEY]);
+  }, [CACHE_KEY, sessionId]);
+  const [newGoalOpen, setNewGoalOpen] = useState(startNew || !sessionId);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [detailedNodes, setDetailedNodes] = useState<PlanNode[]>([]);
+  useEffect(() => {
+    if (startNew || !sessionId) queueMicrotask(() => setNewGoalOpen(true));
+  }, [startNew, sessionId]);
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -1092,6 +1560,7 @@ export function GoalWorkspace({
     es.onmessage = (e) => {
       const event = JSON.parse(e.data);
       if (event.type === "ping" || event.type === "founder_steer") return;
+      if (event.type === "detailed_plan") { setDetailedNodes(event.nodes ?? []); return; }
       if (event.type === "session_expired") { setError("Session expired — backend was restarted. Run a new goal."); es.close(); return; }
 
       setAgents((prev) => {
@@ -1191,7 +1660,7 @@ export function GoalWorkspace({
   const selected = activeAgent || agentList[0] || "";
   const selectedState = visibleAgents[selected];
   const selectedPlanTask = planTasks.find(t => t.agent === selected);
-  const title = company || instruction.slice(0, 48) || "Goal";
+  const title = company || instruction.slice(0, 48) || "Astra";
   const runningCount = Object.values(visibleAgents).filter(a => a.status === "running").length;
   const failedCount = Object.values(visibleAgents).filter(a => a.status === "error").length;
   const totalVisitedUrls = Object.values(visibleAgents).reduce((sum, a) => sum + (a.visitedUrls?.length ?? 0), 0);
@@ -1207,24 +1676,27 @@ export function GoalWorkspace({
       summary: summarizeResult(state),
     }))
     .slice(0, 4);
+  const statusText = !sessionId ? "ready" : done ? "complete" : error ? "error" : reconnecting ? "reconnecting..." : connected ? "running" : "connecting";
 
   return (
-    <div className="goal-workspace" style={{
-      width: "100%",
-      maxWidth: 1480,
-      minHeight: "calc(100vh - clamp(72px, 10vw, 168px))",
-      margin: "0 auto",
-      display: "flex",
-      flexDirection: "column",
-      gap: 24,
-      justifyContent: "center",
-    }}>
+    <div className="astra-app-layout" style={{ width: "100%", maxWidth: 1900, margin: "0 auto", display: "grid", gridTemplateColumns: "minmax(190px, 220px) minmax(0, 1fr)", gap: 24, alignItems: "stretch" }}>
+      <NewGoalOverlay open={newGoalOpen} onClose={() => setNewGoalOpen(false)} />
+      <PlanOverlay open={planOpen} onClose={() => setPlanOpen(false)} title={title} planTasks={planTasks} detailedNodes={detailedNodes} agents={agents} />
+      <aside className="astra-workspace-sidebar" style={{ minWidth: 0, alignSelf: "start" }}>
+        <WorkspaceSidebar title={title} status={statusText} sessionId={sessionId} onNewGoal={() => setNewGoalOpen(true)} onOpenPlan={() => setPlanOpen(true)} />
+      </aside>
+      <div id="current-run" className="goal-workspace" style={{
+        width: "100%",
+        minWidth: 0,
+        minHeight: "calc(100vh - clamp(72px, 10vw, 168px))",
+        display: "flex",
+        flexDirection: "column",
+        gap: 24,
+        justifyContent: "center",
+      }}>
       {/* Header */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <Link href="/" className="site-btn site-btn-ghost" style={{ minHeight: 32, padding: "0 13px", fontSize: 12 }}>
-            ← Back
-          </Link>
           <h1 style={{ fontSize: 18, fontWeight: 600, color: "var(--fg)", margin: 0 }}>{title}</h1>
           <span style={{
             fontSize: 11, letterSpacing: "0.06em", padding: "3px 10px", borderRadius: 999,
@@ -1232,9 +1704,9 @@ export function GoalWorkspace({
             background: done ? "rgba(61,158,95,0.08)" : error ? "rgba(192,57,43,0.08)" : reconnecting ? "rgba(180,83,9,0.08)" : connected ? "rgba(37,99,235,0.08)" : "rgba(0,0,0,0.04)",
             border: `1px solid ${done ? "rgba(61,158,95,0.22)" : error ? "rgba(192,57,43,0.22)" : reconnecting ? "rgba(180,83,9,0.22)" : connected ? "rgba(37,99,235,0.22)" : "rgba(0,0,0,0.1)"}`,
           }}>
-            {done ? "✦ complete" : error ? "error" : reconnecting ? "reconnecting…" : connected ? "running" : "connecting"}
+            {statusText}
           </span>
-          <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)" }}>{sessionId}</span>
+          {sessionId && <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)" }}>{sessionId}</span>}
         </div>
         {total > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1255,7 +1727,7 @@ export function GoalWorkspace({
 
       {/* Main layout: sidebar + detail */}
       {agentList.length > 0 && (
-        <div className="goal-workspace-grid" style={{ display: "grid", gridTemplateColumns: "minmax(260px, 320px) minmax(0, 1fr)", gap: 18, alignItems: "stretch" }}>
+        <div className="goal-workspace-grid" style={{ display: "grid", gridTemplateColumns: "minmax(260px, 340px) minmax(0, 1fr)", gap: 22, alignItems: "stretch" }}>
           {/* Agent sidebar */}
           <LiquidGlass style={{ minWidth: 0 }} contentStyle={{ padding: "12px", display: "flex", flexDirection: "column", gap: 4, minHeight: 620 }}>
             <AgentSidebar agentList={agentList} agents={visibleAgents} activeAgent={selected} onSelect={setActiveAgent} />
@@ -1273,7 +1745,7 @@ export function GoalWorkspace({
       )}
 
       {agentList.length > 0 && (
-        <div className="blob-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, alignItems: "stretch" }}>
+        <div className="blob-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, alignItems: "stretch" }}>
           <LiquidGlass contentStyle={{ padding: "26px 28px", display: "flex", flexDirection: "column", gap: 18, height: 420, minHeight: 420 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span className="site-label">Progress</span>
@@ -1382,6 +1854,7 @@ export function GoalWorkspace({
       {/* Bottom panels */}
       {connected && !error && !done && <SteerPanel sessionId={sessionId} isRunning={!done} />}
       {done && <CompanyChat priorSessionId={sessionId} founderId={founderId} company={company} />}
+      </div>
     </div>
   );
 }
