@@ -412,12 +412,50 @@ function MarketingPreview({ state }: { state: AgentState }) {
   );
 }
 
+/** Extracts all PDF/TXT file paths from any result object (any depth, any key name). */
+function extractFilePaths(obj: unknown, seen = new Set<string>()): string[] {
+  if (!obj || typeof obj !== "object") return [];
+  const paths: string[] = [];
+  for (const v of Object.values(obj as Record<string, unknown>)) {
+    if (typeof v === "string" && /\.(pdf|txt)$/i.test(v) && v.startsWith("/") && !seen.has(v)) {
+      seen.add(v); paths.push(v);
+    } else if (v && typeof v === "object") {
+      paths.push(...extractFilePaths(v, seen));
+    }
+  }
+  return paths;
+}
+
+function fileUrl(pathOrFilename: string): string {
+  const name = pathOrFilename.split("/").pop() ?? pathOrFilename;
+  return `${BASE}/files/${encodeURIComponent(name)}`;
+}
+
+function PdfEmbed({ path, label, height = 340 }: { path: string; label?: string; height?: number }) {
+  const url = fileUrl(path);
+  const filename = path.split("/").pop() ?? path;
+  const isPdf = filename.toLowerCase().endsWith(".pdf");
+  return (
+    <div style={{ borderRadius: 16, overflow: "hidden", border: "1px solid rgba(0,0,0,0.10)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 14px", background: "rgba(180,205,228,0.10)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
+        <span style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", flex: 1 }}>📄 {label ?? filename}</span>
+        <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#2563EB", textDecoration: "none", flexShrink: 0 }}>Download ↗</a>
+      </div>
+      {isPdf
+        ? <iframe src={url} style={{ width: "100%", height, border: "none", display: "block" }} title={label ?? filename} />
+        : <div style={{ fontSize: 11, color: "var(--fg-dim)", padding: "10px 14px" }}>
+            <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#2563EB" }}>{filename} ↗</a>
+          </div>
+      }
+    </div>
+  );
+}
+
 function LegalPreview({ state }: { state: AgentState }) {
   const r = state.result ?? {};
   const [legalTab, setLegalTab] = useState(0);
 
-  // Collect all documents from result keys and log tool results
-  type LegalDoc = { label: string; path?: string; filename?: string; text?: string };
+  type LegalDoc = { label: string; path?: string; text?: string };
   const docs: LegalDoc[] = [];
 
   const DOC_KEYS: [string, string][] = [
@@ -433,42 +471,51 @@ function LegalPreview({ state }: { state: AgentState }) {
     const entry = r[key] as Record<string, unknown> | string | undefined;
     if (!entry) continue;
     if (typeof entry === "object") {
-      const entryText = (entry.content ?? entry.text ?? entry.formatted_text) as string | undefined;
-      docs.push({ label, path: entry.path as string | undefined, filename: entry.filename as string | undefined, text: entryText });
+      const p = (entry.path ?? entry.filename) as string | undefined;
+      const text = (entry.content ?? entry.text ?? entry.formatted_text) as string | undefined;
+      docs.push({ label, path: p, text });
     } else {
       docs.push({ label, text: String(entry) });
     }
   }
 
-  // Fallback: single doc from top-level path/filename/formatted_text
-  if (docs.length === 0) {
-    const path = (r.path ?? r.privacy_policy_path ?? r.filename) as string | undefined;
-    const text = (r.formatted_text ?? r.content ?? r.document_text ?? r.text) as string | undefined;
-    const filename = (r.filename ?? (typeof path === "string" ? path.split("/").pop() : undefined)) as string | undefined;
-    const title = (r.title ?? r.doc_type ?? "Document") as string;
-    if (path || text) docs.push({ label: title, path, filename, text });
-  }
-
-  // Fallback: check if result has `documents` array
+  // documents[] array
   if (docs.length === 0) {
     const docList = r.documents as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(docList)) {
       for (const d of docList) {
-        const label = (d.title ?? d.doc_type ?? d.type ?? "Document") as string;
-        docs.push({ label: String(label), path: d.path as string | undefined, filename: d.filename as string | undefined, text: (d.content ?? d.text) as string | undefined });
+        const label = String(d.title ?? d.doc_type ?? d.type ?? "Document");
+        const p = (d.path ?? d.filename) as string | undefined;
+        docs.push({ label, path: p, text: (d.content ?? d.text) as string | undefined });
       }
     }
   }
 
-  // Extract docs from log (generate_pdf tool results)
+  // Single top-level doc
+  if (docs.length === 0) {
+    const path = (r.path ?? r.privacy_policy_path ?? r.filename) as string | undefined;
+    const text = (r.formatted_text ?? r.content ?? r.document_text ?? r.text) as string | undefined;
+    const title = String(r.title ?? r.doc_type ?? "Document");
+    if (path || text) docs.push({ label: title, path, text });
+  }
+
+  // Deep-scan result object for any .pdf/.txt paths
+  const deepPaths = extractFilePaths(r);
+  for (const p of deepPaths) {
+    const name = p.split("/").pop() ?? p;
+    const label = name.replace(/[_-]/g, " ").replace(/\.(pdf|txt)$/i, "").replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1));
+    if (!docs.find(d => d.path === p)) docs.push({ label, path: p });
+  }
+
+  // Scan log for generate_pdf tool output paths
   for (const entry of state.log) {
-    if (!entry.text.includes("generate_pdf") && !entry.text.includes(".pdf") && !entry.text.includes(".txt")) continue;
-    const pathMatch = entry.text.match(/\/[^\s"']+\.(pdf|txt)/);
-    if (pathMatch) {
-      const p = pathMatch[0];
+    if (!entry.text.includes(".pdf") && !entry.text.includes(".txt")) continue;
+    const m = entry.text.match(/\/[^\s"'\\]+\.(pdf|txt)/i);
+    if (m) {
+      const p = m[0];
       const name = p.split("/").pop() ?? p;
-      const label = name.replace(/[_-]/g, " ").replace(/\.(pdf|txt)$/, "").replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1));
-      if (!docs.find(d => d.path === p)) docs.push({ label, path: p, filename: name });
+      const label = name.replace(/[_-]/g, " ").replace(/\.(pdf|txt)$/i, "").replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1));
+      if (!docs.find(d => d.path === p)) docs.push({ label, path: p });
     }
   }
 
@@ -477,47 +524,28 @@ function LegalPreview({ state }: { state: AgentState }) {
   }
 
   const active = docs[legalTab] ?? docs[0];
-  const pdfUrl = active.filename ? `${BASE}/files/${encodeURIComponent(active.filename)}` : null;
-
-  const TAB = (label: string, i: number) => (
-    <button key={i} onClick={() => setLegalTab(i)} style={{
-      fontSize: 11, padding: "4px 12px", borderRadius: 6, cursor: "pointer",
-      border: legalTab === i ? "1px solid rgba(180,205,228,0.22)" : "1px solid transparent",
-      background: legalTab === i ? "rgba(180,205,228,0.10)" : "transparent",
-      color: legalTab === i ? "var(--fg)" : "var(--fg-mute)", whiteSpace: "nowrap",
-    }}>{label}</button>
-  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {/* Sub-tabs */}
       {docs.length > 1 && (
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid rgba(0,0,0,0.08)", paddingBottom: 8 }}>
-          {docs.map((d, i) => TAB(d.label, i))}
+          {docs.map((d, i) => (
+            <button key={i} onClick={() => setLegalTab(i)} style={{
+              fontSize: 11, padding: "4px 12px", borderRadius: 6, cursor: "pointer",
+              border: legalTab === i ? "1px solid rgba(180,205,228,0.22)" : "1px solid transparent",
+              background: legalTab === i ? "rgba(180,205,228,0.10)" : "transparent",
+              color: legalTab === i ? "var(--fg)" : "var(--fg-mute)", whiteSpace: "nowrap",
+            }}>{d.label}</button>
+          ))}
         </div>
       )}
 
-      {/* PDF embed or text */}
-      {active.filename?.endsWith(".pdf") && pdfUrl ? (
-        <div style={{ borderRadius: 20, overflow: "hidden", border: "1px solid rgba(0,0,0,0.1)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(180,205,228,0.10)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
-            <span style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", flex: 1 }}>📄 {active.filename}</span>
-            <a href={pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#2563EB", textDecoration: "none" }}>Download ↗</a>
+      {active.path
+        ? <PdfEmbed path={active.path} label={active.label} height={360} />
+        : <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 340, overflowY: "auto", padding: "12px 14px", background: "rgba(180,205,228,0.10)", borderRadius: 16, border: "1px solid rgba(0,0,0,0.08)" }}>
+            {active.text ? String(active.text).slice(0, 3000) : "No content available."}
           </div>
-          <iframe src={pdfUrl} style={{ width: "100%", height: 320, border: "none" }} title={active.label} />
-        </div>
-      ) : (
-        <>
-          {active.filename && (
-            <div style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-dim)", padding: "4px 8px", background: "rgba(180,205,228,0.10)", borderRadius: 6, border: "1px solid rgba(180,205,228,0.22)" }}>
-              📄 {active.filename}
-            </div>
-          )}
-          <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 320, overflowY: "auto", padding: "12px 14px", background: "rgba(180,205,228,0.10)", borderRadius: 20, border: "1px solid rgba(0,0,0,0.08)" }}>
-            {active.text ? String(active.text).slice(0, 2000) : "No text content available."}
-          </div>
-        </>
-      )}
+      }
     </div>
   );
 }
@@ -568,27 +596,27 @@ function OpsPreview({ state }: { state: AgentState }) {
   const r = state.result;
   const sop = (r?.SOP ?? r?.content ?? r?.sop ?? r?.summary ?? r?.deliverable ?? r?.pitch_deck ?? r?.investor_summary) as string | undefined;
   const title = (r?.title ?? r?.doc_type) as string | undefined;
-  const pdfPath = (r?.path ?? r?.filename) as string | undefined;
-  if (!r || (!sop && !pdfPath)) {
+
+  // Collect all PDF/TXT paths: direct keys + deep scan + log
+  const allPaths: string[] = [];
+  const directPath = (r?.path ?? r?.filename ?? r?.pdf_path ?? r?.file_path ?? r?.output_path) as string | undefined;
+  if (directPath) allPaths.push(directPath);
+  for (const p of extractFilePaths(r ?? {})) if (!allPaths.includes(p)) allPaths.push(p);
+  for (const entry of state.log) {
+    const m = entry.text.match(/\/[^\s"'\\]+\.(pdf|txt)/i);
+    if (m && !allPaths.includes(m[0])) allPaths.push(m[0]);
+  }
+
+  if (!r || (allPaths.length === 0 && !sop)) {
     return state.status === "done" ? <ResultDump result={state.result} /> : <BuildingIndicator label="Handling operations…" />;
   }
-  const pdfFilename = pdfPath ? pdfPath.split("/").pop() : undefined;
-  const pdfUrl = pdfFilename ? `${BASE}/files/${encodeURIComponent(pdfFilename)}` : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {title && <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{title}</div>}
-      {pdfUrl && (
-        <div style={{ borderRadius: 20, overflow: "hidden", border: "1px solid rgba(0,0,0,0.1)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(180,205,228,0.10)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
-            <span style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", flex: 1 }}>📄 {pdfFilename}</span>
-            <a href={pdfUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#2563EB", textDecoration: "none" }}>Download ↗</a>
-          </div>
-          {pdfFilename?.endsWith(".pdf") && <iframe src={pdfUrl} style={{ width: "100%", height: 260, border: "none" }} title={title ?? "Document"} />}
-        </div>
-      )}
+      {allPaths.map(p => <PdfEmbed key={p} path={p} height={300} />)}
       {sop && (
-        <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(180,205,228,0.10)", borderRadius: 24, border: "1px solid rgba(0,0,0,0.08)" }}>
+        <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(180,205,228,0.10)", borderRadius: 16, border: "1px solid rgba(0,0,0,0.08)" }}>
           {String(sop).slice(0, 1200)}
         </div>
       )}
