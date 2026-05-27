@@ -5,6 +5,7 @@ from backend.tools.obsidian_logger import obsidian_log, obsidian_read, obsidian_
 from backend.tools.browser_research import search_and_fetch, fetch_and_read, research_papers
 from backend.tools.patent_search import patent_search
 from backend.tools.web_search import news_search
+from backend.tools.video_research import youtube_research, tiktok_research
 
 
 def _make_auto_logging_tool(tool_fn, tool_name: str, ctx_holder: list, agent_name: str = "research"):
@@ -77,7 +78,7 @@ _FOCUS_ROLES = {
         "obsidian_log with: MARKET SIZE, GROWTH RATE, TAM/SAM/SOM, KEY SEGMENTS, REGULATORY, VC FUNDING DATA."
     ),
     "research_competitors": (
-        "COMPETITOR INTELLIGENCE (run ALL 8):\n"
+        "COMPETITOR INTELLIGENCE (run ALL 10):\n"
         "1. search_and_fetch('{topic} top competitors companies comparison 2025')\n"
         "2. search_and_fetch('{topic} pricing model subscription freemium enterprise')\n"
         "3. search_and_fetch('{topic} Y Combinator startup product hunt launch')\n"
@@ -85,12 +86,14 @@ _FOCUS_ROLES = {
         "5. search_and_fetch('{topic} startup funding raised Series A B valuation')\n"
         "6. search_and_fetch('{topic} product features comparison strengths weaknesses')\n"
         "7. search_and_fetch('{topic} customer reviews complaints reddit forum')\n"
-        "8. patent_search('{topic}')\n\n"
+        "8. patent_search('{topic}')\n"
+        "9. youtube_research('{topic} competitor review demo product walkthrough')\n"
+        "10. tiktok_research('{topic} review product')\n\n"
         "Then for EACH top competitor found: fetch_and_read(competitor_homepage_url) and fetch_and_read(competitor_pricing_url).\n"
-        "obsidian_log with: COMPETITOR TABLE (name, pricing, strengths, weaknesses, market position), WHITESPACE OPPORTUNITIES."
+        "obsidian_log with: COMPETITOR TABLE (name, pricing, strengths, weaknesses, market position), WHITESPACE OPPORTUNITIES, VIDEO INSIGHTS (viral angles, creator sentiment, common complaints)."
     ),
     "research_execution": (
-        "EXECUTION STRATEGY RESEARCH (run ALL 8):\n"
+        "EXECUTION STRATEGY RESEARCH (run ALL 10):\n"
         "1. search_and_fetch('how to build {topic} startup go-to-market strategy')\n"
         "2. search_and_fetch('{topic} business model revenue streams monetization')\n"
         "3. search_and_fetch('{topic} tech stack architecture how it works implementation')\n"
@@ -98,9 +101,11 @@ _FOCUS_ROLES = {
         "5. search_and_fetch('{topic} unit economics LTV CAC payback period')\n"
         "6. search_and_fetch('{topic} founder story how they built it lessons learned')\n"
         "7. search_and_fetch('{topic} user pain points problems complaints needs')\n"
-        "8. search_and_fetch('{topic} customer success stories case studies ROI')\n\n"
+        "8. search_and_fetch('{topic} customer success stories case studies ROI')\n"
+        "9. youtube_research('{topic} startup founder how to build tutorial')\n"
+        "10. tiktok_research('{topic} startup tips growth hacks')\n\n"
         "Then 8+ fetch_and_read calls on the most actionable URLs found.\n"
-        "obsidian_log with: RECOMMENDED TECH STACK, GTM STRATEGY, PRICING MODEL, FIRST 90 DAYS PLAN, USER PERSONAS, KEY RISKS."
+        "obsidian_log with: RECOMMENDED TECH STACK, GTM STRATEGY, PRICING MODEL, FIRST 90 DAYS PLAN, USER PERSONAS, KEY RISKS, VIDEO CREATOR INSIGHTS."
     ),
 }
 
@@ -118,6 +123,8 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
     auto_papers = _make_auto_logging_tool(research_papers, "research_papers", ctx_holder, agent_name)
     auto_news = _make_auto_logging_tool(news_search, "news_search", ctx_holder, agent_name)
     auto_patent = _make_auto_logging_tool(patent_search, "patent_search", ctx_holder, agent_name)
+    auto_youtube = _make_auto_logging_tool(youtube_research, "youtube_research", ctx_holder, agent_name)
+    auto_tiktok = _make_auto_logging_tool(tiktok_research, "tiktok_research", ctx_holder, agent_name)
 
     from backend.config import settings
     focus_searches = _FOCUS_ROLES.get(agent_name, _FOCUS_ROLES["research"])
@@ -135,6 +142,8 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
             "- research_papers(query) — academic papers.\n"
             "- news_search(query) — recent news.\n"
             "- patent_search(query) — IP landscape.\n"
+            "- youtube_research(query) — YouTube video metadata + transcripts for competitor/creator analysis.\n"
+            "- tiktok_research(query) — TikTok video metadata + captions for viral trend analysis.\n"
             "- obsidian_log — FINAL step only after ALL searches complete.\n\n"
             "YOUR MANDATORY SEARCH SEQUENCE (replace {topic} with the actual subject):\n\n"
             + focus_searches
@@ -145,6 +154,8 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
             "research_papers": auto_papers,
             "news_search": auto_news,
             "patent_search": auto_patent,
+            "youtube_research": auto_youtube,
+            "tiktok_research": auto_tiktok,
             "obsidian_log": obsidian_log,
             "obsidian_read": obsidian_read,
             "obsidian_append": obsidian_append,
