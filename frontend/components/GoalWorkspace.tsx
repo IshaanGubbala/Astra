@@ -130,8 +130,8 @@ function extractUrls(log: LogEntry[]): string[] {
   return out;
 }
 
-function faviconUrl(url: string): string {
-  try { return `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=16`; } catch { return ""; }
+function faviconUrl(url: string): string | null {
+  try { return `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=16`; } catch { return null; }
 }
 
 function summarizeResult(state: AgentState | undefined): string {
@@ -158,7 +158,7 @@ function ResearchPreview({ state }: { state: AgentState }) {
       {current && (
         <div style={{ borderRadius: 28, overflow: "hidden", border: "1px solid rgba(0,0,0,0.09)", background: "#FFFFFF" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderBottom: "1px solid rgba(0,0,0,0.07)", background: "rgba(180,205,228,0.10)" }}>
-            <img src={faviconUrl(current)} width={12} height={12} style={{ opacity: 0.6 }} onError={e => (e.currentTarget.style.display = "none")} />
+            {faviconUrl(current) && <img src={faviconUrl(current)!} width={12} height={12} style={{ opacity: 0.6 }} onError={e => (e.currentTarget.style.display = "none")} />}
             <span style={{ fontSize: 11, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{current}</span>
             <a href={current} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: "#2563EB", textDecoration: "none" }}>↗</a>
           </div>
@@ -177,7 +177,7 @@ function ResearchPreview({ state }: { state: AgentState }) {
         <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", marginBottom: 4 }}>Sites visited ({urls.length})</span>
         {urls.map((u, i) => (
           <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 8, borderRadius: 6, padding: "5px 8px", background: u === current ? "rgba(180,205,228,0.10)" : "rgba(255,255,255,0.28)", border: `1px solid ${u === current ? "rgba(180,205,228,0.22)" : "rgba(255,255,255,0.45)"}`, textDecoration: "none" }}>
-            <img src={faviconUrl(u)} width={12} height={12} onError={e => (e.currentTarget.style.display = "none")} />
+            {faviconUrl(u) && <img src={faviconUrl(u)!} width={12} height={12} onError={e => (e.currentTarget.style.display = "none")} />}
             <span style={{ fontSize: 11, color: "var(--fg-dim)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.replace(/^https?:\/\//, "").slice(0, 60)}</span>
           </a>
         ))}
