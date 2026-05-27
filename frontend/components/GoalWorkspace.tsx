@@ -1566,7 +1566,14 @@ export function GoalWorkspace({
       const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean };
       const firstAgent = cached.planTasks?.[0]?.agent ?? Object.keys(cached.agents ?? {})[0] ?? "";
       queueMicrotask(() => {
-        if (cached.agents && Object.keys(cached.agents).length > 0) setAgents(cached.agents);
+        if (cached.agents && Object.keys(cached.agents).length > 0) {
+          // Agents stuck "running" after a refresh will never get done — downgrade to "waiting"
+          const fixedAgents: Record<string, AgentState> = {};
+          for (const [k, a] of Object.entries(cached.agents)) {
+            fixedAgents[k] = a.status === "running" ? { ...a, status: "waiting" } : a;
+          }
+          setAgents(fixedAgents);
+        }
         if (cached.planTasks?.length > 0) setPlanTasks(cached.planTasks);
         if (cached.done) setDone(true);
         if (firstAgent) setActiveAgent(firstAgent);
@@ -1612,6 +1619,9 @@ export function GoalWorkspace({
         if (event.type === "plan_done") {
           setPlanTasks(event.tasks);
           for (const t of event.tasks) {
+            const existing = next[t.agent];
+            // Don't reset agents already running or done (second plan_done fires after research completes)
+            if (existing && existing.status !== "waiting") continue;
             next[t.agent] = { task_id: t.id, agent: t.agent, instruction: t.instruction, status: "waiting", currentAction: null, currentTool: null, reasoning: null, result: null, log: [], visitedUrls: [], commits: [] };
           }
           if (!activeAgent && event.tasks.length > 0) setActiveAgent(event.tasks[0].agent);

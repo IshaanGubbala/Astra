@@ -29,6 +29,7 @@ export default function AppHome() {
   return (
     <div className="site-shell" style={{ paddingTop: 48, paddingBottom: 88 }}>
       <GoalWorkspace
+        key={activeSessionId || "new"}
         sessionId={activeSessionId}
         instruction={activeInstruction}
         founderId={activeFounderId}
