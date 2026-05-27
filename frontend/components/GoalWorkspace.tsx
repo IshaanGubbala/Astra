@@ -1268,9 +1268,11 @@ function WorkspaceSidebar({
 }
 
 function SessionHistory({ currentSessionId }: { currentSessionId: string }) {
-  const sessions = useSyncExternalStore(subscribeSessions, getSessionSnapshot, () => [] as SessionRecord[]);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const sessions = useSyncExternalStore(subscribeSessions, getSessionSnapshot, getSessionSnapshot);
   const router = useRouter();
-  if (sessions.length === 0) return null;
+  if (!mounted || sessions.length === 0) return null;
   const statusDot = (s: SessionRecord["status"]) =>
     s === "done" ? "#3D9E5F" : s === "running" ? "#2563EB" : "#C0392B";
 

@@ -3,18 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
-import type { ReactNode } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
-
-function NavLink({ href, children, className = "" }: { href: string; children: ReactNode; className?: string }) {
-  const pathname = usePathname();
-  const isActive = href === "/" ? pathname === "/" : pathname.startsWith(href.split("#")[0]);
-  return (
-    <Link href={href} className={`${className} ${isActive ? "active" : ""}`.trim()}>
-      {children}
-    </Link>
-  );
-}
 
 export default function SiteNav() {
   const pathname = usePathname();
@@ -31,10 +20,9 @@ export default function SiteNav() {
         <a href="https://astracreates.com">About</a>
 
         <Show when="signed-in">
-          <NavLink href="/">Dashboard</NavLink>
-          <NavLink href="/" className="site-btn site-btn-primary">
+          <Link href="/?new=1" className="site-btn site-btn-primary">
             New goal <span aria-hidden="true">→</span>
-          </NavLink>
+          </Link>
           <UserButton
             appearance={{
               elements: { avatarBox: "w-8 h-8 rounded-full ring-1 ring-[rgba(0,0,0,0.12)]" },

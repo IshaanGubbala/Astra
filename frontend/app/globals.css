@@ -91,8 +91,8 @@
   --sp-1:  10px;  --sp-2:  18px;  --sp-3:  28px;  --sp-4:  38px;
   --sp-5:  48px;  --sp-6:  60px;  --sp-7:  72px;  --sp-8:  88px;
 
-  --max:     1280px;
-  --gutter:  clamp(28px, 5vw, 72px);
+  --max:     1760px;
+  --gutter:  clamp(22px, 3vw, 48px);
   --radius:  var(--r);
   --blur:    var(--glass-blur);
   --blur-sm: blur(12px) saturate(140%);
@@ -382,6 +382,12 @@ p { margin: 0; }
   background: radial-gradient(ellipse at center, rgba(90,114,144,0.10), transparent 74%);
 }
 
+.astra-workspace-sidebar {
+  position: sticky;
+  top: 50vh;
+  transform: translateY(-50%);
+}
+
 .site-footer {
   position: relative;
   z-index: 2;
@@ -638,6 +644,12 @@ p { margin: 0; }
   .site-nav-links { gap: var(--sp-2); }
   .site-shell { padding-top: 80px; }
   .landing-grid { grid-template-columns: 1fr !important; }
+  .astra-app-layout { grid-template-columns: 1fr !important; }
+  .astra-workspace-sidebar {
+    order: -1;
+    position: static;
+    transform: none;
+  }
   .goal-workspace { justify-content: flex-start !important; }
   .goal-workspace-grid { grid-template-columns: 1fr !important; }
 }

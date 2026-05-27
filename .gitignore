@@ -10,3 +10,5 @@ memory/
 results/
 pi-mlx-server
 .composio.lock
+.vercel
+deploy/certs/
