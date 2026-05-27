@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useUser, SignInButton } from "@clerk/nextjs";
 import { submitGoal } from "@/lib/api";
 import { getSessionSnapshot, saveSession, subscribeSessions } from "@/lib/history";
 import LiquidGlass from "@/components/LiquidGlass";
 import ThemeToggle from "@/components/ThemeToggle";
+import { GoalWorkspace } from "@/components/GoalWorkspace";
 
 import type { SessionRecord } from "@/lib/history";
 const EMPTY_RECENT_SESSIONS: SessionRecord[] = [];
@@ -100,6 +101,7 @@ function getStatusLabel(status: "running" | "done" | "error") {
 
 export default function AppHome() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, isSignedIn } = useUser();
   const [companyName, setCompanyName] = useState("");
   const [domain, setDomain] = useState("");
@@ -122,6 +124,10 @@ export default function AppHome() {
   const draftLabel = trimGoalLabel(companyName || instruction, "Current draft");
   const planTracks = buildPlanTracks(instruction, stack);
   const agentFocus = buildAgentFocus(instruction);
+  const activeSessionId = searchParams.get("session") ?? "";
+  const activeInstruction = searchParams.get("instruction") ?? "";
+  const activeFounderId = searchParams.get("founder") ?? user?.id ?? "founder_001";
+  const activeCompany = searchParams.get("company") ?? "";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -139,11 +145,24 @@ export default function AppHome() {
       const result = await submitGoal(founderId, full);
       saveSession({ sessionId: result.session_id, founderId, companyName: companyName.trim() || instruction.slice(0, 40), instruction, startedAt: Date.now(), status: "running", artifacts: [] });
       if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission();
-      router.push(`/dashboard/goal/${result.session_id}?instruction=${encodeURIComponent(instruction)}&founder=${encodeURIComponent(founderId)}&company=${encodeURIComponent(companyName)}`);
+      router.push(`/?session=${encodeURIComponent(result.session_id)}&instruction=${encodeURIComponent(instruction)}&founder=${encodeURIComponent(founderId)}&company=${encodeURIComponent(companyName)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit goal");
       setLoading(false);
     }
+  }
+
+  if (activeSessionId) {
+    return (
+      <div className="site-shell" style={{ paddingTop: 48, paddingBottom: 88 }}>
+        <GoalWorkspace
+          sessionId={activeSessionId}
+          instruction={activeInstruction}
+          founderId={activeFounderId}
+          company={activeCompany}
+        />
+      </div>
+    );
   }
 
   return (
@@ -282,7 +301,7 @@ export default function AppHome() {
                   {latestSession && <span style={{ fontFamily: "var(--font-jetbrains-mono)" }}>#{latestSession.sessionId.slice(0, 8)}</span>}
                 </div>
                 {latestSession && (
-                  <button type="button" onClick={() => router.push(`/dashboard/goal/${latestSession.sessionId}`)} className="site-btn site-btn-primary" style={{ width: "fit-content", padding: "0 18px" }}>
+                  <button type="button" onClick={() => router.push(`/?session=${encodeURIComponent(latestSession.sessionId)}&instruction=${encodeURIComponent(latestSession.instruction)}&founder=${encodeURIComponent(latestSession.founderId)}&company=${encodeURIComponent(latestSession.companyName)}`)} className="site-btn site-btn-primary" style={{ width: "fit-content", padding: "0 18px" }}>
                     Open latest →
                   </button>
                 )}
@@ -373,7 +392,7 @@ export default function AppHome() {
                 <button
                   key={session.sessionId}
                   type="button"
-                  onClick={() => router.push(`/dashboard/goal/${session.sessionId}`)}
+                  onClick={() => router.push(`/?session=${encodeURIComponent(session.sessionId)}&instruction=${encodeURIComponent(session.instruction)}&founder=${encodeURIComponent(session.founderId)}&company=${encodeURIComponent(session.companyName)}`)}
                   style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 5, padding: "11px 14px", borderRadius: 22, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(176,180,186,0.10)", textAlign: "left", overflow: "hidden" }}
                 >
                   <span style={{ fontSize: 13, color: "var(--fg)", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
