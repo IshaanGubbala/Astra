@@ -23,8 +23,12 @@ def github_create_repo(
     repo_name = repo_name or name
     if stack is None:
         stack = {}
+    if isinstance(stack, str):
+        stack = {}
     if mvp_features is None:
         mvp_features = []
+    if isinstance(mvp_features, str):
+        mvp_features = [{"name": f.strip()} for f in mvp_features.split(",") if f.strip()]
     """Create GitHub repo. Args: repo_name (str, kebab-case), description (str), stack (dict e.g. {"language":"Python","framework":"FastAPI"}), mvp_features (list of dicts e.g. [{"name":"Auth","description":"..."}]), private (bool). Returns: {repo_url, scaffolded}.
     Requires GITHUB_TOKEN. Falls back to returning scaffold content only.
     """

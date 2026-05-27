@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${geist.variable} ${jetBrainsMono.variable} antialiased`} data-theme="dark" suppressHydrationWarning>
       <head />
-      <body>
+      <body suppressHydrationWarning>
         <ClerkProvider>
           <SiteNav />
           <main>{children}</main>

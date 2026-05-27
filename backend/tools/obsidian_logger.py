@@ -38,8 +38,8 @@ def _coerce_output(output: Any) -> dict | None:
                 return parsed
         except Exception:
             pass
-        return {"raw": output[:2000]}
-    return {"value": str(output)[:2000]}
+        return {"raw": output}
+    return {"value": str(output)}
 
 
 def obsidian_read(agent: str = "", max_notes: int = 5, founder_id: str | None = None, session_id: str | None = None, **kwargs) -> dict:
@@ -58,7 +58,7 @@ def obsidian_read(agent: str = "", max_notes: int = 5, founder_id: str | None = 
     for note in matches:
         try:
             text = note.read_text()
-            results.append({"file": f"{note.parent.name}/{note.name}", "content": text[:2000]})
+            results.append({"file": f"{note.parent.name}/{note.name}", "content": text})
         except Exception:
             pass
 
@@ -131,7 +131,7 @@ def obsidian_log(
         for key, val in output_dict.items():
             if isinstance(val, (dict, list)):
                 sections.append(f"**{key}:**")
-                sections.append(f"```json\n{json.dumps(val, indent=2)[:1500]}\n```")
+                sections.append(f"```json\n{json.dumps(val, indent=2)}\n```")
             else:
                 sections.append(f"**{key}:** {val}")
         sections.append("")

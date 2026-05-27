@@ -34,7 +34,7 @@ export default function SettingsPage() {
     <div style={{ width: "100%", maxWidth: 920, margin: "0 auto", display: "flex", flexDirection: "column", gap: 18 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Link href="/dashboard" className="site-btn site-btn-ghost" style={{ padding: "0 14px", fontSize: 12 }}>
+          <Link href="/" className="site-btn site-btn-ghost" style={{ padding: "0 14px", fontSize: 12 }}>
             ← Back
           </Link>
           <div>

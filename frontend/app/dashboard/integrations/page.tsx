@@ -259,7 +259,7 @@ export default function SetupPage() {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <Link href="/dashboard" className="site-btn site-btn-ghost" style={{ padding: "0 14px", fontSize: 12 }}>
+          <Link href="/" className="site-btn site-btn-ghost" style={{ padding: "0 14px", fontSize: 12 }}>
             ← Back
           </Link>
           <div>
@@ -482,8 +482,8 @@ export default function SetupPage() {
 
       {/* CTA */}
       <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
-        <Link href="/dashboard" className="site-btn site-btn-primary" style={{ fontSize: 13, padding: "0 20px" }}>
-          Go to dashboard →
+        <Link href="/" className="site-btn site-btn-primary" style={{ fontSize: 13, padding: "0 20px" }}>
+          Back to app →
         </Link>
       </div>
     </div>

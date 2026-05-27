@@ -43,3 +43,10 @@ class SaveCredentialRequest(BaseModel):
 class SteerRequest(BaseModel):
     session_id: str
     message: str  # founder directive to the orchestrator mid-run
+
+
+class ContinueRequest(BaseModel):
+    founder_id: str
+    instruction: str
+    prior_session_id: str
+    agents: Optional[list[str]] = None  # if None, planner decides

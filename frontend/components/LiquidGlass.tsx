@@ -142,7 +142,7 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
           if (typeof ref === "function") ref(el);
           else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
         }}
-        className={className}
+        className={["liquid-glass", className].filter(Boolean).join(" ")}
         style={{ position: "relative", borderRadius: resolvedRadius, overflow: "hidden", isolation: "isolate", ...style }}
       >
         {/* Filter definition */}
@@ -204,6 +204,7 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
 
         {/* Organic glow pockets */}
         <div
+          data-lg-glow="top"
           style={{
             position: "absolute",
             inset: "-12% -16% auto auto",
@@ -217,6 +218,7 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
           }}
         />
         <div
+          data-lg-glow="bottom"
           style={{
             position: "absolute",
             inset: "auto auto -20% -18%",
@@ -232,6 +234,7 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
 
         {/* Top specular sheen */}
         <div
+          data-lg-sheen="true"
           style={{
             position: "absolute",
             top: 0,
@@ -247,7 +250,7 @@ const LiquidGlass = forwardRef<HTMLDivElement, LiquidGlassProps>(
         />
 
         {/* Content */}
-        <div style={{ position: "relative", zIndex: 3, ...contentStyle }}>
+        <div data-lg-content="true" style={{ position: "relative", zIndex: 3, ...contentStyle }}>
           {children}
         </div>
       </div>
