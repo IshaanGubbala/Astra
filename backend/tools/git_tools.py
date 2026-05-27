@@ -386,14 +386,34 @@ def _sanitize_package_json(repo_dir: str) -> None:
     try:
         data = json.loads(pkg_path.read_text())
         changed = False
+        # Correct next version — pin to 14.2.21 (latest stable 14.x)
+        _NEXT_VERSION = "14.2.21"
         for section in ("dependencies", "devDependencies", "peerDependencies"):
-            if section in data:
-                before = set(data[section])
-                data[section] = {k: v for k, v in data[section].items() if k not in _FAKE_PACKAGES}
-                removed = before - set(data[section])
-                if removed:
-                    logger.warning("Removed fake npm packages: %s", removed)
+            if section not in data:
+                continue
+            before = set(data[section])
+            data[section] = {k: v for k, v in data[section].items() if k not in _FAKE_PACKAGES}
+            removed = before - set(data[section])
+            if removed:
+                logger.warning("Removed fake npm packages: %s", removed)
+                changed = True
+            # Fix @next/* packages to match the actual next version
+            if "next" in data[section]:
+                actual_next = data[section]["next"].lstrip("^~")
+                for pkg in list(data[section]):
+                    if pkg.startswith("@next/"):
+                        data[section][pkg] = actual_next
+                        changed = True
+                # If next version itself looks wrong (e.g. 14.2.23 doesn't exist), pin it
+                import re as _re
+                ver = actual_next
+                if _re.match(r"14\.\d+\.\d+", ver) and ver > "14.2.21":
+                    data[section]["next"] = _NEXT_VERSION
+                    for pkg in list(data[section]):
+                        if pkg.startswith("@next/"):
+                            data[section][pkg] = _NEXT_VERSION
                     changed = True
+                    logger.warning("Pinned next + @next/* to %s (was %s)", _NEXT_VERSION, ver)
         if changed:
             pkg_path.write_text(json.dumps(data, indent=2))
     except Exception as e:
