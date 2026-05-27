@@ -25,12 +25,16 @@ def build_web_agent(**kwargs) -> Agent:
             "All copy must be specific to the product — real headlines, real value props, real feature names. "
             "Include package.json, next.config.js (NOT next.config.ts — use .js only), tailwind.config.js, app/layout.tsx, app/page.tsx, app/globals.css. "
             "After writing all files run: bash -c \"git add -A && git commit -m feat: landing page\"')\n"
-            "4. vercel_deploy_from_github(repo_url=<url>) — if it returns deployed=False, log the repo_url and continue\n"
-            "5. obsidian_log — log repo_url and deploy URL (or repo_url if deploy failed)\n"
-            "6. done — return {repo_url, url} (url = deploy URL if available, else repo_url)\n\n"
+            "4. vercel_deploy_from_github(repo_url=<url>)\n"
+            "   - If deployed=True: proceed to step 5.\n"
+            "   - If deployed=False: read the error field. Call run_claude_in_repo again with task='Fix this Vercel build error and commit: <paste error>'. "
+            "Then call vercel_deploy_from_github again. Repeat this fix→redeploy loop up to 4 times until deployed=True. "
+            "NEVER give up and log repo_url as the result — keep iterating until Vercel returns a live URL.\n"
+            "5. obsidian_log — log repo_url and the live Vercel deploy URL\n"
+            "6. done — return {repo_url, url} where url is the live Vercel URL\n\n"
             "Do NOT use generate_landing_page_html or vercel_deploy (HTML upload). "
-            "Always build via GitHub repo + Claude Code so the landing page is real, "
-            "product-specific, and version-controlled."
+            "Always build via GitHub repo + Claude Code. "
+            "A successful deploy (deployed=True with a URL) is the only acceptable outcome."
         ),
         tools={
             "github_create_repo": github_create_repo,
