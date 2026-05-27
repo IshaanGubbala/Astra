@@ -763,7 +763,7 @@ function AgentDetail({
   });
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14, height: "100%", minHeight: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ fontSize: 20 }}>{AGENT_ICONS[state.agent] ?? "🤖"}</span>
@@ -806,7 +806,7 @@ function AgentDetail({
       )}
 
       {/* Sub-tabs */}
-      <div style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(0,0,0,0.08)", paddingBottom: 8 }}>
+      <div style={{ display: "flex", gap: 4, borderBottom: "1px solid rgba(0,0,0,0.08)", paddingBottom: 8, flexShrink: 0 }}>
         {(["preview", "plan", "log", "obsidian"] as DetailTab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={TAB_STYLE(tab === t)}>
             {t === "obsidian" ? "Obsidian" : t.charAt(0).toUpperCase() + t.slice(1)}
@@ -815,7 +815,7 @@ function AgentDetail({
       </div>
 
       {/* Tab content */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
         {tab === "preview" && <AgentPreview state={state} />}
 
         {tab === "plan" && (
@@ -1823,7 +1823,7 @@ export function GoalWorkspace({
           </LiquidGlass>
 
           {/* Detail panel */}
-          <LiquidGlass style={{ minWidth: 0 }} contentStyle={{ padding: "20px 28px", minHeight: 620, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <LiquidGlass style={{ minWidth: 0 }} contentStyle={{ padding: "20px 28px", minHeight: 620, display: "flex", flexDirection: "column" }}>
             {selectedState ? (
               <AgentDetail state={selectedState} planTask={selectedPlanTask} sessionId={sessionId} founderId={founderId} />
             ) : (
