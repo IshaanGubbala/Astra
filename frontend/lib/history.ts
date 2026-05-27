@@ -88,3 +88,11 @@ export function deleteSession(sessionId: string): void {
   cachedSessions = sessions;
   emitSessionsChange();
 }
+
+export function clearAllSessions(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(KEY);
+  cachedRaw = "[]";
+  cachedSessions = EMPTY_SESSIONS;
+  emitSessionsChange();
+}

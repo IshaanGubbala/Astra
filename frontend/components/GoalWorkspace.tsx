@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { SignInButton, useUser } from "@clerk/nextjs";
 import { streamGoal, continueSession, submitGoal, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder } from "@/lib/api";
-import { saveSession } from "@/lib/history";
+import { saveSession, getSessionSnapshot, subscribeSessions, deleteSession, clearAllSessions } from "@/lib/history";
+import type { SessionRecord } from "@/lib/history";
 import LiquidGlass from "@/components/LiquidGlass";
 import CompanyChat from "@/components/CompanyChat";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -1252,7 +1253,9 @@ function WorkspaceSidebar({
         </a>
       </div>
 
-      <div style={{ marginTop: "auto", display: "grid", gap: 10 }}>
+      <SessionHistory currentSessionId={sessionId} />
+
+      <div style={{ display: "grid", gap: 10 }}>
         <div style={{ padding: "12px 13px", borderRadius: 22, border: "1px solid rgba(176,180,186,0.10)", background: "rgba(255,255,255,0.025)", display: "grid", gap: 5 }}>
           <span style={{ fontSize: 10, color: "var(--fg-mute)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Session</span>
           <span style={{ fontSize: 12, color: "var(--fg)", lineHeight: 1.45, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
@@ -1261,6 +1264,40 @@ function WorkspaceSidebar({
         <ThemeToggle />
       </div>
     </LiquidGlass>
+  );
+}
+
+function SessionHistory({ currentSessionId }: { currentSessionId: string }) {
+  const sessions = useSyncExternalStore(subscribeSessions, getSessionSnapshot, () => [] as SessionRecord[]);
+  const router = useRouter();
+  if (sessions.length === 0) return null;
+  const statusDot = (s: SessionRecord["status"]) =>
+    s === "done" ? "#3D9E5F" : s === "running" ? "#2563EB" : "#C0392B";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" }}>
+        <span style={{ fontSize: 10, color: "var(--fg-mute)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Recent</span>
+        <button
+          onClick={() => { if (confirm("Clear all sessions?")) { clearAllSessions(); router.push("/"); } }}
+          style={{ fontSize: 10, color: "var(--fg-mute)", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", borderRadius: 4 }}
+        >Clear all</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" }}>
+        {sessions.map(s => (
+          <div key={s.sessionId} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 12, background: s.sessionId === currentSessionId ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${s.sessionId === currentSessionId ? "rgba(176,180,186,0.18)" : "rgba(176,180,186,0.08)"}`, cursor: "pointer" }}
+            onClick={() => router.push(`/?session=${s.sessionId}&instruction=${encodeURIComponent(s.instruction)}&founder=${encodeURIComponent(s.founderId)}&company=${encodeURIComponent(s.companyName)}`)}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: statusDot(s.status), flexShrink: 0 }} />
+            <span style={{ flex: 1, fontSize: 11, color: "var(--fg-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{s.companyName || s.instruction.slice(0, 30)}</span>
+            <button
+              onClick={e => { e.stopPropagation(); deleteSession(s.sessionId); if (s.sessionId === currentSessionId) router.push("/"); }}
+              style={{ fontSize: 11, color: "var(--fg-mute)", background: "none", border: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1, flexShrink: 0 }}
+              title="Delete session"
+            >✕</button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
