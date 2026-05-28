@@ -11,7 +11,7 @@ from backend.config import settings
 
 _FAST_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 _LARGE_MODEL = "openai/gpt-oss-120b"
-_IMAGE_MODEL = "black-forest-labs/FLUX-1-schnell"
+_IMAGE_MODEL = "black-forest-labs/FLUX-1-dev"
 _PROMPT_MODEL = "openai/gpt-oss-120b"
 _DI_BASE = "https://api.deepinfra.com/v1/openai"
 _DI_IMAGE_BASE = "https://api.deepinfra.com/v1/inference"
@@ -55,11 +55,13 @@ def generate_image(description: str, width: int = 1024, height: int = 1024) -> d
     prompt_resp = client.chat.completions.create(
         model=_PROMPT_MODEL,
         messages=[{"role": "user", "content": (
-            f"Write a detailed, vivid image generation prompt for Janus-Pro-7B to create a high-quality ad image.\n"
+            f"Write a detailed image generation prompt for FLUX to create a high-quality ad visual.\n"
             f"Ad description: {description}\n"
-            f"Output ONLY the image prompt — no explanation, no quotes. "
-            f"Be specific about style, lighting, composition, colors, and mood. "
-            f"Optimized for a marketing/advertising use case."
+            f"Rules:\n"
+            f"- NO text, words, letters, or typography in the image — diffusion models corrupt text\n"
+            f"- Focus on: visual concept, mood, lighting, composition, color palette, style\n"
+            f"- Use photography or illustration style terms (e.g. 'cinematic lighting', 'editorial photography', 'minimalist flat design')\n"
+            f"- Output ONLY the prompt, no explanation, no quotes."
         )}],
         max_tokens=300,
         temperature=0.8,
