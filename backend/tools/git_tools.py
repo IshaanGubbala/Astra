@@ -215,24 +215,25 @@ def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 
         raise RuntimeError(f"openclaude not found at {OPENCLAUDE_BIN}")
 
     env = _make_env()
-    inner_cmd = [
+    model = env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
+    # Build args list (excluding cwd — handled by shell cd)
+    oc_args = [
         OPENCLAUDE_BIN, "--print", "--allow-dangerously-skip-permissions", "--dangerously-skip-permissions",
-        "--provider", "openai",
-        "--model", env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Flash"),
+        "--provider", "openai", "--model", model,
     ]
     if session_id:
-        inner_cmd += ["--session-id", session_id]
-    # openclaude ignores subprocess cwd — prepend explicit cd so file writes land in the right dir
-    scoped_prompt = f"Your working directory for this task is: {local}\ncd to that directory first before creating any files.\n\n{prompt}"
-    inner_cmd.append(scoped_prompt)
+        oc_args += ["--session-id", session_id]
+    # Escape prompt for shell embedding
+    escaped_prompt = prompt.replace("'", "'\\''")
+    oc_args_str = " ".join(oc_args)
 
-    # openclaude blocks --dangerously-skip-permissions when running as root — use sudo -u astra
+    # openclaude ignores subprocess cwd — must cd in shell so it starts in the repo dir
     if os.getuid() == 0:
-        cmd = ["sudo", "-u", "astra", "-E"] + inner_cmd
+        shell_cmd = f"cd {local!r} && sudo -E -u astra {oc_args_str} '{escaped_prompt}'"
     else:
-        cmd = inner_cmd
+        shell_cmd = f"cd {local!r} && {oc_args_str} '{escaped_prompt}'"
 
-    r = subprocess.run(cmd, cwd=local, capture_output=True, text=True, timeout=timeout, env=env)
+    r = subprocess.run(shell_cmd, shell=True, capture_output=True, text=True, timeout=timeout, env=env)
     if r.returncode not in (0, 1):
         logger.warning("openclaude exited %d: %s", r.returncode, r.stderr[:200])
     return r.stdout.strip()
