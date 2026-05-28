@@ -222,7 +222,9 @@ def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 
     ]
     if session_id:
         inner_cmd += ["--session-id", session_id]
-    inner_cmd.append(prompt)
+    # openclaude ignores subprocess cwd — prepend explicit cd so file writes land in the right dir
+    scoped_prompt = f"Your working directory for this task is: {local}\ncd to that directory first before creating any files.\n\n{prompt}"
+    inner_cmd.append(scoped_prompt)
 
     # openclaude blocks --dangerously-skip-permissions when running as root — use sudo -u astra
     if os.getuid() == 0:
