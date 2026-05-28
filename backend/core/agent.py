@@ -274,7 +274,7 @@ class Agent:
 
     async def _run_loop(self, messages: list[dict], ctx: AgentContext, browser=None) -> dict[str, Any]:
         i = 0
-        MAX_ITERATIONS = self._max_iterations or 40
+        MAX_ITERATIONS = self._max_iterations or 5
         # Track consecutive failures per tool to break infinite retry loops
         _tool_fail_counts: dict[str, int] = {}
         # One-shot tools: hard-blocked after first success
@@ -310,8 +310,8 @@ class Agent:
             if action == "done":
                 required_by_agent = {
                     "legal": {"format_legal_document", "generate_pdf"},
-                    "sales": {"find_leads", "build_outreach_sequence"},
-                    "design": {"generate_design_spec", "generate_wireframe"},
+                    "sales": {"find_leads", "build_outreach_sequence", "build_crm_contact"},
+                    "design": {"generate_design_spec", "generate_wireframe", "generate_logo_brief"},
                 }
                 missing = sorted(required_by_agent.get(self.name, set()) - _called_tools)
                 if missing:
@@ -323,6 +323,14 @@ class Agent:
                 output = parsed.get("output", {})
                 if isinstance(output, dict):
                     output = self._normalize_done_output(output, _tool_results)
+                    missing_output = self._missing_required_output(output)
+                    if missing_output:
+                        messages.append({"role": "user", "content": (
+                            "You cannot call done yet. Output is missing required fields: "
+                            f"{', '.join(missing_output)}. "
+                            "Call the necessary tools, then call done with a complete output payload."
+                        )})
+                        continue
                 await self._emit(ctx, "agent_done", result=output)
                 return output
 
@@ -418,6 +426,48 @@ class Agent:
 
         logger.warning("%s hit MAX_ITERATIONS (%d) — returning partial result", self.name, MAX_ITERATIONS)
         return {"status": "max_iterations_reached", "agent": self.name}
+
+    def _missing_required_output(self, output: dict[str, Any]) -> list[str]:
+        """Require key preview artifacts per role before accepting done."""
+        if self.name == "legal":
+            docs = output.get("documents")
+            if not isinstance(docs, list) or not docs:
+                return ["documents[]"]
+            first = docs[0] if isinstance(docs[0], dict) else {}
+            if not (first.get("path") or first.get("text")):
+                return ["documents[0].path|text"]
+            return []
+        if self.name == "sales":
+            missing: list[str] = []
+            if not isinstance(output.get("leads"), list) or not output.get("leads"):
+                missing.append("leads[]")
+            if not isinstance(output.get("sequence"), list) or not output.get("sequence"):
+                missing.append("sequence[]")
+            if not isinstance(output.get("crm_contacts"), list) or not output.get("crm_contacts"):
+                missing.append("crm_contacts[]")
+            return missing
+        if self.name == "design":
+            missing: list[str] = []
+            if not output.get("design_spec"):
+                missing.append("design_spec")
+            if not isinstance(output.get("wireframes"), list) or not output.get("wireframes"):
+                missing.append("wireframes[]")
+            if not output.get("logo_brief"):
+                missing.append("logo_brief")
+            return missing
+        if self.name == "marketing":
+            missing: list[str] = []
+            if not output.get("reel_package"):
+                missing.append("reel_package")
+            if not output.get("tiktok_package"):
+                missing.append("tiktok_package")
+            if not output.get("meta_ad"):
+                missing.append("meta_ad")
+            ad_images = output.get("ad_images")
+            if not isinstance(ad_images, list) or not ad_images:
+                missing.append("ad_images[]")
+            return missing
+        return []
 
     async def _execute_tool(self, tool_name: str, args: dict, ctx: AgentContext) -> Any:
         fn = self.tools.get(tool_name)
