@@ -16,3 +16,4 @@ composio-core>=0.7.0
 networkx>=3.3
 yt-dlp>=2024.1.0
 youtube-transcript-api>=0.6.2
+psutil>=6.0.0

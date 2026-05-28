@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import router
+from backend.api.admin import router as admin_router
 
 app = FastAPI(title="Astra API", version="1.0.0")
 
@@ -13,6 +14,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(admin_router)
 
 
 @app.get("/health")
