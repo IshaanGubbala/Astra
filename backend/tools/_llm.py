@@ -2,15 +2,17 @@
 Sync LLM helper for content-generation tools.
 
 Models:
-  "fast"    → Llama-3.3-70B  (default, general purpose)
-  "large"   → gpt-oss-120b   (small input, high output — docs, copy, HTML)
-  "image"   → Janus-Pro-7B   (image generation, returns base64 PNG)
+  "fast"    → DeepSeek-V4-Flash   (default, general purpose)
+  "large"   → gpt-oss-120b        (small input, high output — docs, copy)
+  "instruct" → Llama-3.3-70B      (strict rule-following: HTML, design, sales)
+  "image"   → FLUX-2-pro          (image generation)
 """
 import re
 from backend.config import settings
 
 _FAST_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 _LARGE_MODEL = "openai/gpt-oss-120b"
+_INSTRUCT_MODEL = "meta-llama/Meta-Llama-3.3-70B-Instruct"
 _IMAGE_MODEL = "black-forest-labs/FLUX-2-pro"
 _PROMPT_MODEL = "openai/gpt-oss-120b"
 _DI_BASE = "https://api.deepinfra.com/v1/openai"
@@ -23,12 +25,18 @@ def _api_key() -> str:
 
 def generate(prompt: str, max_tokens: int | None = None, json_mode: bool = False, model: str = "large") -> str:
     """Call an LLM for content generation. Returns raw text.
-    model="fast"  → Llama-3.3-70B (general)
-    model="large" → gpt-oss-120b (high-output docs/copy/HTML)
+    model="fast"     → DeepSeek-V4-Flash (general)
+    model="large"    → gpt-oss-120b (high-output docs/copy)
+    model="instruct" → Llama-3.3-70B (strict rule-following: HTML, design constraints)
     """
     import openai
     client = openai.OpenAI(base_url=_DI_BASE, api_key=_api_key())
-    selected = _LARGE_MODEL if model == "large" else _FAST_MODEL
+    if model == "large":
+        selected = _LARGE_MODEL
+    elif model == "instruct":
+        selected = _INSTRUCT_MODEL
+    else:
+        selected = _FAST_MODEL
     kwargs: dict = dict(
         model=selected,
         messages=[{"role": "user", "content": prompt}],

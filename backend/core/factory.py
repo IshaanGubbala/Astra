@@ -25,14 +25,15 @@ def get_orchestrator() -> Orchestrator:
             model_base_url=settings.planner_model_base_url,
             model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         )
-        _light_kwargs = dict(
-            model=settings.light_model_name,
-            model_base_url=settings.light_model_base_url,
-            model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
-        )
         _highoutput_kwargs = dict(
             model=settings.highoutput_model_name,
             model_base_url=settings.highoutput_model_base_url,
+            model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+        )
+        # Llama-3.3-70B for agents that must follow strict prompt rules
+        _instruct_kwargs = dict(
+            model="meta-llama/Meta-Llama-3.3-70B-Instruct",
+            model_base_url=settings.agent_model_base_url,
             model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         )
         specialists = {
@@ -47,8 +48,8 @@ def get_orchestrator() -> Orchestrator:
             "technical": build_technical_agent(use_computer=True, **_coder_kwargs),
             "legal": build_legal_agent(use_computer=True, **_highoutput_kwargs),
             "ops": build_ops_agent(use_computer=True, **_highoutput_kwargs),
-            "sales": build_sales_agent(use_computer=False, **_highoutput_kwargs),
-            "design": build_design_agent(use_computer=False, **_light_kwargs),
+            "sales": build_sales_agent(use_computer=False, **_instruct_kwargs),
+            "design": build_design_agent(use_computer=False, **_instruct_kwargs),
         }
         from backend.tools.company_brain import (
             add_company_brain_record,

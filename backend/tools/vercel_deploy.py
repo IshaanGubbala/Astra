@@ -636,7 +636,7 @@ Start the output with <!DOCTYPE html> immediately."""
 
     try:
         from backend.tools._llm import generate
-        html = generate(prompt)
+        html = generate(prompt, model="instruct")
         # Strip markdown fences then find DOCTYPE even if LLM added preamble text
         html = re.sub(r"```html?", "", html, flags=re.IGNORECASE).strip().rstrip("`").strip()
         doctype_pos = html.lower().find("<!doctype")
