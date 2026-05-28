@@ -35,7 +35,9 @@ def build_sales_agent(**kwargs) -> Agent:
             "create_warming_schedule() and generate_spf_dkim_instructions().\n\n"
             "STEP 5 — obsidian_log: LEADS FOUND, SEQUENCES BUILT, DELIVERABILITY SETUP.\n\n"
             "If all sources return 0 leads, build sequences targeting competitor customers "
-            "using a '<competitor> alternative' angle from the research notes."
+            "using a '<competitor> alternative' angle from the research notes.\n\n"
+            "Your final done output MUST include: leads (array), sequences (array), "
+            "sequence (primary sequence array), and crm_contacts (array) for preview compatibility."
         ),
         tools={
             "search_and_fetch": search_and_fetch,

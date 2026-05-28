@@ -17,7 +17,9 @@ def build_legal_agent(**kwargs) -> Agent:
             "Always call generate_pdf in this same run. "
             "patent_search surveys the IP landscape. "
             "Mandatory sequence: format_legal_document → generate_pdf → obsidian_log → done. "
-            "Generate privacy_policy and terms_of_service at minimum."
+            "Generate privacy_policy and terms_of_service at minimum. "
+            "Your final done output MUST include a documents array with entries shaped as "
+            "{doc_type, title, path, text} so the legal preview can render reliably."
         ),
         tools={
             "generate_pdf": generate_pdf,

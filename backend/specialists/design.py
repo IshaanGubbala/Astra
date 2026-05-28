@@ -19,6 +19,8 @@ def build_design_agent(**kwargs) -> Agent:
             "generate_wireframe creates page wireframes — call once per key page. "
             "generate_logo_brief produces a logo direction brief. "
             "web_search finds competitor designs or inspiration as needed. "
+            "Your final done output MUST include design_spec (object), wireframes (array), "
+            "and logo_brief (object or string) so previews render complete artifacts. "
             "Call obsidian_log then done with concrete design artifacts."
         ),
         tools={
