@@ -7,19 +7,15 @@ import re
 from backend.config import settings
 
 _FAST_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-_CREATIVE_MODEL = "anthropic/claude-sonnet-4-5"
 _DI_BASE = "https://api.deepinfra.com/v1/openai"
 
 
 def generate(prompt: str, max_tokens: int | None = None, json_mode: bool = False, model: str = "fast") -> str:
-    """Call an LLM for content generation. Returns raw text.
-    model="fast" → Llama 3.1 8B on DeepInfra (default, cheap)
-    model="claude" → Claude Sonnet on DeepInfra (high quality, use for landing pages)
-    """
+    """Call an LLM for content generation. Returns raw text."""
     import openai
     api_key = settings.deepinfra_api_key or settings.planner_model_api_key or settings.agent_model_api_key
     client = openai.OpenAI(base_url=_DI_BASE, api_key=api_key)
-    selected_model = _CREATIVE_MODEL if model == "claude" else _FAST_MODEL
+    selected_model = _FAST_MODEL
     kwargs: dict = dict(
         model=selected_model,
         messages=[{"role": "user", "content": prompt}],

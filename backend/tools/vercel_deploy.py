@@ -636,7 +636,7 @@ Start the output with <!DOCTYPE html> immediately."""
 
     try:
         from backend.tools._llm import generate
-        html = generate(prompt, model="claude")
+        html = generate(prompt)
         html = re.sub(r"^```html?\s*", "", html, flags=re.IGNORECASE | re.MULTILINE).strip().rstrip("`").strip()
         if html.startswith("<!"):
             return html
