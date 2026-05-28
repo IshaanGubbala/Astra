@@ -217,7 +217,7 @@ class Orchestrator:
             )
             resp = await asyncio.to_thread(
                 client.chat.completions.create,
-                model="meta-llama/Llama-3.3-70B-Instruct",
+                model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
                 messages=[
                     {"role": "system", "content": (
                         "Output ONLY a single company/product name for this startup idea. "
@@ -258,7 +258,7 @@ class Orchestrator:
             )
             resp = await asyncio.to_thread(
                 client.chat.completions.create,
-                model="meta-llama/Llama-3.3-70B-Instruct",
+                model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": goal},

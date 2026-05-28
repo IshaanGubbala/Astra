@@ -12,7 +12,7 @@ from backend.config import settings
 
 _FAST_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 _LARGE_MODEL = "openai/gpt-oss-120b"
-_INSTRUCT_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+_INSTRUCT_MODEL = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 _IMAGE_MODEL = "black-forest-labs/FLUX-2-pro"
 _PROMPT_MODEL = "openai/gpt-oss-120b"
 _DI_BASE = "https://api.deepinfra.com/v1/openai"

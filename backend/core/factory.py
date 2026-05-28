@@ -32,7 +32,7 @@ def get_orchestrator() -> Orchestrator:
         )
         # Llama-3.3-70B for agents that must follow strict prompt rules
         _instruct_kwargs = dict(
-            model="meta-llama/Meta-Llama-3.3-70B-Instruct",
+            model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
             model_base_url=settings.agent_model_base_url,
             model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         )
