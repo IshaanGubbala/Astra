@@ -277,7 +277,8 @@ class Agent:
         # Track consecutive failures per tool to break infinite retry loops
         _tool_fail_counts: dict[str, int] = {}
         # One-shot tools: hard-blocked after first success
-        _ONE_SHOT_TOOLS = {"generate_landing_page_html", "vercel_deploy", "claude_code_scaffold"}
+        _ONE_SHOT_TOOLS = {"generate_landing_page_html", "vercel_deploy", "claude_code_scaffold",
+                           "obsidian_read", "obsidian_log"}
         _one_shot_done: set[str] = set()
         _called_tools: set[str] = set()
         _tool_results: list[tuple[str, dict[str, Any]]] = []
