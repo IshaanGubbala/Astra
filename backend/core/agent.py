@@ -155,6 +155,7 @@ class Agent:
             model=self.model,
             messages=messages,
             temperature=0.1,
+            max_tokens=4096,
             response_format={"type": "json_object"},
             timeout=300.0,
         )
