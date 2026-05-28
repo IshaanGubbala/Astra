@@ -13,8 +13,8 @@ import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from backend.config import settings
-from backend.provisioning.credentials_store import store_credentials, load_all_credentials
+from backend.provisioning.credentials_store import store_credentials
+from backend.provisioning.integration_automation import apply_platform_credentials
 
 logger = logging.getLogger(__name__)
 _EXECUTOR = ThreadPoolExecutor(max_workers=4)
@@ -25,23 +25,7 @@ def _provision_platform_creds(founder_id: str) -> dict:
     Map Astra's platform API keys as this user's credentials so all
     agents work immediately without the user connecting anything.
     """
-    mapped = {}
-
-    if settings.github_token:
-        store_credentials(founder_id, "github", {"token": settings.github_token})
-        mapped["github"] = True
-
-    if settings.vercel_token:
-        store_credentials(founder_id, "vercel", {"token": settings.vercel_token})
-        mapped["vercel"] = True
-
-    if settings.sendgrid_api_key:
-        store_credentials(founder_id, "sendgrid", {"api_key": settings.sendgrid_api_key})
-        mapped["sendgrid"] = True
-
-    if settings.composio_api_key:
-        store_credentials(founder_id, "composio", {"api_key": settings.composio_api_key})
-        mapped["composio"] = True
+    mapped = apply_platform_credentials(founder_id)
 
     logger.info("Platform creds mapped for %s: %s", founder_id, list(mapped.keys()))
     return mapped

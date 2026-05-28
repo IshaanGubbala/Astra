@@ -1,0 +1,978 @@
+"""Company brain store, sync adapters, and agent tools.
+
+The first version is deliberately local-first: it normalizes connected-tool
+metadata, prior agent vault notes, and manually added facts into one searchable
+graph that agents can query. External source sync is best-effort and can be
+expanded per provider without changing the API surface.
+"""
+from __future__ import annotations
+
+import json
+import re
+import time
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+
+SOURCE_CATALOG: dict[str, dict[str, str]] = {
+    "slack": {"label": "Slack", "kind": "messages"},
+    "github": {"label": "GitHub", "kind": "code"},
+    "linear": {"label": "Linear", "kind": "work"},
+    "notion": {"label": "Notion", "kind": "docs"},
+    "google_drive": {"label": "Google Drive", "kind": "files"},
+    "google_workspace": {"label": "Google Workspace", "kind": "docs"},
+    "gmail": {"label": "Gmail", "kind": "email"},
+    "confluence": {"label": "Confluence", "kind": "docs"},
+    "zendesk": {"label": "Zendesk", "kind": "support"},
+    "granola": {"label": "Granola", "kind": "meetings"},
+}
+
+CONNECTOR_REQUIREMENTS: dict[str, dict[str, Any]] = {
+    "github": {
+        "credential_fields": ["token"],
+        "oauth_apps": ["github"],
+        "setup_url": "https://github.com/settings/tokens/new?description=Astra&scopes=repo,read:user",
+        "setup_hint": "Save a GitHub personal access token with repo read access, or connect GitHub through Composio.",
+        "importer": True,
+    },
+    "slack": {
+        "credential_fields": ["bot_token"],
+        "oauth_apps": [],
+        "setup_url": "https://api.slack.com/apps",
+        "setup_hint": "Save a Slack bot token with conversations:read and channels:read scopes.",
+        "importer": True,
+    },
+    "linear": {
+        "credential_fields": ["token"],
+        "oauth_apps": ["linear"],
+        "setup_url": "https://linear.app/settings/api",
+        "setup_hint": "Save a Linear API key, or connect Linear through Composio.",
+        "importer": True,
+    },
+    "notion": {
+        "credential_fields": ["token"],
+        "oauth_apps": ["notion"],
+        "setup_url": "https://www.notion.so/my-integrations",
+        "setup_hint": "Save a Notion integration token and share pages with it, or connect Notion through Composio.",
+        "importer": True,
+    },
+    "google_drive": {
+        "credential_fields": ["access_token"],
+        "oauth_apps": ["googledrive"],
+        "setup_url": "https://console.cloud.google.com/apis/credentials",
+        "setup_hint": "Save a Google OAuth access token with Drive read scope, or connect Google through Composio.",
+        "importer": True,
+    },
+    "google_workspace": {
+        "credential_fields": ["access_token"],
+        "oauth_apps": ["googledrive"],
+        "setup_url": "https://console.cloud.google.com/apis/credentials",
+        "setup_hint": "Uses the Google Drive importer for Docs, Sheets, and Slides exports.",
+        "importer": True,
+    },
+    "gmail": {
+        "credential_fields": ["access_token"],
+        "oauth_apps": ["gmail"],
+        "setup_url": "https://console.cloud.google.com/apis/credentials",
+        "setup_hint": "Save a Google OAuth access token with Gmail readonly scope, or connect Gmail through Composio.",
+        "importer": True,
+    },
+    "confluence": {
+        "credential_fields": ["base_url", "email", "api_token"],
+        "oauth_apps": [],
+        "setup_url": "https://id.atlassian.com/manage-profile/security/api-tokens",
+        "setup_hint": "Save your Confluence base URL, account email, and Atlassian API token.",
+        "importer": True,
+    },
+    "zendesk": {
+        "credential_fields": ["subdomain", "email", "token"],
+        "oauth_apps": [],
+        "setup_url": "https://support.zendesk.com/hc/en-us/articles/4408889192858",
+        "setup_hint": "Save Zendesk subdomain, agent email, and API token.",
+        "importer": True,
+    },
+    "granola": {
+        "credential_fields": [],
+        "oauth_apps": [],
+        "setup_url": "https://www.granola.ai/",
+        "setup_hint": "Granola is modeled in the graph; direct import is planned.",
+        "importer": False,
+    },
+}
+
+DEFAULT_SOURCES = ["github", "notion", "linear", "gmail", "google_drive", "slack"]
+
+STOP_WORDS = {
+    "that", "with", "from", "this", "have", "will", "into", "your", "their",
+    "about", "company", "brain", "context", "using", "agent", "agents",
+    "there", "where", "which", "when", "then", "than", "they", "them",
+    "what", "were", "been", "also", "only", "onto", "over", "under",
+}
+
+
+def _brain_root() -> Path:
+    root = Path(".astra/company_brain")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _brain_path(founder_id: str) -> Path:
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", founder_id)[:120] or "founder"
+    return _brain_root() / f"{safe}.json"
+
+
+def list_company_brain_founders() -> list[str]:
+    """Return founder ids that have a company-brain store on disk."""
+    root = _brain_root()
+    founders: list[str] = []
+    for path in sorted(root.glob("*.json")):
+        try:
+            data = json.loads(path.read_text())
+            founders.append(str(data.get("founder_id") or path.stem))
+        except Exception:
+            founders.append(path.stem)
+    return founders
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _iso_from_epoch(ts: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _epoch_from_iso(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return time.mktime(time.strptime(value, "%Y-%m-%dT%H:%M:%SZ"))
+    except Exception:
+        return None
+
+
+def _empty_brain(founder_id: str) -> dict[str, Any]:
+    return {
+        "founder_id": founder_id,
+        "updated_at": _now(),
+        "sources": {
+            key: {
+                "key": key,
+                "label": meta["label"],
+                "kind": meta["kind"],
+                "status": "available",
+                "record_count": 0,
+                "last_synced_at": None,
+                "notes": "",
+                **CONNECTOR_REQUIREMENTS.get(key, {}),
+            }
+            for key, meta in SOURCE_CATALOG.items()
+        },
+        "records": [],
+        "relationships": [],
+        "proposals": [],
+        "maintenance": {
+            "last_checked_at": None,
+            "stale_count": 0,
+            "contradiction_count": 0,
+            "missing_canonical_count": 0,
+        },
+        "sync": {
+            "enabled": False,
+            "interval_minutes": 60,
+            "sources": DEFAULT_SOURCES,
+            "last_run_at": None,
+            "next_run_at": None,
+            "last_status": "idle",
+            "last_error": "",
+            "history": [],
+        },
+    }
+
+
+def _load(founder_id: str) -> dict[str, Any]:
+    path = _brain_path(founder_id)
+    if not path.exists():
+        return _empty_brain(founder_id)
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        data = _empty_brain(founder_id)
+    data.setdefault("founder_id", founder_id)
+    data.setdefault("sources", _empty_brain(founder_id)["sources"])
+    data.setdefault("records", [])
+    data.setdefault("relationships", [])
+    data.setdefault("proposals", [])
+    data.setdefault("maintenance", {
+        "last_checked_at": None,
+        "stale_count": 0,
+        "contradiction_count": 0,
+        "missing_canonical_count": 0,
+    })
+    data.setdefault("sync", {
+        "enabled": False,
+        "interval_minutes": 60,
+        "sources": DEFAULT_SOURCES,
+        "last_run_at": None,
+        "next_run_at": None,
+        "last_status": "idle",
+        "last_error": "",
+        "history": [],
+    })
+    for key, meta in SOURCE_CATALOG.items():
+        data["sources"].setdefault(key, {
+            "key": key,
+            "label": meta["label"],
+            "kind": meta["kind"],
+            "status": "available",
+            "record_count": 0,
+            "last_synced_at": None,
+            "notes": "",
+        })
+        data["sources"][key].update(CONNECTOR_REQUIREMENTS.get(key, {}))
+    return data
+
+
+def _save(founder_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    data["updated_at"] = _now()
+    path = _brain_path(founder_id)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True))
+    return data
+
+
+def _proposal_id(kind: str, record_ids: list[str], title: str) -> str:
+    raw = f"{kind}:{':'.join(sorted(record_ids))}:{title}"
+    import hashlib
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _record_id(source: str, title: str, content: str) -> str:
+    raw = f"{source}:{title}:{content[:600]}"
+    import hashlib
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _record(
+    *,
+    source: str,
+    title: str,
+    content: str,
+    kind: str | None = None,
+    url: str = "",
+    canonical: bool = False,
+    stale_risk: str = "medium",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    content = re.sub(r"\s+", " ", content).strip()
+    meta = metadata or {}
+    status = meta.get("status", "active")
+    domain = meta.get("domain") or _infer_domain(title, content)
+    return {
+        "id": _record_id(source, title, content),
+        "source": source,
+        "kind": kind or SOURCE_CATALOG.get(source, {}).get("kind", "note"),
+        "title": title.strip()[:180] or "Untitled",
+        "url": url,
+        "content": content[:8000],
+        "canonical": canonical,
+        "stale_risk": stale_risk,
+        "status": status,
+        "domain": domain,
+        "supersedes": meta.get("supersedes", []),
+        "updated_at": _now(),
+        "metadata": meta,
+    }
+
+
+def _upsert_records(data: dict[str, Any], records: list[dict[str, Any]]) -> int:
+    existing = {r["id"]: r for r in data.get("records", []) if r.get("id")}
+    changed = 0
+    for rec in records:
+        old = existing.get(rec["id"])
+        if old != rec:
+            existing[rec["id"]] = rec
+            changed += 1
+    data["records"] = sorted(existing.values(), key=lambda r: (r.get("source", ""), r.get("title", "")))
+    return changed
+
+
+def _keywords(text: str, limit: int = 8) -> list[str]:
+    words = re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{3,}", text.lower())
+    return [w for w, _ in Counter(w for w in words if w not in STOP_WORDS).most_common(limit)]
+
+
+def _infer_domain(title: str, content: str) -> str:
+    text = f"{title} {content}".lower()
+    domains = {
+        "architecture": ["architecture", "infra", "backend", "frontend", "api", "database", "schema", "deploy", "auth"],
+        "product": ["roadmap", "feature", "user", "customer", "pricing", "plan", "launch", "mvp"],
+        "go_to_market": ["sales", "marketing", "campaign", "lead", "outreach", "positioning", "competitor"],
+        "operations": ["runbook", "sop", "process", "hiring", "meeting", "decision", "owner"],
+        "support": ["ticket", "bug", "incident", "customer", "zendesk", "help"],
+    }
+    scores = {
+        domain: sum(text.count(token) for token in tokens)
+        for domain, tokens in domains.items()
+    }
+    best, score = max(scores.items(), key=lambda item: item[1])
+    if score > 0:
+        return best
+    kws = _keywords(text, 1)
+    return kws[0] if kws else "general"
+
+
+def _rebuild_relationships(data: dict[str, Any]) -> None:
+    records = data.get("records", [])
+    rels: dict[tuple[str, str], dict[str, Any]] = {}
+    keyword_map: dict[str, list[str]] = {}
+    for rec in records:
+        kws = set(_keywords(f"{rec.get('title', '')} {rec.get('content', '')}", 12))
+        keyword_map[rec["id"]] = list(kws)
+    for i, a in enumerate(records):
+        for b in records[i + 1:]:
+            if a.get("source") == b.get("source"):
+                continue
+            overlap = sorted(set(keyword_map.get(a["id"], [])) & set(keyword_map.get(b["id"], [])))
+            if not overlap:
+                continue
+            key = tuple(sorted([a["id"], b["id"]]))
+            rels[key] = {
+                "from": key[0],
+                "to": key[1],
+                "type": "shared_context",
+                "strength": min(1.0, round(len(overlap) / 5, 2)),
+                "evidence": overlap[:5],
+            }
+    data["relationships"] = list(rels.values())
+
+
+def _extract_conflict_markers(text: str) -> set[str]:
+    markers: set[str] = set()
+    lower = text.lower()
+    patterns = [
+        r"\b(next\.?js|react|vite|sveltekit|remix|fastapi|django|express|supabase|postgres|mysql|mongodb|sqlite|clerk|nextauth)\b",
+        r"\b(free|freemium|enterprise|team|usage-based|seat-based|subscription)\b",
+        r"\b(aws|gcp|azure|vercel|cloudflare|render|fly\.io)\b",
+    ]
+    for pattern in patterns:
+        markers.update(re.findall(pattern, lower))
+    return markers
+
+
+def _record_overlap(a: dict[str, Any], b: dict[str, Any]) -> set[str]:
+    a_text = f"{a.get('title', '')} {a.get('content', '')}"
+    b_text = f"{b.get('title', '')} {b.get('content', '')}"
+    return set(_keywords(a_text, 16)) & set(_keywords(b_text, 16))
+
+
+def _proposal(kind: str, title: str, records: list[dict[str, Any]], reason: str, suggested_update: str) -> dict[str, Any]:
+    ids = [r["id"] for r in records if r.get("id")]
+    return {
+        "id": _proposal_id(kind, ids, title),
+        "kind": kind,
+        "title": title,
+        "status": "open",
+        "record_ids": ids,
+        "reason": reason,
+        "suggested_update": suggested_update,
+        "created_at": _now(),
+    }
+
+
+def _merge_proposals(data: dict[str, Any], proposals: list[dict[str, Any]]) -> None:
+    existing = {p.get("id"): p for p in data.get("proposals", []) if p.get("id")}
+    for proposal in proposals:
+        old = existing.get(proposal["id"])
+        if old and old.get("status") != "open":
+            proposal["status"] = old["status"]
+        existing[proposal["id"]] = proposal
+    data["proposals"] = sorted(existing.values(), key=lambda p: (p.get("status") != "open", p.get("created_at", "")))
+
+
+def _refresh_counts(data: dict[str, Any]) -> None:
+    counts = Counter(r.get("source", "unknown") for r in data.get("records", []))
+    for key, source in data.get("sources", {}).items():
+        source["record_count"] = counts.get(key, 0)
+
+
+def _append_sync_history(data: dict[str, Any], entry: dict[str, Any]) -> None:
+    sync = data.setdefault("sync", {})
+    history = list(sync.get("history") or [])
+    history.insert(0, entry)
+    sync["history"] = history[:25]
+
+
+def _normalize_source_record(source: str, raw: dict[str, Any]) -> dict[str, Any]:
+    title = str(
+        raw.get("title")
+        or raw.get("name")
+        or raw.get("subject")
+        or raw.get("message")
+        or raw.get("id")
+        or "Untitled"
+    )
+    content = str(
+        raw.get("content")
+        or raw.get("body")
+        or raw.get("text")
+        or raw.get("description")
+        or raw.get("summary")
+        or raw.get("message")
+        or ""
+    )
+    url = str(raw.get("url") or raw.get("html_url") or raw.get("permalink") or raw.get("web_url") or "")
+    kind = str(raw.get("kind") or SOURCE_CATALOG.get(source, {}).get("kind", "note"))
+    canonical = bool(raw.get("canonical", False))
+    stale_risk = str(raw.get("stale_risk") or ("low" if canonical else "medium"))
+    metadata = dict(raw.get("metadata") or {})
+    for key in ("external_id", "author", "owner", "repo", "channel", "thread_ts", "state", "updated_at", "domain", "status"):
+        if key in raw and key not in metadata:
+            metadata[key] = raw[key]
+    if not content:
+        content = title
+    return _record(
+        source=source,
+        title=title,
+        content=content,
+        kind=kind,
+        url=url,
+        canonical=canonical,
+        stale_risk=stale_risk,
+        metadata=metadata,
+    )
+
+
+def _vault_records(founder_id: str) -> list[dict[str, Any]]:
+    try:
+        from backend.tools.obsidian_logger import _sessions_root
+    except Exception:
+        return []
+    root = _sessions_root(founder_id)
+    if not root.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for note_file in sorted(root.glob("*/*.md"))[-80:]:
+        text = note_file.read_text(errors="replace")
+        if not text.strip():
+            continue
+        title = f"{note_file.parent.name} / {note_file.stem}"
+        records.append(_record(
+            source="astra_vault",
+            kind="agent_memory",
+            title=title,
+            content=text,
+            url=str(note_file),
+            canonical=note_file.stem == "index",
+            stale_risk="low",
+            metadata={"session_id": note_file.parent.name, "agent": note_file.stem},
+        ))
+    return records
+
+
+def _source_status(founder_id: str, source: str) -> tuple[str, str]:
+    try:
+        from backend.provisioning.credentials_store import load_credentials
+        direct = load_credentials(founder_id, source)
+        if direct:
+            return "connected", "Manual credentials saved."
+        composio = load_credentials("__platform__", "composio")
+        if composio and source in {"github", "gmail", "linear", "notion", "google_drive", "google_workspace"}:
+            return "oauth_ready", "Composio configured; connect this account from Integrations."
+    except Exception:
+        pass
+    if source in {"slack", "confluence", "zendesk", "granola"}:
+        return "planned", "Connector modeled; OAuth adapter not yet wired."
+    return "available", "Ready to connect."
+
+
+def _connector_records(founder_id: str, sources: list[str]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for source in sources:
+        meta = SOURCE_CATALOG.get(source)
+        if not meta:
+            continue
+        status, note = _source_status(founder_id, source)
+        records.append(_record(
+            source=source,
+            title=f"{meta['label']} connector",
+            content=(
+                f"{meta['label']} is part of the company brain source graph. "
+                f"Status: {status}. {note} This source contributes {meta['kind']} context "
+                "to search, drift checks, and agent prompts once records are synced."
+            ),
+            kind="connector",
+            canonical=True,
+            stale_risk="low" if status in {"connected", "oauth_ready"} else "medium",
+            metadata={"connector_status": status},
+        ))
+    return records
+
+
+def sync_company_brain(founder_id: str, sources: list[str] | None = None) -> dict[str, Any]:
+    """Sync source metadata plus local Astra vault notes into the company brain."""
+    selected = sources or DEFAULT_SOURCES
+    data = _load(founder_id)
+    records = _connector_records(founder_id, selected) + _vault_records(founder_id)
+    changed = _upsert_records(data, records)
+    for source in selected:
+        if source in data["sources"]:
+            status, note = _source_status(founder_id, source)
+            data["sources"][source]["status"] = status
+            data["sources"][source]["notes"] = note
+            data["sources"][source]["last_synced_at"] = _now()
+    if "astra_vault" not in data["sources"]:
+        data["sources"]["astra_vault"] = {
+            "key": "astra_vault",
+            "label": "Astra Vault",
+            "kind": "agent_memory",
+            "status": "connected",
+            "record_count": 0,
+            "last_synced_at": _now(),
+            "notes": "Prior agent runs and Obsidian notes.",
+        }
+    maintenance = _run_maintenance(data)
+    _merge_proposals(data, maintenance["proposals"])
+    _rebuild_relationships(data)
+    _refresh_counts(data)
+    _save(founder_id, data)
+    return {
+        "ok": True,
+        "founder_id": founder_id,
+        "changed_records": changed,
+        "record_count": len(data["records"]),
+        "relationship_count": len(data["relationships"]),
+        "proposal_count": len([p for p in data.get("proposals", []) if p.get("status") == "open"]),
+        "sources": list(data["sources"].values()),
+    }
+
+
+def configure_company_brain_sync(
+    founder_id: str,
+    enabled: bool = True,
+    sources: list[str] | None = None,
+    interval_minutes: int = 60,
+) -> dict[str, Any]:
+    """Persist continuous-sync settings for the company brain."""
+    data = _load(founder_id)
+    interval = max(5, min(int(interval_minutes or 60), 24 * 60))
+    selected = sources or data.get("sync", {}).get("sources") or DEFAULT_SOURCES
+    next_run = _iso_from_epoch(time.time() + interval * 60) if enabled else None
+    data["sync"] = {
+        **data.get("sync", {}),
+        "enabled": bool(enabled),
+        "interval_minutes": interval,
+        "sources": selected,
+        "next_run_at": next_run,
+        "last_status": data.get("sync", {}).get("last_status", "idle"),
+        "last_error": data.get("sync", {}).get("last_error", ""),
+        "history": data.get("sync", {}).get("history", [])[:25],
+    }
+    _save(founder_id, data)
+    return {"ok": True, "sync": data["sync"]}
+
+
+def get_company_brain_sync_status(founder_id: str) -> dict[str, Any]:
+    """Return persisted continuous-sync settings and recent run history."""
+    data = _load(founder_id)
+    return {"ok": True, "sync": data.get("sync", {})}
+
+
+def run_company_brain_sync(founder_id: str, force: bool = False) -> dict[str, Any]:
+    """Run provider import + vault sync if due or explicitly forced."""
+    data = _load(founder_id)
+    sync = data.get("sync", {})
+    now = time.time()
+    next_run_epoch = _epoch_from_iso(sync.get("next_run_at"))
+    if not force and (not sync.get("enabled") or (next_run_epoch and now < next_run_epoch)):
+        return {"ok": True, "skipped": True, "sync": sync}
+
+    sources = sync.get("sources") or DEFAULT_SOURCES
+    interval = max(5, min(int(sync.get("interval_minutes") or 60), 24 * 60))
+    started_at = _now()
+    sync["last_status"] = "running"
+    sync["last_error"] = ""
+    data["sync"] = sync
+    _save(founder_id, data)
+
+    try:
+        from backend.tools.company_brain_connectors import import_company_brain_sources
+        import_result = import_company_brain_sources(founder_id, sources, limit=20)
+        metadata_result = sync_company_brain(founder_id, sources)
+        data = _load(founder_id)
+        sync = data.get("sync", {})
+        sync["enabled"] = bool(sync.get("enabled", True))
+        sync["sources"] = sources
+        sync["interval_minutes"] = interval
+        sync["last_run_at"] = started_at
+        sync["next_run_at"] = _iso_from_epoch(time.time() + interval * 60)
+        sync["last_status"] = "ok" if import_result.get("ok") or metadata_result.get("ok") else "partial"
+        sync["last_error"] = ""
+        _append_sync_history(data, {
+            "started_at": started_at,
+            "finished_at": _now(),
+            "status": sync["last_status"],
+            "sources": sources,
+            "imported_sources": import_result.get("imported_sources", []),
+            "failed_sources": import_result.get("failed_sources", []),
+            "record_count": metadata_result.get("record_count", len(data.get("records", []))),
+            "proposal_count": metadata_result.get("proposal_count", 0),
+        })
+        data["sync"] = sync
+        _save(founder_id, data)
+        return {"ok": True, "skipped": False, "sync": sync, "import": import_result, "metadata": metadata_result}
+    except Exception as exc:
+        data = _load(founder_id)
+        sync = data.get("sync", {})
+        sync["last_run_at"] = started_at
+        sync["next_run_at"] = _iso_from_epoch(time.time() + interval * 60)
+        sync["last_status"] = "error"
+        sync["last_error"] = str(exc)
+        _append_sync_history(data, {
+            "started_at": started_at,
+            "finished_at": _now(),
+            "status": "error",
+            "sources": sources,
+            "error": str(exc),
+        })
+        data["sync"] = sync
+        _save(founder_id, data)
+        return {"ok": False, "skipped": False, "sync": sync, "error": str(exc)}
+
+
+def run_due_company_brain_syncs(limit: int = 25) -> dict[str, Any]:
+    """Run due continuous-sync jobs for all local company brains."""
+    results: list[dict[str, Any]] = []
+    for founder_id in list_company_brain_founders()[: max(1, limit)]:
+        data = _load(founder_id)
+        sync = data.get("sync", {})
+        if not sync.get("enabled"):
+            continue
+        next_run = _epoch_from_iso(sync.get("next_run_at"))
+        if next_run is not None and time.time() < next_run:
+            continue
+        results.append(run_company_brain_sync(founder_id, force=True))
+    return {
+        "ok": True,
+        "checked_founders": len(list_company_brain_founders()),
+        "ran": len(results),
+        "results": results,
+    }
+
+
+def ingest_company_brain_records(
+    founder_id: str,
+    source: str,
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Bulk-ingest normalized records from a connector, webhook, or importer."""
+    data = _load(founder_id)
+    normalized = [_normalize_source_record(source, raw) for raw in records]
+    changed = _upsert_records(data, normalized)
+    if source not in data["sources"]:
+        data["sources"][source] = {
+            "key": source,
+            "label": source.replace("_", " ").title(),
+            "kind": SOURCE_CATALOG.get(source, {}).get("kind", "records"),
+            "status": "connected",
+            "record_count": 0,
+            "last_synced_at": _now(),
+            "notes": "Ingested via company brain API.",
+        }
+    data["sources"][source]["status"] = "connected"
+    data["sources"][source]["last_synced_at"] = _now()
+    data["sources"][source]["notes"] = "Records ingested via company brain API."
+    maintenance = _run_maintenance(data)
+    _merge_proposals(data, maintenance["proposals"])
+    _rebuild_relationships(data)
+    _refresh_counts(data)
+    _save(founder_id, data)
+    return {
+        "ok": True,
+        "source": source,
+        "ingested": len(normalized),
+        "changed_records": changed,
+        "record_count": len(data["records"]),
+        "proposal_count": len([p for p in data.get("proposals", []) if p.get("status") == "open"]),
+    }
+
+
+def add_company_brain_record(
+    founder_id: str,
+    source: str,
+    title: str,
+    content: str,
+    kind: str = "note",
+    url: str = "",
+    canonical: bool = False,
+    stale_risk: str = "medium",
+) -> dict[str, Any]:
+    """Add a normalized manual/source record to the company brain."""
+    data = _load(founder_id)
+    rec = _record(
+        source=source,
+        title=title,
+        content=content,
+        kind=kind,
+        url=url,
+        canonical=canonical,
+        stale_risk=stale_risk,
+        metadata={"manual": True},
+    )
+    _upsert_records(data, [rec])
+    if source not in data["sources"]:
+        data["sources"][source] = {
+            "key": source,
+            "label": source.replace("_", " ").title(),
+            "kind": kind,
+            "status": "connected",
+            "record_count": 0,
+            "last_synced_at": _now(),
+            "notes": "Manually added source.",
+        }
+    maintenance = _run_maintenance(data)
+    _merge_proposals(data, maintenance["proposals"])
+    _rebuild_relationships(data)
+    _refresh_counts(data)
+    _save(founder_id, data)
+    return {"ok": True, "record": rec}
+
+
+def get_company_brain(founder_id: str) -> dict[str, Any]:
+    """Return the full normalized company brain graph."""
+    data = _load(founder_id)
+    _refresh_counts(data)
+    return data
+
+
+def _run_maintenance(data: dict[str, Any]) -> dict[str, Any]:
+    records = [r for r in data.get("records", []) if r.get("status", "active") == "active"]
+    proposals: list[dict[str, Any]] = []
+    stale_count = 0
+    contradiction_count = 0
+    missing_canonical_count = 0
+
+    by_domain: dict[str, list[dict[str, Any]]] = {}
+    for rec in records:
+        by_domain.setdefault(rec.get("domain") or "general", []).append(rec)
+
+    for domain, domain_records in by_domain.items():
+        canonical = [r for r in domain_records if r.get("canonical")]
+        noncanonical = [r for r in domain_records if not r.get("canonical")]
+        if len(domain_records) >= 3 and not canonical:
+            missing_canonical_count += 1
+            proposals.append(_proposal(
+                "missing_canonical",
+                f"Choose a canonical {domain} source",
+                domain_records[:5],
+                f"{len(domain_records)} active records discuss {domain}, but none is marked canonical.",
+                "Pick or create one authoritative record so agents know which source wins during conflicts.",
+            ))
+
+        for canon in canonical:
+            for rec in noncanonical:
+                overlap = _record_overlap(canon, rec)
+                if len(overlap) < 2:
+                    continue
+                canon_markers = _extract_conflict_markers(canon.get("content", ""))
+                rec_markers = _extract_conflict_markers(rec.get("content", ""))
+                if canon_markers and rec_markers and canon_markers != rec_markers:
+                    contradiction_count += 1
+                    proposals.append(_proposal(
+                        "contradiction",
+                        f"Resolve {domain} conflict: {canon.get('title')} vs {rec.get('title')}",
+                        [canon, rec],
+                        f"Both records overlap on {', '.join(sorted(overlap)[:5])}, but mention different implementation or business choices.",
+                        f"Review {rec.get('title')} against canonical source {canon.get('title')} and update or deprecate the stale record.",
+                    ))
+                elif rec.get("stale_risk") == "high":
+                    stale_count += 1
+                    proposals.append(_proposal(
+                        "stale_record",
+                        f"Refresh stale {domain} record: {rec.get('title')}",
+                        [canon, rec],
+                        f"{rec.get('title')} is marked high drift risk and overlaps canonical source {canon.get('title')}.",
+                        "Regenerate this artifact from the canonical source or mark it deprecated.",
+                    ))
+
+    data["maintenance"] = {
+        "last_checked_at": _now(),
+        "stale_count": stale_count,
+        "contradiction_count": contradiction_count,
+        "missing_canonical_count": missing_canonical_count,
+    }
+    return {"ok": True, "maintenance": data["maintenance"], "proposals": proposals}
+
+
+def maintain_company_brain(founder_id: str) -> dict[str, Any]:
+    """Detect stale records, canonical gaps, and cross-source contradictions."""
+    data = _load(founder_id)
+    result = _run_maintenance(data)
+    _merge_proposals(data, result["proposals"])
+    _rebuild_relationships(data)
+    _refresh_counts(data)
+    _save(founder_id, data)
+    return {
+        "ok": True,
+        "maintenance": data["maintenance"],
+        "proposals": [p for p in data.get("proposals", []) if p.get("status") == "open"],
+    }
+
+
+def resolve_company_brain_proposal(founder_id: str, proposal_id: str, status: str = "resolved") -> dict[str, Any]:
+    """Mark a maintenance proposal resolved, dismissed, or open."""
+    data = _load(founder_id)
+    allowed = {"open", "resolved", "dismissed"}
+    next_status = status if status in allowed else "resolved"
+    for proposal in data.get("proposals", []):
+        if proposal.get("id") == proposal_id:
+            proposal["status"] = next_status
+            proposal["updated_at"] = _now()
+            _save(founder_id, data)
+            return {"ok": True, "proposal": proposal}
+    return {"ok": False, "error": f"Unknown proposal {proposal_id}"}
+
+
+def search_company_brain(founder_id: str, query: str, limit: int = 8) -> dict[str, Any]:
+    """Search the company brain for human and agent context retrieval."""
+    data = _load(founder_id)
+    terms = [t for t in re.findall(r"[a-zA-Z0-9_-]+", query.lower()) if len(t) > 2]
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for rec in data.get("records", []):
+        if rec.get("status") == "deprecated":
+            continue
+        hay = f"{rec.get('title', '')} {rec.get('content', '')} {rec.get('source', '')}".lower()
+        score = sum(hay.count(term) for term in terms)
+        if query.lower() in hay:
+            score += 4
+        if rec.get("canonical"):
+            score += 0.5
+        if score > 0:
+            scored.append((float(score), rec))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    results = []
+    for score, rec in scored[: max(1, min(limit, 20))]:
+        content = rec.get("content", "")
+        snippet = content[:420]
+        results.append({**rec, "score": score, "snippet": snippet})
+    return {
+        "query": query,
+        "count": len(results),
+        "results": results,
+        "formatted": format_company_brain_context(results),
+    }
+
+
+def format_company_brain_context(records: list[dict[str, Any]]) -> str:
+    if not records:
+        return "No company brain records matched."
+    lines = ["Company brain context:"]
+    for rec in records:
+        lines.append(
+            f"- [{rec.get('source')}] {rec.get('title')}: "
+            f"{rec.get('snippet') or rec.get('content', '')[:360]}"
+        )
+    return "\n".join(lines)
+
+
+def company_brain_agent_context(founder_id: str, query: str, limit: int = 8) -> dict[str, Any]:
+    """Return compact graph context for IDEs, MCP bridges, and external agents."""
+    data = _load(founder_id)
+    search = search_company_brain(founder_id, query, limit=limit)
+    matched_ids = {record["id"] for record in search["results"]}
+    relationships = [
+        rel for rel in data.get("relationships", [])
+        if rel.get("from") in matched_ids or rel.get("to") in matched_ids
+    ][:12]
+    proposals = [
+        p for p in data.get("proposals", [])
+        if p.get("status") == "open" and any(rid in matched_ids for rid in p.get("record_ids", []))
+    ][:8]
+    canonical = [
+        {
+            "id": rec.get("id"),
+            "source": rec.get("source"),
+            "title": rec.get("title"),
+            "domain": rec.get("domain"),
+            "url": rec.get("url"),
+            "content": rec.get("content", "")[:700],
+        }
+        for rec in data.get("records", [])
+        if rec.get("canonical") and rec.get("status", "active") == "active"
+    ][:12]
+    return {
+        "ok": True,
+        "founder_id": founder_id,
+        "query": query,
+        "context": search["formatted"],
+        "records": search["results"],
+        "relationships": relationships,
+        "canonical_sources": canonical,
+        "open_proposals": proposals,
+        "maintenance": data.get("maintenance", {}),
+        "sync": data.get("sync", {}),
+    }
+
+
+def company_brain_context(founder_id: str, query: str, limit: int = 6) -> str:
+    """Compact helper for orchestrator context injection."""
+    return search_company_brain(founder_id, query, limit=limit)["formatted"]
+
+
+def ask_company_brain(founder_id: str, question: str, limit: int = 8) -> dict[str, Any]:
+    """Answer a question using company-brain records with explicit citations."""
+    query = question.strip()
+    if not query:
+        return {
+            "ok": False,
+            "question": question,
+            "answer": "Question is empty.",
+            "citations": [],
+            "confidence": 0.0,
+        }
+    search = search_company_brain(founder_id, query, limit=limit)
+    records = search.get("results", [])
+    if not records:
+        return {
+            "ok": True,
+            "question": question,
+            "answer": "I could not find supporting records in the current company brain.",
+            "citations": [],
+            "confidence": 0.0,
+        }
+
+    top = records[: max(1, min(limit, 8))]
+    evidence_lines: list[str] = []
+    citations: list[dict[str, Any]] = []
+    for idx, rec in enumerate(top, start=1):
+        snippet = (rec.get("snippet") or rec.get("content") or "").strip()
+        if len(snippet) > 260:
+            snippet = snippet[:257] + "..."
+        evidence_lines.append(f"[{idx}] {rec.get('title')} ({rec.get('source')}): {snippet}")
+        citations.append({
+            "index": idx,
+            "record_id": rec.get("id"),
+            "title": rec.get("title"),
+            "source": rec.get("source"),
+            "url": rec.get("url"),
+            "canonical": bool(rec.get("canonical")),
+            "score": rec.get("score", 0.0),
+        })
+
+    canonical_hits = sum(1 for c in citations if c["canonical"])
+    top_score = float(citations[0].get("score") or 0.0)
+    confidence = min(1.0, round((top_score / 6.0) + (canonical_hits / max(1, len(citations))) * 0.25, 2))
+    summary = (
+        f"Answer based on {len(top)} matched records. "
+        f"Top source: {citations[0]['title']} ({citations[0]['source']})."
+    )
+
+    return {
+        "ok": True,
+        "question": question,
+        "answer": summary,
+        "confidence": confidence,
+        "citations": citations,
+        "evidence": evidence_lines,
+        "context": search.get("formatted", ""),
+    }

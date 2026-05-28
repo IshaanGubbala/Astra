@@ -50,3 +50,38 @@ class ContinueRequest(BaseModel):
     instruction: str
     prior_session_id: str
     agents: Optional[list[str]] = None  # if None, planner decides
+
+
+class BrainSyncRequest(BaseModel):
+    sources: Optional[list[str]] = None
+    limit: int = 20
+
+
+class BrainSyncConfigRequest(BaseModel):
+    enabled: bool = True
+    sources: Optional[list[str]] = None
+    interval_minutes: int = 60
+
+
+class BrainRecordRequest(BaseModel):
+    source: str
+    title: str
+    content: str
+    kind: str = "note"
+    url: Optional[str] = ""
+    canonical: bool = False
+    stale_risk: str = "medium"
+
+
+class BrainIngestRequest(BaseModel):
+    source: str
+    records: list[dict]
+
+
+class BrainProposalRequest(BaseModel):
+    status: str = "resolved"
+
+
+class BrainAskRequest(BaseModel):
+    question: str
+    limit: int = 8

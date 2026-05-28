@@ -9,7 +9,22 @@ from fastapi import APIRouter, HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
-from backend.api.schemas import AskRequest, ApproveRequest, ContinueRequest, GoalRequest, RejectRequest, SetupRequest, SaveCredentialRequest, SteerRequest
+from backend.api.schemas import (
+    AskRequest,
+    ApproveRequest,
+    BrainRecordRequest,
+    BrainIngestRequest,
+    BrainAskRequest,
+    BrainProposalRequest,
+    BrainSyncConfigRequest,
+    BrainSyncRequest,
+    ContinueRequest,
+    GoalRequest,
+    RejectRequest,
+    SetupRequest,
+    SaveCredentialRequest,
+    SteerRequest,
+)
 from backend.provisioning.credentials_store import store_credentials
 
 
@@ -197,11 +212,165 @@ async def save_service_credential(body: SaveCredentialRequest):
     return {"saved": True, "service": body.service, "founder_id": body.founder_id}
 
 
+@router.get("/brain/{founder_id}")
+async def get_brain(founder_id: str):
+    """Return the founder's normalized company brain graph."""
+    from backend.tools.company_brain import get_company_brain
+    return get_company_brain(founder_id)
+
+
+@router.post("/brain/{founder_id}/sync")
+async def sync_brain(founder_id: str, body: BrainSyncRequest):
+    """Sync connected sources and local agent vault notes into the company brain."""
+    import asyncio
+    from backend.tools.company_brain import sync_company_brain
+    return await asyncio.to_thread(sync_company_brain, founder_id, body.sources)
+
+
+@router.get("/brain/{founder_id}/search")
+async def search_brain(founder_id: str, q: str, limit: int = 8):
+    """Search company brain records for human UI and agent context."""
+    from backend.tools.company_brain import search_company_brain
+    return search_company_brain(founder_id, q, limit)
+
+
+@router.get("/brain/{founder_id}/agent-context")
+async def brain_agent_context(founder_id: str, q: str, limit: int = 8):
+    """Compact graph context for IDE/MCP/external agents."""
+    from backend.tools.company_brain import company_brain_agent_context
+    return company_brain_agent_context(founder_id, q, limit)
+
+
+@router.post("/brain/{founder_id}/ask")
+async def ask_brain(founder_id: str, body: BrainAskRequest):
+    """Return a cited answer synthesized from matched company-brain records."""
+    from backend.tools.company_brain import ask_company_brain
+    return ask_company_brain(founder_id, body.question, body.limit)
+
+
+@router.post("/brain/{founder_id}/records")
+async def add_brain_record(founder_id: str, body: BrainRecordRequest):
+    """Add a manual or app-sourced record to the company brain."""
+    from backend.tools.company_brain import add_company_brain_record
+    return add_company_brain_record(
+        founder_id=founder_id,
+        source=body.source,
+        title=body.title,
+        content=body.content,
+        kind=body.kind,
+        url=body.url or "",
+        canonical=body.canonical,
+        stale_risk=body.stale_risk,
+    )
+
+
+@router.post("/brain/{founder_id}/ingest")
+async def ingest_brain_records(founder_id: str, body: BrainIngestRequest):
+    """Bulk-ingest normalized records from connector/webhook payloads."""
+    import asyncio
+    from backend.tools.company_brain import ingest_company_brain_records
+    return await asyncio.to_thread(
+        ingest_company_brain_records,
+        founder_id,
+        body.source,
+        body.records,
+    )
+
+
+@router.post("/brain/{founder_id}/import")
+async def import_brain_sources(founder_id: str, body: BrainSyncRequest):
+    """Import actual records from connected providers into the company brain."""
+    import asyncio
+    from backend.tools.company_brain_connectors import import_company_brain_sources
+    return await asyncio.to_thread(
+        import_company_brain_sources,
+        founder_id,
+        body.sources,
+        body.limit,
+    )
+
+
+@router.get("/brain/{founder_id}/sync/status")
+async def brain_sync_status(founder_id: str):
+    """Return continuous sync settings and recent run history."""
+    from backend.tools.company_brain import get_company_brain_sync_status
+    return get_company_brain_sync_status(founder_id)
+
+
+@router.post("/brain/{founder_id}/sync/config")
+async def configure_brain_sync(founder_id: str, body: BrainSyncConfigRequest):
+    """Configure continuous sync for connected providers."""
+    from backend.tools.company_brain import configure_company_brain_sync
+    return configure_company_brain_sync(
+        founder_id=founder_id,
+        enabled=body.enabled,
+        sources=body.sources,
+        interval_minutes=body.interval_minutes,
+    )
+
+
+@router.post("/brain/{founder_id}/sync/run")
+async def run_brain_sync(founder_id: str, body: BrainSyncRequest):
+    """Run continuous-sync import now, regardless of schedule."""
+    import asyncio
+    from backend.tools.company_brain import configure_company_brain_sync, run_company_brain_sync
+    if body.sources:
+        configure_company_brain_sync(founder_id, enabled=True, sources=body.sources, interval_minutes=60)
+    return await asyncio.to_thread(run_company_brain_sync, founder_id, True)
+
+
+@router.get("/brain/scheduler/status")
+async def brain_scheduler_status():
+    """Return process-local company-brain scheduler status."""
+    from backend.tools.company_brain_scheduler import get_company_brain_scheduler_status
+    return get_company_brain_scheduler_status()
+
+
+@router.post("/brain/scheduler/run-due")
+async def run_due_brain_syncs():
+    """Run all currently due company-brain sync jobs."""
+    import asyncio
+    from backend.tools.company_brain import run_due_company_brain_syncs
+    return await asyncio.to_thread(run_due_company_brain_syncs)
+
+
+@router.post("/brain/{founder_id}/maintain")
+async def maintain_brain(founder_id: str):
+    """Run drift, canonical-gap, and contradiction detection."""
+    import asyncio
+    from backend.tools.company_brain import maintain_company_brain
+    return await asyncio.to_thread(maintain_company_brain, founder_id)
+
+
+@router.post("/brain/{founder_id}/proposals/{proposal_id}")
+async def update_brain_proposal(founder_id: str, proposal_id: str, body: BrainProposalRequest):
+    """Update a maintenance proposal status."""
+    from backend.tools.company_brain import resolve_company_brain_proposal
+    return resolve_company_brain_proposal(founder_id, proposal_id, body.status)
+
+
 @router.get("/setup/{founder_id}")
 async def get_setup_status(founder_id: str):
     """Returns which services are connected for this founder."""
     from backend.provisioning.account_provisioner import get_founder_setup_status
     return await get_founder_setup_status(founder_id)
+
+
+@router.post("/setup/auto-connect/{founder_id}")
+async def auto_connect_integrations(founder_id: str):
+    """
+    Apply all available platform credentials for this founder and return
+    deterministic per-service auto-connect status.
+    """
+    from backend.provisioning.integration_automation import auto_connect_status
+    return auto_connect_status(founder_id, apply=True)
+
+
+@router.get("/setup/auto-connect/{founder_id}")
+async def get_auto_connect_status(founder_id: str):
+    """Preview per-service automation status without applying changes."""
+    from backend.provisioning.integration_automation import auto_connect_status
+    return auto_connect_status(founder_id, apply=False)
 
 
 @router.get("/setup/composio/connect/{founder_id}")

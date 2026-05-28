@@ -19,6 +19,20 @@ from backend.tools.composio_tools import (
     composio_calendar_create_event,
     composio_notion_create_page,
 )
+from backend.tools.company_brain import (
+    add_company_brain_record,
+    ask_company_brain,
+    company_brain_agent_context,
+    configure_company_brain_sync,
+    get_company_brain_sync_status,
+    ingest_company_brain_records,
+    run_due_company_brain_syncs,
+    maintain_company_brain,
+    run_company_brain_sync,
+    search_company_brain,
+    sync_company_brain,
+)
+from backend.tools.company_brain_connectors import import_company_brain_source, import_company_brain_sources
 
 TOOL_REGISTRY: dict[str, callable] = {
     # Research
@@ -52,6 +66,21 @@ TOOL_REGISTRY: dict[str, callable] = {
     "composio_linear_create_issue": composio_linear_create_issue,
     "composio_calendar_create_event": composio_calendar_create_event,
     "composio_notion_create_page": composio_notion_create_page,
+
+    # Company brain — normalized cross-tool context for humans and agents
+    "company_brain_search": search_company_brain,
+    "company_brain_sync": sync_company_brain,
+    "company_brain_add_record": add_company_brain_record,
+    "company_brain_ingest_records": ingest_company_brain_records,
+    "company_brain_maintain": maintain_company_brain,
+    "company_brain_agent_context": company_brain_agent_context,
+    "company_brain_ask": ask_company_brain,
+    "company_brain_configure_sync": configure_company_brain_sync,
+    "company_brain_sync_status": get_company_brain_sync_status,
+    "company_brain_run_sync": run_company_brain_sync,
+    "company_brain_run_due_syncs": run_due_company_brain_syncs,
+    "company_brain_import_source": import_company_brain_source,
+    "company_brain_import_sources": import_company_brain_sources,
 }
 
 

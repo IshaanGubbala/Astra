@@ -1242,6 +1242,10 @@ function WorkspaceSidebar({
           <span aria-hidden="true">▣</span>
           Plan
         </button>
+        <Link href="/brain" style={navItemStyle}>
+          <span aria-hidden="true">◎</span>
+          Company brain
+        </Link>
         <Link href="/settings" style={navItemStyle}>
           <span aria-hidden="true">⚙</span>
           Account settings

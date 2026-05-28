@@ -264,6 +264,9 @@ export default function SetupPage() {
           <Link href="/" className="site-btn site-btn-ghost" style={{ padding: "0 14px", fontSize: 12 }}>
             ← Back
           </Link>
+          <Link href="/brain" className="site-btn site-btn-ghost" style={{ padding: "0 14px", fontSize: 12 }}>
+            Company brain
+          </Link>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "var(--fg)", letterSpacing: "-0.02em" }}>
               Integrations

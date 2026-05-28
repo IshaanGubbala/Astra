@@ -44,6 +44,106 @@ export interface SetupResult {
   composio_oauth_urls?: Record<string, string>;
 }
 
+export interface BrainSource {
+  key: string;
+  label: string;
+  kind: string;
+  status: string;
+  record_count: number;
+  last_synced_at: string | null;
+  notes: string;
+  credential_fields?: string[];
+  oauth_apps?: string[];
+  setup_url?: string;
+  setup_hint?: string;
+  importer?: boolean;
+}
+
+export interface BrainRecord {
+  id: string;
+  source: string;
+  kind: string;
+  title: string;
+  url: string;
+  content: string;
+  snippet?: string;
+  canonical: boolean;
+  stale_risk: string;
+  status?: string;
+  domain?: string;
+  supersedes?: string[];
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+  score?: number;
+}
+
+export interface BrainRelationship {
+  from: string;
+  to: string;
+  type: string;
+  strength: number;
+  evidence: string[];
+}
+
+export interface BrainProposal {
+  id: string;
+  kind: string;
+  title: string;
+  status: "open" | "resolved" | "dismissed";
+  record_ids: string[];
+  reason: string;
+  suggested_update: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface BrainMaintenance {
+  last_checked_at: string | null;
+  stale_count: number;
+  contradiction_count: number;
+  missing_canonical_count: number;
+}
+
+export interface BrainSyncState {
+  enabled: boolean;
+  interval_minutes: number;
+  sources: string[];
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: string;
+  last_error: string;
+  history: Array<Record<string, unknown>>;
+}
+
+export interface BrainSchedulerState {
+  running: boolean;
+  interval_seconds: number;
+  last_tick_at: string | null;
+  last_result: Record<string, unknown> | null;
+  last_error: string;
+}
+
+export interface BrainAnswerCitation {
+  index: number;
+  record_id: string;
+  title: string;
+  source: string;
+  url?: string;
+  canonical: boolean;
+  score: number;
+}
+
+export interface CompanyBrain {
+  founder_id: string;
+  updated_at: string;
+  sources: Record<string, BrainSource>;
+  records: BrainRecord[];
+  relationships: BrainRelationship[];
+  proposals: BrainProposal[];
+  maintenance: BrainMaintenance;
+  sync: BrainSyncState;
+}
+
 export async function submitGoal(
   founderId: string,
   instruction: string,
@@ -141,6 +241,159 @@ export async function getComposioOAuthUrls(
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
   return data.oauth_urls ?? {};
+}
+
+export async function getCompanyBrain(founderId: string): Promise<CompanyBrain> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function syncCompanyBrain(
+  founderId: string,
+  sources?: string[]
+): Promise<{ ok: boolean; record_count: number; relationship_count: number; changed_records: number; sources: BrainSource[] }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sources }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function importCompanyBrainSources(
+  founderId: string,
+  sources?: string[],
+  limit = 20
+): Promise<{ ok: boolean; founder_id: string; results: Array<{ ok: boolean; source: string; error?: string; ingested?: number; changed_records?: number }>; imported_sources: string[]; failed_sources: string[] }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sources, limit }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getCompanyBrainAgentContext(
+  founderId: string,
+  query: string,
+  limit = 8
+): Promise<{ ok: boolean; context: string; records: BrainRecord[]; relationships: BrainRelationship[]; canonical_sources: BrainRecord[]; open_proposals: BrainProposal[]; sync: BrainSyncState }> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/agent-context?${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function askCompanyBrain(
+  founderId: string,
+  question: string,
+  limit = 8
+): Promise<{ ok: boolean; question: string; answer: string; confidence: number; citations: BrainAnswerCitation[]; evidence: string[]; context: string }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, limit }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function configureCompanyBrainSync(
+  founderId: string,
+  config: { enabled: boolean; sources?: string[]; interval_minutes?: number }
+): Promise<{ ok: boolean; sync: BrainSyncState }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function runCompanyBrainSync(
+  founderId: string,
+  sources?: string[]
+): Promise<{ ok: boolean; skipped: boolean; sync: BrainSyncState }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sources }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getCompanyBrainSchedulerStatus(): Promise<{ ok: boolean; scheduler: BrainSchedulerState }> {
+  const res = await fetch(`${BASE}/brain/scheduler/status`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function searchCompanyBrain(
+  founderId: string,
+  query: string,
+  limit = 8
+): Promise<{ query: string; count: number; results: BrainRecord[]; formatted: string }> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/search?${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function addCompanyBrainRecord(
+  founderId: string,
+  record: { source: string; title: string; content: string; kind?: string; url?: string; canonical?: boolean; stale_risk?: string }
+): Promise<{ ok: boolean; record: BrainRecord }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/records`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(record),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function ingestCompanyBrainRecords(
+  founderId: string,
+  source: string,
+  records: Array<Record<string, unknown>>
+): Promise<{ ok: boolean; source: string; ingested: number; changed_records: number; record_count: number; proposal_count: number }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/ingest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source, records }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function maintainCompanyBrain(
+  founderId: string
+): Promise<{ ok: boolean; maintenance: BrainMaintenance; proposals: BrainProposal[] }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/maintain`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateBrainProposal(
+  founderId: string,
+  proposalId: string,
+  status: "open" | "resolved" | "dismissed"
+): Promise<{ ok: boolean; proposal?: BrainProposal; error?: string }> {
+  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/proposals/${encodeURIComponent(proposalId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 export const AGENT_LABELS: Record<string, string> = {

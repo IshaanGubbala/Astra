@@ -40,6 +40,37 @@ def get_orchestrator() -> Orchestrator:
             "sales": build_sales_agent(use_computer=False),
             "design": build_design_agent(use_computer=False),
         }
+        from backend.tools.company_brain import (
+            add_company_brain_record,
+            ask_company_brain,
+            company_brain_agent_context,
+            configure_company_brain_sync,
+            get_company_brain_sync_status,
+            ingest_company_brain_records,
+            maintain_company_brain,
+            run_due_company_brain_syncs,
+            run_company_brain_sync,
+            search_company_brain,
+            sync_company_brain,
+        )
+        from backend.tools.company_brain_connectors import (
+            import_company_brain_source,
+            import_company_brain_sources,
+        )
+        for agent in specialists.values():
+            agent.tools.setdefault("company_brain_search", search_company_brain)
+            agent.tools.setdefault("company_brain_sync", sync_company_brain)
+            agent.tools.setdefault("company_brain_add_record", add_company_brain_record)
+            agent.tools.setdefault("company_brain_ingest_records", ingest_company_brain_records)
+            agent.tools.setdefault("company_brain_maintain", maintain_company_brain)
+            agent.tools.setdefault("company_brain_agent_context", company_brain_agent_context)
+            agent.tools.setdefault("company_brain_ask", ask_company_brain)
+            agent.tools.setdefault("company_brain_configure_sync", configure_company_brain_sync)
+            agent.tools.setdefault("company_brain_sync_status", get_company_brain_sync_status)
+            agent.tools.setdefault("company_brain_run_sync", run_company_brain_sync)
+            agent.tools.setdefault("company_brain_run_due_syncs", run_due_company_brain_syncs)
+            agent.tools.setdefault("company_brain_import_source", import_company_brain_source)
+            agent.tools.setdefault("company_brain_import_sources", import_company_brain_sources)
         planner = Agent(
             name="planner",
             role="planning coordinator. Decompose founder goals into specialist tasks scoped to each agent's actual capabilities.",

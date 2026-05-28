@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-type AnyData = Record<string, unknown>;
+type AnyData = Record<string, any>;
 
 function useAdminFetch<T = AnyData>(path: string, interval = 5000) {
   const [data, setData] = useState<T | null>(null);

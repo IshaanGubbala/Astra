@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, JetBrains_Mono } from "next/font/google";
+import CookieNotice from "@/components/CookieNotice";
 import SiteNav from "./site-nav";
 import "./globals.css";
 
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ClerkProvider>
           <SiteNav />
           <main>{children}</main>
+          <CookieNotice />
         </ClerkProvider>
       </body>
     </html>

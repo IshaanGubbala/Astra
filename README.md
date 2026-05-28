@@ -89,6 +89,43 @@ No LangChain. No LlamaIndex. No Agents SDK. Raw OpenAI-compatible chat completio
 
 **Ops:** `generate_pdf`, `send_email_campaign`, `composio_linear_create_issue`, `composio_notion_create_page`, `obsidian_log`
 
+## Company Brain
+
+Astra includes a local-first company brain that normalizes context from GitHub,
+Slack, Notion, Google Drive, Gmail, Linear, Zendesk, Confluence, and Astra agent
+memory into one searchable graph. It tracks canonical records, stale/conflicting
+knowledge, source relationships, and continuous sync state.
+
+Backend agents receive compact company-brain context automatically during goal
+runs. External coding agents and IDE clients can also access it through the
+stdio JSON-RPC bridge:
+
+```bash
+ASTRA_FOUNDER_ID=founder_001 python -m backend.tools.company_brain_mcp
+```
+
+Example MCP-style client config:
+
+```json
+{
+  "mcpServers": {
+    "astra-company-brain": {
+      "command": "python",
+      "args": ["-m", "backend.tools.company_brain_mcp"],
+      "env": {
+        "ASTRA_FOUNDER_ID": "founder_001"
+      }
+    }
+  }
+}
+```
+
+Exposed tools include `company_brain_search`,
+`company_brain_agent_context`, `company_brain_add_record`,
+`company_brain_ingest_records`, `company_brain_import_sources`,
+`company_brain_configure_sync`, `company_brain_run_sync`,
+`company_brain_maintain`, and `company_brain_status`.
+
 ---
 
 ## Key Design Decisions
