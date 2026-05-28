@@ -304,6 +304,8 @@ class Agent:
 
             action = parsed.get("action")
             reasoning = parsed.get("reasoning", "")
+            tool_hint = parsed.get("tool", "")
+            logger.info("[%s] iter=%d  action=%-12s  %s", self.name, i, action, (tool_hint or reasoning)[:80])
             messages.append({"role": "assistant", "content": raw})
 
             if action == "done":
@@ -331,6 +333,22 @@ class Agent:
                         )})
                         continue
                 await self._emit(ctx, "agent_done", result=output)
+                logger.info("[%s] DONE — output keys: %s", self.name, list(output.keys()) if isinstance(output, dict) else type(output).__name__)
+                # Auto-log to obsidian if agent never called it
+                if "obsidian_log" in self.tools and "obsidian_log" not in _called_tools and ctx.founder_id and ctx.session_id:
+                    try:
+                        summary = output.get("summary", "") if isinstance(output, dict) else ""
+                        await asyncio.to_thread(
+                            self.tools["obsidian_log"],
+                            agent=self.name,
+                            session_id=ctx.session_id,
+                            summary=summary or json.dumps(output)[:500],
+                            output=output,
+                            founder_id=ctx.founder_id,
+                        )
+                        logger.info("[%s] auto-logged done output to obsidian", self.name)
+                    except Exception as oe:
+                        logger.warning("[%s] obsidian auto-log failed: %s", self.name, oe)
                 return output
 
             elif action == "tool":
@@ -445,6 +463,21 @@ class Agent:
                 output = parsed.get("output", {})
                 output["status"] = "partial"
                 await self._emit(ctx, "agent_done", output=output)
+                # Auto-write to obsidian so downstream agents can read it
+                if "obsidian_log" in self.tools and ctx.founder_id and ctx.session_id:
+                    try:
+                        summary = output.get("summary", "") or json.dumps(output)[:500]
+                        await asyncio.to_thread(
+                            self.tools["obsidian_log"],
+                            agent=self.name,
+                            session_id=ctx.session_id,
+                            summary=summary,
+                            output=output,
+                            founder_id=ctx.founder_id,
+                        )
+                        logger.info("[%s] auto-logged synthesis to obsidian", self.name)
+                    except Exception as oe:
+                        logger.warning("[%s] obsidian auto-log failed: %s", self.name, oe)
                 return output
         except Exception as e:
             logger.warning("%s forced synthesis failed: %s", self.name, e)
