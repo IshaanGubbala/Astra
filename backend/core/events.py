@@ -2,6 +2,7 @@
 In-process event bus for streaming agent progress to SSE clients.
 One asyncio.Queue per session_id. Agent/orchestrator publish; SSE endpoint consumes.
 All events are buffered so reconnecting clients can replay missed events.
+Events are also persisted to Redis so sessions survive backend restarts.
 """
 import asyncio
 import json
@@ -20,7 +21,74 @@ _event_log: dict[str, list[tuple[int, dict]]] = {}
 _event_counters: dict[str, int] = {}
 
 _MAX_BUFFER = 2000  # max events kept per session
+_REDIS_TTL = 8 * 3600  # 8 hours
 
+
+# ── Redis helpers ──────────────────────────────────────────────────────────────
+
+def _redis():
+    """Return a connected Redis client or None if unavailable."""
+    try:
+        import redis as _redis_lib
+        from backend.config import settings
+        r = _redis_lib.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=1)
+        r.ping()
+        return r
+    except Exception:
+        return None
+
+
+def _redis_append(session_id: str, event_id: int, event: dict) -> None:
+    try:
+        r = _redis()
+        if not r:
+            return
+        key = f"events:{session_id}"
+        r.rpush(key, json.dumps({"id": event_id, "event": event}))
+        r.expire(key, _REDIS_TTL)
+    except Exception:
+        pass
+
+
+def _redis_load(session_id: str) -> list[tuple[int, dict]] | None:
+    """Load event log from Redis. Returns None if not found."""
+    try:
+        r = _redis()
+        if not r:
+            return None
+        raw = r.lrange(f"events:{session_id}", 0, -1)
+        if not raw:
+            return None
+        result = []
+        for item_str in raw:
+            item = json.loads(item_str)
+            result.append((int(item["id"]), item["event"]))
+        return result
+    except Exception:
+        return None
+
+
+def _redis_active_sessions() -> list[str]:
+    """Return session_ids that have events in Redis but no goal_done — interrupted runs."""
+    try:
+        r = _redis()
+        if not r:
+            return []
+        keys = r.keys("events:*")
+        interrupted = []
+        for key in keys:
+            sid = key.split(":", 1)[1]
+            raw = r.lrange(key, 0, -1)
+            events = [json.loads(x)["event"] for x in raw]
+            is_done = any(e.get("type") in ("goal_done", "goal_error") for e in events)
+            if not is_done:
+                interrupted.append(sid)
+        return interrupted
+    except Exception:
+        return []
+
+
+# ── Core event bus ─────────────────────────────────────────────────────────────
 
 def _get_queue(session_id: str) -> asyncio.Queue:
     if session_id not in _sessions:
@@ -45,6 +113,8 @@ def _buffer(session_id: str, event_id: int, event: dict) -> None:
 async def publish(session_id: str, event: dict) -> None:
     event_id = _next_id(session_id)
     _buffer(session_id, event_id, event)
+    # Fire-and-forget Redis write (don't block the event loop)
+    asyncio.get_running_loop().run_in_executor(None, _redis_append, session_id, event_id, event)
     await _get_queue(session_id).put((event_id, event))
 
 
@@ -75,20 +145,59 @@ def _fmt(event_id: int, event: dict) -> str:
     return f"id: {event_id}\ndata: {json.dumps(event)}\n\n"
 
 
+def _restore_session(session_id: str) -> tuple[bool, bool]:
+    """Try to restore session from Redis into memory.
+    Returns (restored: bool, is_done: bool). Does NOT create asyncio objects (thread-safe).
+    """
+    events = _redis_load(session_id)
+    if not events:
+        return False, False
+    _event_log[session_id] = events
+    _event_counters[session_id] = max(eid for eid, _ in events)
+    is_done = any(e.get("type") in ("goal_done", "goal_error") for _, e in events)
+    if is_done:
+        _completed.add(session_id)
+    return True, is_done
+
+
+# Events that establish agent state — safe to replay on fresh connect without flooding the log
+_STATE_EVENTS = frozenset({
+    "goal_start", "plan_done", "goal_expanded", "detailed_plan", "company_name",
+    "agent_start", "agent_done", "agent_error", "mirror_verdict",
+    "goal_done", "goal_error",
+})
+
+
 async def stream_events(session_id: str, last_event_id: int | None = None) -> AsyncIterator[str]:
     """Async generator yielding SSE-formatted strings.
-    If last_event_id is provided, replays all buffered events after that id first.
+    - Auto-reconnect (Last-Event-ID header): replays only missed events.
+    - Fresh connect (no Last-Event-ID): replays state-establishing events to rebuild UI
+      without duplicating action log entries already in localStorage.
+    - Falls back to Redis if session not in memory — survives backend restarts.
     """
-    # Unknown session (server restart / old session) — tell client it's done
+    # Not in memory — try Redis restore before declaring expired
     if session_id not in _sessions and session_id not in _completed and session_id not in _event_log:
-        yield _fmt(0, {"type": "session_expired"})
-        return
+        restored, _ = await asyncio.to_thread(_restore_session, session_id)
+        if not restored:
+            yield _fmt(0, {"type": "session_expired"})
+            return
+        # Queue must be created on event loop thread, not inside the executor thread
+        if session_id not in _sessions and session_id not in _completed:
+            _sessions[session_id] = asyncio.Queue()
 
-    # Replay missed events if client reconnects with Last-Event-ID
-    if last_event_id is not None and session_id in _event_log:
-        for eid, ev in _event_log[session_id]:
-            if eid > last_event_id:
-                yield _fmt(eid, ev)
+    # Replay buffered events
+    if session_id in _event_log:
+        if last_event_id is not None:
+            # Auto-reconnect: replay only events missed since last seen
+            for eid, ev in _event_log[session_id]:
+                if eid > last_event_id:
+                    yield _fmt(eid, ev)
+        else:
+            # Fresh connect: replay state events only — skips action/thinking noise
+            # that would duplicate log entries already restored from localStorage
+            for eid, ev in _event_log[session_id]:
+                if ev.get("type") in _STATE_EVENTS:
+                    yield _fmt(eid, ev)
 
     # Already completed — send closed signal immediately (after replay)
     if session_id in _completed:

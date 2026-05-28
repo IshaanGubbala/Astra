@@ -20,7 +20,22 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-OPENCLAUDE_BIN = "/opt/homebrew/bin/openclaude"
+def _find_claude_bin() -> str:
+    """Find claude/openclaude binary — Mac homebrew or Linux npm global install."""
+    import shutil
+    for candidate in [
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+        "/usr/bin/claude",
+        shutil.which("claude") or "",
+        "/opt/homebrew/bin/openclaude",
+        shutil.which("openclaude") or "",
+    ]:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return "claude"  # fall back to PATH lookup at runtime
+
+OPENCLAUDE_BIN = _find_claude_bin()
 
 
 def _research_error_docs(agent_output: str) -> str:
@@ -97,8 +112,8 @@ def _research_error_docs(agent_output: str) -> str:
         logger.debug("Error doc research failed: %s", e)
         return ""
 
-# Workspace root — persistent per-session dirs under ~/Documents
-WORKSPACE_ROOT = Path.home() / "Documents" / "astra-workspaces"
+# Workspace root — configurable via ASTRA_WORKSPACE env var for Docker volume mounts
+WORKSPACE_ROOT = Path(os.environ.get("ASTRA_WORKSPACE", str(Path.home() / "Documents" / "astra-workspaces")))
 WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
 
 # session_id:repo_url -> workspace path
@@ -187,7 +202,7 @@ def _make_env() -> dict:
     env = os.environ.copy()
     env["OPENAI_BASE_URL"] = "https://api.deepinfra.com/v1/openai"
     env["OPENAI_API_KEY"] = deepinfra_key
-    env["OPENAI_MODEL"] = "deepseek-ai/DeepSeek-V4-Pro"
+    env["OPENAI_MODEL"] = "deepseek-ai/DeepSeek-V4-Flash"
     return env
 
 
@@ -203,7 +218,7 @@ def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 
     cmd = [
         OPENCLAUDE_BIN, "--print", "--dangerously-skip-permissions",
         "--provider", "openai",
-        "--model", env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Pro"),
+        "--model", env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Flash"),
     ]
     if session_id:
         cmd += ["--session-id", session_id]

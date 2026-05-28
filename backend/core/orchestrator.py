@@ -34,6 +34,20 @@ class Orchestrator:
         "  design     — wireframes, color palettes, design specs, logo briefs, UI/UX mockups.\n"
     )
 
+    @staticmethod
+    def _is_web_fallback_html(html: str) -> bool:
+        if not isinstance(html, str):
+            return False
+        h = html.lower()
+        fallback_markers = (
+            "astra-fallback-template",
+            "--bg: #06080f",
+            "--bg2: #0d1117",
+            "define your goal",
+            "astra builds it",
+        )
+        return any(marker in h for marker in fallback_markers)
+
     async def _parse_tasks(self, raw: str) -> list[dict]:
         import json, re
         for pattern in [raw, raw[raw.find("{"):raw.rfind("}")+1]]:
@@ -181,8 +195,50 @@ class Orchestrator:
                 pass
         return []
 
+    async def _generate_company_name(self, goal: str) -> str:
+        """Extract or invent a company/product name from the goal."""
+        import re
+        # Explicit name patterns: frontend sends "Company name: X." or "called X", quoted names
+        for pattern in [
+            r'[Cc]ompany\s+name[:\s]+([A-Za-z][a-zA-Z0-9]{2,})',
+            r'(?:called|named|building)\s+"?([A-Z][a-zA-Z0-9]{2,})"?',
+            r'"([A-Z][a-zA-Z0-9]{2,20})"',
+        ]:
+            m = re.search(pattern, goal)
+            if m:
+                return m.group(1).strip()
+        # Generate one
+        try:
+            from openai import OpenAI
+            from backend.config import settings
+            client = OpenAI(
+                base_url=settings.planner_model_base_url or "https://api.deepinfra.com/v1/openai",
+                api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+            )
+            resp = await asyncio.to_thread(
+                client.chat.completions.create,
+                model="deepseek-ai/DeepSeek-V4-Flash",
+                messages=[
+                    {"role": "system", "content": (
+                        "Output ONLY a single company/product name for this startup idea. "
+                        "1-2 words max. CamelCase. Memorable, domain-friendly, not generic. "
+                        "No explanation. No punctuation. Just the name."
+                    )},
+                    {"role": "user", "content": goal[:300]},
+                ],
+                max_tokens=10,
+                temperature=0.85,
+            )
+            raw = (resp.choices[0].message.content or "").strip().split()[0]
+            name = re.sub(r"[^a-zA-Z0-9]", "", raw)
+            if len(name) >= 3:
+                return name
+        except Exception as e:
+            logger.warning("Company name generation failed: %s", e)
+        return "Venture"
+
     async def _expand_goal(self, goal: str, session_id: str) -> str:
-        """Expand a terse founder prompt into a rich, specific goal using Llama 3.3 70B."""
+        """Expand a terse founder prompt into a rich, specific goal using Qwen3-235B."""
         from backend.config import settings
         from backend.core.events import publish
         system = (
@@ -202,7 +258,7 @@ class Orchestrator:
             )
             resp = await asyncio.to_thread(
                 client.chat.completions.create,
-                model="meta-llama/Llama-3.3-70B-Instruct",
+                model="deepseek-ai/DeepSeek-V4-Flash",
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": goal},
@@ -248,7 +304,13 @@ class Orchestrator:
 
         from backend.core.events import publish
 
-        # Expand the goal with Llama 3.3 70B before anything else
+        # Generate company name before expansion so it feeds into expanded goal
+        company_name = await self._generate_company_name(goal)
+        shared["company_name"] = company_name
+        await publish(session_id, {"type": "company_name", "name": company_name})
+        logger.info("Company name: %s", company_name)
+
+        # Expand the goal with Qwen3-235B before anything else
         goal = await self._expand_goal(goal, session_id)
 
         # Phase 1: initial plan — research always runs first
@@ -256,7 +318,11 @@ class Orchestrator:
         if not initial_tasks:
             initial_tasks = [{"id": "t1", "agent": "research", "instruction": f"Research the market and competitive landscape for: {goal}", "depends_on": []}]
 
-        _RESEARCH_AGENTS = {"research", "research_2", "research_competitors", "research_competitors_2", "research_execution", "research_execution_2"}
+        _RESEARCH_AGENTS = {
+            "research",
+            "research_competitors",
+            "research_execution",
+        }
         research_task = next((t for t in initial_tasks if t["agent"] == "research"), None)
         other_agents_initial = [t for t in initial_tasks if t["agent"] not in _RESEARCH_AGENTS]
 
@@ -270,15 +336,17 @@ class Orchestrator:
             if _ag not in _existing_agents and _ag in self.specialists:
                 other_agents_initial.append({"id": f"forced_{_ag}", "agent": _ag, "instruction": _instr, "depends_on": []})
 
-        # Run 2 agents per research track (6 total) in parallel for faster, deeper coverage
+        # Run only configured research specialists in parallel.
         research_instruction = research_task["instruction"] if research_task else f"Research market, competitors, and execution strategy for: {goal}"
+        candidate_research = [
+            ("r_market",          "research"),
+            ("r_competitors",     "research_competitors"),
+            ("r_execution",       "research_execution"),
+        ]
         parallel_research_tasks = [
-            {"id": "r_market",        "agent": "research",               "instruction": research_instruction, "depends_on": []},
-            {"id": "r_market_2",      "agent": "research_2",             "instruction": research_instruction, "depends_on": []},
-            {"id": "r_competitors",   "agent": "research_competitors",   "instruction": research_instruction, "depends_on": []},
-            {"id": "r_competitors_2", "agent": "research_competitors_2", "instruction": research_instruction, "depends_on": []},
-            {"id": "r_execution",     "agent": "research_execution",     "instruction": research_instruction, "depends_on": []},
-            {"id": "r_execution_2",   "agent": "research_execution_2",   "instruction": research_instruction, "depends_on": []},
+            {"id": tid, "agent": agent_name, "instruction": research_instruction, "depends_on": []}
+            for tid, agent_name in candidate_research
+            if agent_name in self.specialists
         ]
 
         # Emit initial plan
@@ -330,6 +398,52 @@ class Orchestrator:
             await publish(session_id, {"type": "agent_start", "agent": agent_name, "task_id": tid, "instruction": task["instruction"]})
             result = await agent.run(ctx)
 
+            # Web quality gate: retry with stricter instructions when fallback template is detected.
+            if agent_name == "web":
+                retry_count = 0
+                while retry_count < 2:
+                    html_result = result.get("html") if isinstance(result, dict) else None
+                    used_fallback = isinstance(html_result, str) and self._is_web_fallback_html(html_result)
+                    if not used_fallback:
+                        break
+                    retry_count += 1
+                    await publish(session_id, {
+                        "type": "agent_action_result",
+                        "agent": agent_name,
+                        "tool": "generate_landing_page_html",
+                        "result": {"error": f"fallback template detected (attempt {retry_count}); rerunning with stricter instruction"},
+                    })
+                    retry_ctx = AgentContext(
+                        goal=(
+                            task["instruction"]
+                            + "\n\nSTRICT QUALITY RETRY: The previous HTML used fallback template output. "
+                              "You MUST regenerate custom HTML with explicit brand colors/fonts and concrete product copy. "
+                              "Use semantic sections and realistic metrics. Do not return fallback/template output."
+                        ),
+                        founder_id=founder_id,
+                        session_id=session_id,
+                        shared={**ctx.shared, "web_quality_retry": True, "web_quality_retry_count": retry_count},
+                    )
+                    await publish(session_id, {
+                        "type": "agent_start",
+                        "agent": agent_name,
+                        "task_id": f"{tid}_retry_{retry_count}",
+                        "instruction": f"Quality retry {retry_count} after fallback detection",
+                    })
+                    retry_result = await agent.run(retry_ctx)
+                    if isinstance(retry_result, dict):
+                        result = retry_result
+                html_result = result.get("html") if isinstance(result, dict) else None
+                if isinstance(html_result, str) and self._is_web_fallback_html(html_result):
+                    if isinstance(result, dict):
+                        result["web_quality_error"] = "fallback_template_persisted_after_retries"
+                    await publish(session_id, {
+                        "type": "agent_error",
+                        "agent": agent_name,
+                        "task_id": tid,
+                        "error": "Web output still used fallback template after retries",
+                    })
+
             # Mirror review
             if proprietary_engine:
                 try:
@@ -359,6 +473,8 @@ class Orchestrator:
             except Exception as _ole:
                 logger.warning("Obsidian auto-log failed for %s: %s", agent_name, _ole)
 
+            if isinstance(result, dict) and "agent" not in result:
+                result["agent"] = agent_name
             completed[tid] = result
             shared[f"result_{tid}"] = result
             shared[f"result_{agent_name}"] = result  # also keyed by agent name for downstream context
@@ -376,8 +492,9 @@ class Orchestrator:
             for rt in parallel_research_tasks:
                 research_result.update(completed.get(rt["id"], {}))
                 try:
-                    # _2 variants write to the same base agent name — deduplicate
-                    base_agent = rt["agent"].removesuffix("_2")
+                    # _2/_3/_4 variants write to same base agent name — deduplicate
+                    import re as _re
+                    base_agent = _re.sub(r"_\d+$", "", rt["agent"])
                     note_file = _note_path(base_agent, session_id, founder_id)
                     note_key = str(note_file)
                     if note_file.exists() and note_key not in _seen_note_paths:
@@ -417,6 +534,14 @@ class Orchestrator:
 
             remaining = [t for t in tasks if t["agent"] not in _RESEARCH_AGENTS]
 
+        # design must finish before web (web uses brand colors/fonts from design output)
+        _design_task = next((t for t in remaining if t["agent"] == "design"), None)
+        _web_task = next((t for t in remaining if t["agent"] == "web"), None)
+        if _design_task and _web_task:
+            _web_task.setdefault("depends_on", [])
+            if _design_task["id"] not in _web_task["depends_on"]:
+                _web_task["depends_on"].append(_design_task["id"])
+
         # Run remaining agents in parallel (all depends_on research which is done)
         in_flight: set[str] = set()
         while remaining or in_flight:
@@ -444,13 +569,22 @@ class Orchestrator:
 
         # Write session index linking all agent notes
         try:
-            from backend.tools.obsidian_logger import obsidian_session_index
+            from backend.tools.obsidian_logger import obsidian_session_index, obsidian_backend_log
+            from backend.core.events import _event_log
             agents_ran = [t["agent"] for t in tasks]
             await asyncio.to_thread(
                 obsidian_session_index, session_id, goal, agents_ran, founder_id
             )
+            await asyncio.to_thread(
+                obsidian_backend_log,
+                session_id,
+                founder_id,
+                goal,
+                _event_log.get(session_id, []),
+                completed,
+            )
         except Exception as _sie:
-            logger.warning("Obsidian session index failed: %s", _sie)
+            logger.warning("Obsidian session log/index failed: %s", _sie)
 
         # Proprietary engine: post-run fingerprint
         if proprietary_engine:
@@ -568,4 +702,17 @@ class Orchestrator:
 
         await asyncio.gather(*[_run_task(t) for t in tasks])
         await publish(session_id, {"type": "goal_done", "results": completed})
+        try:
+            from backend.tools.obsidian_logger import obsidian_backend_log
+            from backend.core.events import _event_log
+            await asyncio.to_thread(
+                obsidian_backend_log,
+                session_id,
+                founder_id,
+                instruction,
+                _event_log.get(session_id, []),
+                completed,
+            )
+        except Exception as _bl:
+            logger.warning("Continuation backend log failed: %s", _bl)
         return {"session_id": session_id, "results": completed}

@@ -14,12 +14,15 @@ services:
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379
+      - OBSIDIAN_VAULT=/data/astra_docs
+      - ASTRA_WORKSPACE=/data/astra-workspaces
     depends_on:
       - redis
     ports:
       - "8000:8000"
     volumes:
-      - /tmp/astra_docs:/tmp/astra_docs
+      - astra_docs_data:/data/astra_docs
+      - astra_workspaces_data:/data/astra-workspaces
 
   frontend:
     build:
@@ -28,7 +31,7 @@ services:
       args:
         - BACKEND_URL=http://backend:8000
         - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_YWxsb3dlZC1zdGluZ3JheS0zNy5jbGVyay5hY2NvdW50cy5kZXYk
-        - NEXT_PUBLIC_API_URL=http://167.235.151.204:8000
+        - NEXT_PUBLIC_API_URL=/api
         - NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
         - NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
         - NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
@@ -57,3 +60,5 @@ services:
 
 volumes:
   redis_data:
+  astra_docs_data:
+  astra_workspaces_data:

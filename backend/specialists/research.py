@@ -125,8 +125,9 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
     # ctx_holder: mutable so wrappers can see the live AgentContext
     ctx_holder: list = [None]
 
-    # _2 variants log to the same Obsidian note as their base so notes merge
-    log_name = agent_name.removesuffix("_2")
+    # _2/_3/_4 variants log to same Obsidian note as base so notes merge
+    import re as _re
+    log_name = _re.sub(r"_\d+$", "", agent_name)
     auto_search = _make_auto_logging_tool(search_and_fetch, "search_and_fetch", ctx_holder, log_name)
     auto_fetch = _make_auto_logging_tool(fetch_and_read, "fetch_and_read", ctx_holder, log_name)
     auto_papers = _make_auto_logging_tool(research_papers, "research_papers", ctx_holder, log_name)
@@ -143,9 +144,10 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
         model=settings.planner_model_name,
         model_base_url=settings.planner_model_base_url,
         model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+        max_iterations=5,
         role=(
             "You are an elite deep research specialist. You produce investment-grade research. "
-            "You do NOT stop until you have completed ALL mandatory searches below.\n\n"
+            "Prioritize speed + quality: complete core coverage fast, then stop once evidence is sufficient.\n\n"
             "TOOLS:\n"
             "- search_and_fetch(query) — searches + fetches full content from multiple sites. PRIMARY tool.\n"
             "- fetch_and_read(url) — read a specific URL in full depth.\n"

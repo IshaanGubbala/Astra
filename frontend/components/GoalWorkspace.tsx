@@ -41,7 +41,23 @@ interface AgentState {
   legalText?: string;
   salesLead?: string;
   designSpec?: string;
+  adImages?: Array<{ url?: string; base64?: string; prompt?: string }>;
+  webQualityError?: string;
 }
+
+const PREVIEW_CARD: React.CSSProperties = {
+  borderRadius: 12,
+  border: "1px solid rgba(0,0,0,0.08)",
+  background: "rgba(255,255,255,0.03)",
+  padding: "10px 12px",
+};
+
+const PREVIEW_HEADER: React.CSSProperties = {
+  fontSize: 10,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase",
+  color: "var(--fg-mute)",
+};
 
 const AGENT_ICONS: Record<string, string> = {
   research: "🔬", research_2: "🔬", research_competitors: "🏆", research_competitors_2: "🏆", research_execution: "📋", research_execution_2: "📋",
@@ -97,11 +113,14 @@ function extractColors(log: LogEntry[]): string[] {
 
 function extractHexFromObj(obj: unknown, depth = 0): string[] {
   if (depth > 4 || !obj || typeof obj !== "object") return [];
-  return Object.values(obj as Record<string, unknown>).flatMap(v =>
-    typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)
-      ? [v as string]
-      : extractHexFromObj(v, depth + 1)
-  );
+  return Object.values(obj as Record<string, unknown>).flatMap(v => {
+    if (typeof v === "string") {
+      // exact hex value OR hex codes embedded inside a longer string
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) return [v];
+      return Array.from(v.matchAll(/#[0-9a-fA-F]{6}\b/g), m => m[0]);
+    }
+    return extractHexFromObj(v, depth + 1);
+  });
 }
 
 // Find the first nested object that has ≥2 hex string values — that's the color palette
@@ -146,6 +165,27 @@ function summarizeResult(state: AgentState | undefined): string {
   if (state.commits?.length) return `${state.commits.length} code rounds committed so far.`;
   if (Object.keys(result).length) return `${Object.keys(result).length} output fields captured in this lane.`;
   return state.currentAction ? `Currently ${state.currentAction}.` : "This lane is in progress.";
+}
+
+function extractAdImagesFromResult(obj: unknown, seen = new Set<string>()): Array<{ url?: string; base64?: string; prompt?: string }> {
+  if (!obj || typeof obj !== "object") return [];
+  const o = obj as Record<string, unknown>;
+  const results: Array<{ url?: string; base64?: string; prompt?: string }> = [];
+  // Check if this object looks like an image result
+  const resolvedUrl = (typeof o.url === "string" && o.url) || (typeof o.image_url === "string" && o.image_url) || "";
+  const hasImageUrl = /^https?:/.test(resolvedUrl);
+  const hasBase64 = typeof o.base64 === "string" && o.base64.length > 100;
+  if (hasImageUrl || hasBase64) {
+    const key = resolvedUrl || (o.base64 as string).slice(0, 50);
+    if (!seen.has(key)) {
+      seen.add(key);
+      results.push({ url: resolvedUrl || undefined, base64: o.base64 as string | undefined, prompt: o.prompt as string | undefined });
+    }
+  }
+  for (const v of Object.values(o)) {
+    results.push(...extractAdImagesFromResult(v, seen));
+  }
+  return results;
 }
 
 // ── Agent-specific preview panels ──────────────────────────────────────────
@@ -194,9 +234,21 @@ function ResearchPreview({ state }: { state: AgentState }) {
 function WebPreview({ state }: { state: AgentState }) {
   const url = state.previewUrl ?? (state.result?.url ?? state.result?.deployment_url ?? state.result?.project_url) as string | undefined;
   const commits = state.commits ?? [];
+  const usedFallback = state.log.some(l => l.text.includes("fallback template"));
+  const qualityError = state.webQualityError ?? (state.result?.web_quality_error as string | undefined);
   if (url) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
+        {qualityError && (
+          <div style={{ borderRadius: 10, border: "1px solid rgba(192,57,43,0.3)", background: "rgba(192,57,43,0.08)", padding: "8px 10px", fontSize: 11, color: "#C97070" }}>
+            Web quality gate failed: {qualityError.replace(/_/g, " ")}
+          </div>
+        )}
+        {usedFallback && (
+          <div style={{ borderRadius: 10, border: "1px solid rgba(192,57,43,0.3)", background: "rgba(192,57,43,0.08)", padding: "8px 10px", fontSize: 11, color: "#C97070" }}>
+            Fallback template was detected in this run. A quality retry should follow.
+          </div>
+        )}
         <div style={{ borderRadius: 28, overflow: "hidden", border: "1px solid rgba(0,0,0,0.09)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(180,205,228,0.10)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
             <div style={{ display: "flex", gap: 5 }}>
@@ -244,6 +296,25 @@ function TechnicalPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Technical Build</span>
+        <span style={{ fontSize: 11, color: state.status === "done" ? "#3D9E5F" : "#2563EB", fontWeight: 600 }}>
+          {state.status === "done" ? "Complete" : state.status === "running" ? "Running" : "Queued"}
+        </span>
+      </div>
+      {(isBuilding || state.currentTool) && (
+        <div style={{ borderRadius: 12, border: "1px solid rgba(37,99,235,0.2)", background: "rgba(37,99,235,0.08)", padding: "8px 10px", display: "grid", gap: 4 }}>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "#2563EB" }}>Live build status</div>
+          <div style={{ fontSize: 12, color: "var(--fg-dim)" }}>
+            {state.currentTool ? `Running ${state.currentTool.replace(/_/g, " ")}` : "Preparing build pipeline"}
+          </div>
+          {state.log.length > 0 && (
+            <div style={{ fontSize: 10, color: "var(--fg-mute)" }}>
+              {state.log.slice(-1)[0]?.text?.slice(0, 140)}
+            </div>
+          )}
+        </div>
+      )}
       {/* Live site iframe */}
       {deploy && (
         <div style={{ borderRadius: 20, overflow: "hidden", border: "1px solid rgba(37,99,235,0.18)" }}>
@@ -309,6 +380,17 @@ function TechnicalPreview({ state }: { state: AgentState }) {
         </div>
       )}
 
+      {state.log.length > 0 && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)" }}>Recent technical activity</span>
+          {state.log.slice(-5).map((entry, i) => (
+            <div key={i} style={{ padding: "5px 9px", borderRadius: 6, fontSize: 10, color: "var(--fg-mute)", background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)" }}>
+              {entry.text.slice(0, 140)}
+            </div>
+          ))}
+        </div>
+      )}
+
       {!repo && !deploy && !isBuilding && <ResultDump result={state.result} />}
       {!repo && !deploy && isBuilding && <BuildingIndicator label="Building MVP with openclaude…" />}
     </div>
@@ -334,31 +416,47 @@ function DesignPreview({ state }: { state: AgentState }) {
     result.design_system ??
     result.css_variables
   ) as string | undefined;
+  const wireframes = (result.wireframes ?? result.pages ?? result.screen_specs) as Array<Record<string, unknown>> | undefined;
+  const logoBriefObj = result.logo_brief as Record<string, unknown> | undefined;
+  const logoBrief = (typeof logoBriefObj === "object" ? JSON.stringify(logoBriefObj, null, 2) : (result.logo_brief ?? result.brand_direction ?? result.logo_direction)) as string | undefined;
 
   const isDone = state.status === "done";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ ...PREVIEW_CARD, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, padding: "8px 10px" }}>
+        {[
+          ["Colors", String(allColors.length)],
+          ["Wireframes", String(Array.isArray(wireframes) ? wireframes.length : 0)],
+          ["Spec", spec ? "Yes" : "No"],
+        ].map(([k, v]) => (
+          <div key={k} style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 9, textTransform: "uppercase", color: "var(--fg-mute)", letterSpacing: "0.08em" }}>{k}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--fg)" }}>{v}</div>
+          </div>
+        ))}
+      </div>
       {allColors.length > 0 && (
         <div>
-          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", display: "block", marginBottom: 8 }}>Color Palette</span>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {allColors.slice(0, 12).map((c, i) => (
-              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 24, background: c, border: "1px solid rgba(0,0,0,0.1)", boxShadow: `0 2px 8px ${c}44` }} />
-                <span style={{ fontSize: 9, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)" }}>{c}</span>
+          {/* Gradient hero bar using the palette */}
+          <div style={{ height: 52, borderRadius: 14, marginBottom: 10, background: `linear-gradient(135deg, ${allColors.slice(0,4).join(", ")})`, boxShadow: `0 4px 24px ${allColors[0]}55` }} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(56px, 1fr))", gap: 6 }}>
+            {allColors.slice(0, 10).map((c, i) => (
+              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                <div style={{ width: "100%", aspectRatio: "1", borderRadius: 10, background: c, boxShadow: `0 4px 12px ${c}66, inset 0 1px 0 rgba(255,255,255,0.15)` }} />
+                <span style={{ fontSize: 8, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", textAlign: "center" }}>{c}</span>
               </div>
             ))}
           </div>
         </div>
       )}
       {paletteEntries.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           {paletteEntries.map(([k, v]) => (
-            <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(0,0,0,0.03)" }}>
-              <div style={{ width: 14, height: 14, borderRadius: 3, background: v, border: "1px solid rgba(0,0,0,0.12)", flexShrink: 0 }} />
-              <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "capitalize" }}>{k.replace(/_/g, " ")}</span>
-              <span style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-dim)", marginLeft: "auto" }}>{v.slice(0, 40)}</span>
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: `${v}14`, border: `1px solid ${v}33` }}>
+              <div style={{ width: 16, height: 16, borderRadius: 4, background: v, boxShadow: `0 2px 6px ${v}66`, flexShrink: 0 }} />
+              <span style={{ fontSize: 10, color: "var(--fg-dim)", textTransform: "capitalize", flex: 1 }}>{k.replace(/_/g, " ")}</span>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)" }}>{v}</span>
             </div>
           ))}
         </div>
@@ -371,8 +469,25 @@ function DesignPreview({ state }: { state: AgentState }) {
           </div>
         </div>
       )}
+      {Array.isArray(wireframes) && wireframes.length > 0 && (
+        <div style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)" }}>Wireframes</span>
+          {wireframes.slice(0, 5).map((wf, i) => (
+            <div key={i} style={{ borderRadius: 10, border: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.03)", padding: "8px 10px", fontSize: 11, color: "var(--fg-dim)" }}>
+              <div style={{ fontWeight: 600, color: "var(--fg)" }}>{String(wf.page ?? wf.name ?? `Screen ${i + 1}`)}</div>
+              <div>{String(wf.layout ?? wf.structure ?? wf.notes ?? "").slice(0, 140)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {logoBrief && (
+        <div style={{ borderRadius: 10, border: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.03)", padding: "8px 10px", fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.6 }}>
+          <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", marginBottom: 4 }}>Logo direction</div>
+          {logoBrief.slice(0, 320)}
+        </div>
+      )}
       {allColors.length === 0 && !spec && isDone && <ResultDump result={state.result} />}
-      {allColors.length === 0 && !spec && !isDone && <BuildingIndicator label="Designing…" />}
+      {allColors.length === 0 && !spec && !isDone && <BuildingIndicator label="Building design system…" tool={state.currentTool ?? undefined} />}
     </div>
   );
 }
@@ -412,11 +527,28 @@ function MarketingPreview({ state }: { state: AgentState }) {
   const isDone = state.status === "done";
 
   if (!hasContent) {
-    return isDone ? <ResultDump result={state.result} /> : <BuildingIndicator label="Creating content…" />;
+    return isDone ? <ResultDump result={state.result} /> : <BuildingIndicator label="Creating campaigns…" tool={state.currentTool ?? undefined} />;
   }
 
+  const SocialCard = ({ platform, icon, color, gradient, lines }: { platform: string; icon: string; color: string; gradient: string; lines: [string, string][] }) => (
+    <div style={{ borderRadius: 16, overflow: "hidden", border: `1px solid ${color}33` }}>
+      <div style={{ padding: "8px 12px", background: gradient, display: "flex", alignItems: "center", gap: 7 }}>
+        <span style={{ fontSize: 14 }}>{icon}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", letterSpacing: "0.03em" }}>{platform}</span>
+      </div>
+      <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, background: "rgba(255,255,255,0.02)" }}>
+        {lines.filter(([, v]) => v).map(([k, v]) => (
+          <div key={k}>
+            <span style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--fg-mute)" }}>{k}</span>
+            <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.65, whiteSpace: "pre-wrap", maxHeight: 90, overflowY: "auto" }}>{v.slice(0, 350)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   const CARD = (label: string, lines: [string, string][]) => (
-    <div style={{ borderRadius: 20, border: "1px solid rgba(0,0,0,0.09)", background: "rgba(255,255,255,0.02)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ ...PREVIEW_CARD, display: "flex", flexDirection: "column", gap: 8 }}>
       <span style={{ fontSize: 11, fontWeight: 700, color: "var(--fg)", letterSpacing: "0.03em" }}>{label}</span>
       {lines.filter(([, v]) => v).map(([k, v]) => (
         <div key={k}>
@@ -427,13 +559,54 @@ function MarketingPreview({ state }: { state: AgentState }) {
     </div>
   );
 
+  const adImages = state.adImages ?? [];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {(reelScript || reelCaption) && CARD("📸 Instagram Reel", [["Script", reelScript], ["Caption", reelCaption], ["Hashtags", reelHashtags]])}
-      {tiktokScript && CARD("🎵 TikTok", [["Script", tiktokScript]])}
-      {(adHeadline || adBody) && CARD("📣 Meta Ad", [["Headline", adHeadline], ["Body", adBody], ["CTA", adCta]])}
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Campaign Output</span>
+        <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{hasContent ? "Assets ready" : "Generating"}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
+        {[
+          ["Reels", reelScript ? "1+" : "0"],
+          ["TikTok", tiktokScript ? "1+" : "0"],
+          ["Ads", adHeadline || adBody ? "1+" : "0"],
+          ["Images", String(adImages.length)],
+        ].map(([label, value]) => (
+          <div key={label} style={{ borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.03)", padding: "6px 8px" }}>
+            <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>{label}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--fg)" }}>{value}</div>
+          </div>
+        ))}
+      </div>
+      {adImages.length > 0 && (
+        <div style={{ ...PREVIEW_CARD, display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--fg)", letterSpacing: "0.03em" }}>Ad Images</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {adImages.map((img, i) => {
+              const src = img.url ?? (img.base64 ? `data:image/png;base64,${img.base64}` : null);
+              if (!src) return null;
+              return (
+                <div key={i} style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: "1px solid rgba(0,0,0,0.12)" }}>
+                  <img src={src} alt={img.prompt ?? `Ad image ${i + 1}`} style={{ display: "block", maxWidth: 280, maxHeight: 280, objectFit: "cover" }} />
+                  {img.prompt && (
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)", padding: "4px 8px" }}>
+                      <span style={{ fontSize: 9, color: "rgba(255,255,255,0.8)", lineHeight: 1.4 }}>{img.prompt.slice(0, 100)}{img.prompt.length > 100 ? "…" : ""}</span>
+                    </div>
+                  )}
+                  <a href={src} target="_blank" rel="noopener noreferrer" style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.5)", borderRadius: 6, padding: "2px 6px", fontSize: 9, color: "#fff", textDecoration: "none" }}>↗</a>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {(reelScript || reelCaption) && <SocialCard platform="Instagram Reel" icon="📸" color="#E1306C" gradient="linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)" lines={[["Script", reelScript], ["Caption", reelCaption], ["Hashtags", reelHashtags]]} />}
+      {tiktokScript && <SocialCard platform="TikTok" icon="🎵" color="#69C9D0" gradient="linear-gradient(135deg,#010101,#69C9D0)" lines={[["Script", tiktokScript]]} />}
+      {(adHeadline || adBody) && <SocialCard platform="Meta Ad" icon="📣" color="#1877F2" gradient="linear-gradient(135deg,#1877F2,#42a5f5)" lines={[["Headline", adHeadline], ["Body", adBody], ["CTA", adCta]]} />}
       {(emailSubject || emailBody) && CARD("📧 Email", [["Subject", emailSubject], ["Body", typeof emailBody === "string" ? emailBody.replace(/<[^>]+>/g, "") : emailBody]])}
-      {linkedin && CARD("💼 LinkedIn", [["Post", linkedin]])}
+      {linkedin && <SocialCard platform="LinkedIn" icon="💼" color="#0A66C2" gradient="linear-gradient(135deg,#0A66C2,#00a0dc)" lines={[["Post", linkedin]]} />}
     </div>
   );
 }
@@ -553,8 +726,12 @@ function LegalPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Legal Artifacts</span>
+        <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{docs.length} doc{docs.length === 1 ? "" : "s"}</span>
+      </div>
       {docs.length > 1 && (
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid rgba(0,0,0,0.08)", paddingBottom: 8 }}>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid rgba(0,0,0,0.08)", paddingBottom: 8 }}>
           {docs.map((d, i) => (
             <button key={i} onClick={() => setLegalTab(i)} style={{
               fontSize: 11, padding: "4px 12px", borderRadius: 6, cursor: "pointer",
@@ -581,13 +758,31 @@ function SalesPreview({ state }: { state: AgentState }) {
   const leadsArr = r?.leads as Array<Record<string, unknown>> | undefined;
   const firstLead = Array.isArray(leadsArr) ? leadsArr[0] : undefined;
   const lead = (r?.lead ?? r?.company ?? firstLead?.company ?? firstLead?.name ?? firstLead?.title) as string | undefined;
-  const seq = r?.sequence ?? r?.outreach_sequence ?? r?.email_sequence;
+  const seq = r?.sequence ?? r?.outreach_sequence ?? r?.email_sequence ?? (r?.outreach as Record<string, unknown> | undefined)?.sequence;
+  const crmContacts = (r?.crm_contacts ?? r?.contacts ?? []) as Array<Record<string, unknown>>;
+  const sequences = (r?.sequences ?? []) as Array<Record<string, unknown>>;
   if (!r || !lead) {
     return state.status === "done" ? <ResultDump result={state.result} /> : <BuildingIndicator label="Building outreach…" />;
   }
   const steps: unknown[] = Array.isArray(seq) ? seq : typeof seq === "string" ? (() => { try { return JSON.parse(seq); } catch { return []; } })() : [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Sales Pipeline</span>
+        <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{Array.isArray(leadsArr) ? leadsArr.length : lead ? 1 : 0} lead(s)</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
+        {[
+          ["Leads", String(Array.isArray(leadsArr) ? leadsArr.length : (lead ? 1 : 0))],
+          ["Sequence", String(steps.length)],
+          ["CRM", String(Array.isArray(crmContacts) ? crmContacts.length : 0)],
+        ].map(([label, value]) => (
+          <div key={label} style={{ borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.03)", padding: "6px 8px" }}>
+            <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>{label}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--fg)" }}>{value}</div>
+          </div>
+        ))}
+      </div>
       <div style={{ padding: "8px 12px", borderRadius: 24, background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)" }}>
         <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)", marginBottom: 3 }}>Target Lead</div>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{lead}</div>
@@ -596,7 +791,7 @@ function SalesPreview({ state }: { state: AgentState }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>All leads ({leadsArr.length})</span>
           {leadsArr.slice(0, 5).map((l, i) => (
-            <div key={i} style={{ padding: "5px 10px", borderRadius: 6, background: "rgba(0,0,0,0.03)", fontSize: 11, color: "var(--fg-dim)" }}>
+            <div key={i} style={{ ...PREVIEW_CARD, padding: "6px 10px", fontSize: 11, color: "var(--fg-dim)" }}>
               {String(l.company ?? l.name ?? l.title ?? l.url ?? JSON.stringify(l)).slice(0, 80)}
             </div>
           ))}
@@ -606,10 +801,30 @@ function SalesPreview({ state }: { state: AgentState }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>Email Sequence ({steps.length} steps)</span>
           {(steps as Record<string, unknown>[]).slice(0, 4).map((s, i) => (
-            <div key={i} style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)" }}>
+            <div key={i} style={{ ...PREVIEW_CARD, padding: "8px 10px", background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)" }}>
               <div style={{ fontSize: 10, color: "#2563EB", marginBottom: 3 }}>Day {String(s.send_day ?? i + 1)}</div>
               <div style={{ fontSize: 11, fontWeight: 500, color: "var(--fg)" }}>{String(s.subject ?? "").slice(0, 60)}</div>
               <div style={{ fontSize: 10, color: "var(--fg-mute)", marginTop: 2 }}>{String(s.body ?? "").slice(0, 80)}…</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(sequences) && sequences.length > 1 && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>Additional sequences ({sequences.length - 1})</span>
+          {sequences.slice(1, 4).map((seqObj, i) => (
+            <div key={i} style={{ ...PREVIEW_CARD, padding: "6px 8px", fontSize: 11, color: "var(--fg-dim)" }}>
+              {String((seqObj.lead as Record<string, unknown> | undefined)?.company ?? (seqObj.lead as Record<string, unknown> | undefined)?.name ?? `Lead ${i + 2}`)}
+            </div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(crmContacts) && crmContacts.length > 0 && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>CRM contacts ({crmContacts.length})</span>
+          {crmContacts.slice(0, 4).map((c, i) => (
+            <div key={i} style={{ ...PREVIEW_CARD, padding: "6px 8px", fontSize: 11, color: "var(--fg-dim)" }}>
+              {String(c.name ?? c.company ?? c.email ?? JSON.stringify(c)).slice(0, 100)}
             </div>
           ))}
         </div>
@@ -639,10 +854,14 @@ function OpsPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Operations Deliverables</span>
+        <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{allPaths.length} file(s)</span>
+      </div>
       {title && <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{title}</div>}
       {allPaths.map(p => <PdfEmbed key={p} path={p} height={300} />)}
       {sop && (
-        <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(180,205,228,0.10)", borderRadius: 16, border: "1px solid rgba(0,0,0,0.08)" }}>
+      <div style={{ ...PREVIEW_CARD, fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", background: "rgba(180,205,228,0.10)" }}>
           {String(sop).slice(0, 1200)}
         </div>
       )}
@@ -662,11 +881,18 @@ function ResultDump({ result }: { result: Record<string, unknown> | null }) {
   );
 }
 
-function BuildingIndicator({ label }: { label: string }) {
+function BuildingIndicator({ label, tool }: { label: string; tool?: string | null }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 0", color: "var(--fg-mute)", fontSize: 12 }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#2563EB", flexShrink: 0 }} className="animate-pulse" />
-      {label}
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "18px 0" }}>
+      <div style={{ height: 2, borderRadius: 999, background: "rgba(37,99,235,0.12)", overflow: "hidden" }}>
+        <div style={{ height: "100%", borderRadius: 999, background: "linear-gradient(90deg, #2563EB, #7C3AED, #2563EB)", backgroundSize: "200% 100%", animation: "shimmer 1.8s linear infinite" }} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#2563EB", flexShrink: 0 }} className="animate-pulse" />
+        <span style={{ fontSize: 11, color: "var(--fg-mute)" }}>{label}</span>
+        {tool && <span style={{ fontSize: 10, color: "#2563EB", fontFamily: "var(--font-jetbrains-mono)", marginLeft: "auto", opacity: 0.8 }}>{tool.replace(/_/g, "_")}</span>}
+      </div>
+      <style>{`@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }`}</style>
     </div>
   );
 }
@@ -675,10 +901,16 @@ function AgentPreview({ state }: { state: AgentState }) {
   switch (state.agent) {
     case "research":
     case "research_2":
+    case "research_3":
+    case "research_4":
     case "research_competitors":
     case "research_competitors_2":
+    case "research_competitors_3":
+    case "research_competitors_4":
     case "research_execution":
     case "research_execution_2":
+    case "research_execution_3":
+    case "research_execution_4":
       return <ResearchPreview state={state} />;
     case "web": return <WebPreview state={state} />;
     case "technical": return <TechnicalPreview state={state} />;
@@ -1553,9 +1785,9 @@ export function GoalWorkspace({
   // ── Persistent session cache ──────────────────────────────────────────────
   const CACHE_KEY = `astra_session_${sessionId}`;
 
-  const saveCache = useCallback((a: Record<string, AgentState>, p: AgentTask[], d: boolean) => {
+  const saveCache = useCallback((a: Record<string, AgentState>, p: AgentTask[], d: boolean, cn?: string) => {
     if (!sessionId) return;
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d })); } catch {}
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d, autoCompanyName: cn })); } catch {}
   }, [CACHE_KEY, sessionId]);
 
   // Always start with empty state to avoid SSR/client hydration mismatch;
@@ -1564,6 +1796,7 @@ export function GoalWorkspace({
   const [planTasks, setPlanTasks] = useState<AgentTask[]>([]);
   const [activeAgent, setActiveAgent] = useState<string>("");
   const [expandedGoal, setExpandedGoal] = useState<string>("");
+  const [autoCompanyName, setAutoCompanyName] = useState<string>("");
   const [done, setDone] = useState(false);
 
   // Restore from cache after first render (client-only)
@@ -1572,7 +1805,7 @@ export function GoalWorkspace({
     try {
       const raw = localStorage.getItem(CACHE_KEY);
       if (!raw) return;
-      const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean };
+      const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean; autoCompanyName?: string };
       const firstAgent = cached.planTasks?.[0]?.agent ?? Object.keys(cached.agents ?? {})[0] ?? "";
       queueMicrotask(() => {
         if (cached.agents && Object.keys(cached.agents).length > 0) {
@@ -1585,6 +1818,7 @@ export function GoalWorkspace({
         }
         if (cached.planTasks?.length > 0) setPlanTasks(cached.planTasks);
         if (cached.done) setDone(true);
+        if (cached.autoCompanyName) setAutoCompanyName(cached.autoCompanyName);
         if (firstAgent) setActiveAgent(firstAgent);
       });
     } catch {}
@@ -1592,6 +1826,12 @@ export function GoalWorkspace({
   const [newGoalOpen, setNewGoalOpen] = useState(startNew || !sessionId);
   const [planOpen, setPlanOpen] = useState(false);
   const [detailedNodes, setDetailedNodes] = useState<PlanNode[]>([]);
+  const [pendingDetailedNodes, setPendingDetailedNodes] = useState<PlanNode[]>([]);
+  const [nonResearchStarted, setNonResearchStarted] = useState(false);
+  const nonResearchStartedRef = useRef(false);
+  const pendingDetailedNodesRef = useRef<PlanNode[]>([]);
+  useEffect(() => { nonResearchStartedRef.current = nonResearchStarted; }, [nonResearchStarted]);
+  useEffect(() => { pendingDetailedNodesRef.current = pendingDetailedNodes; }, [pendingDetailedNodes]);
   useEffect(() => {
     if (startNew || !sessionId) queueMicrotask(() => setNewGoalOpen(true));
   }, [startNew, sessionId]);
@@ -1603,7 +1843,7 @@ export function GoalWorkspace({
   const errorCount = useRef(0);
 
   // Persist to localStorage whenever state changes
-  useEffect(() => { saveCache(agents, planTasks, done); }, [agents, planTasks, done, saveCache]);
+  useEffect(() => { saveCache(agents, planTasks, done, autoCompanyName); }, [agents, planTasks, done, autoCompanyName, saveCache]);
 
   useEffect(() => {
     if (!sessionId || sessionId === "undefined") return;
@@ -1618,8 +1858,14 @@ export function GoalWorkspace({
     es.onmessage = (e) => {
       const event = JSON.parse(e.data);
       if (event.type === "ping" || event.type === "founder_steer") return;
-      if (event.type === "detailed_plan") { setDetailedNodes(event.nodes ?? []); return; }
+      if (event.type === "detailed_plan") {
+        const nodes = event.nodes ?? [];
+        if (nonResearchStartedRef.current) setDetailedNodes(nodes);
+        else setPendingDetailedNodes(nodes);
+        return;
+      }
       if (event.type === "goal_expanded") { setExpandedGoal(event.expanded ?? ""); return; }
+      if (event.type === "company_name") { setAutoCompanyName(event.name ?? ""); return; }
       if (event.type === "session_expired") { setError("Session expired — backend was restarted. Run a new goal."); es.close(); return; }
 
       setAgents((prev) => {
@@ -1650,6 +1896,13 @@ export function GoalWorkspace({
         const addLog = (type: string, text: string): LogEntry[] => [...cur.log, { ts: Date.now(), type, text }];
 
         if (event.type === "agent_start") {
+          if (!agent.startsWith("research")) {
+            setNonResearchStarted(true);
+            if (pendingDetailedNodesRef.current.length > 0) {
+              setDetailedNodes(pendingDetailedNodesRef.current);
+              setPendingDetailedNodes([]);
+            }
+          }
           const _PAIR_MAP: Record<string, string> = { research_2: "research", research_competitors_2: "research_competitors", research_execution_2: "research_execution" };
           setActiveAgent(_PAIR_MAP[agent] ?? agent);
           next[agent] = { ...cur, status: "running", instruction: event.instruction ?? cur.instruction, task_id: event.task_id ?? cur.task_id, log: addLog("info", "Started") };
@@ -1672,6 +1925,10 @@ export function GoalWorkspace({
           let newUrl: string | undefined;
           if (!ok) {
             text = `✗ ${event.tool}: ${event.result?.error ?? "failed"}`;
+          } else if (event.tool === "generate_landing_page_html" && typeof event.result === "string") {
+            text = event.result.includes("astra-fallback-template")
+              ? "⚠ generate_landing_page_html used fallback template"
+              : "✓ generate_landing_page_html produced custom HTML";
           } else if (SEARCH_TOOLS.has(event.tool)) {
             const resultStr = typeof event.result === "string" ? event.result : JSON.stringify(event.result ?? "");
             const urlMatch = resultStr.match(/https?:\/\/[^\s"')\]]+/);
@@ -1688,18 +1945,90 @@ export function GoalWorkspace({
           // Capture files from run_mvp_loop result
           const newFiles = Array.isArray(event.result?.files_preview) ? event.result.files_preview as string[] : cur.filesPreview;
           const newFilesCount = (event.result?.files_in_repo as number) ?? cur.filesCount;
-          next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text), visitedUrls: newVisited, currentUrl: newUrl ?? cur.currentUrl, commits: newCommits, filesPreview: newFiles, filesCount: newFilesCount };
+          // Capture ad images from generate_ad_image tool result
+          let newAdImages = cur.adImages;
+          const eventImageUrl = (event.result?.url as string | undefined) ?? (event.result?.image_url as string | undefined);
+          if (event.tool === "generate_ad_image" && ok && (eventImageUrl || event.result?.base64)) {
+            const img = { url: eventImageUrl, base64: event.result.base64 as string | undefined, prompt: event.result.prompt as string | undefined };
+            newAdImages = [...(cur.adImages ?? []), img];
+          }
+          next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text), visitedUrls: newVisited, currentUrl: newUrl ?? cur.currentUrl, commits: newCommits, filesPreview: newFiles, filesCount: newFilesCount, adImages: newAdImages };
         } else if (event.type === "agent_thinking") {
           next[agent] = { ...cur, log: addLog("info", `Thinking… (step ${event.iteration})`) };
         } else if (event.type === "agent_done") {
           const result = event.result ?? {};
           const previewUrl = (result.url ?? result.deployment_url ?? result.project_url ?? result.github_url) as string | undefined;
-          next[agent] = { ...cur, status: "done", currentAction: null, currentTool: null, result, previewUrl, log: addLog("result", "Complete") };
+          // Extract any ad images embedded in the final result (in case tool_result events were missed)
+          const doneAdImages = extractAdImagesFromResult(result);
+          const mergedAdImages = doneAdImages.length > 0
+            ? [...(cur.adImages ?? []), ...doneAdImages].filter((img, i, arr) =>
+                arr.findIndex(x => (x.url && x.url === img.url) || (x.base64 && x.base64 === img.base64)) === i)
+            : cur.adImages;
+          next[agent] = {
+            ...cur,
+            status: "done",
+            currentAction: null,
+            currentTool: null,
+            result,
+            previewUrl,
+            adImages: mergedAdImages,
+            webQualityError: (result.web_quality_error as string | undefined) ?? cur.webQualityError,
+            log: addLog("result", "Complete"),
+          };
         } else if (event.type === "agent_error") {
-          next[agent] = { ...cur, status: "error", log: addLog("error", event.error ?? "Error") };
+          const qualityError = typeof event.error === "string" && event.error.toLowerCase().includes("fallback template")
+            ? "fallback_template_persisted_after_retries"
+            : cur.webQualityError;
+          next[agent] = { ...cur, status: "error", webQualityError: qualityError, log: addLog("error", event.error ?? "Error") };
         } else if (event.type === "mirror_verdict") {
           next[agent] = { ...cur, mirrorVerdict: event.verdict, mirrorCritique: event.critique };
-        } else if (event.type === "goal_done") { setDone(true); }
+        } else if (event.type === "goal_done") {
+          const results = event.results as Record<string, unknown> | undefined;
+          if (results && typeof results === "object") {
+            const byAgent: Record<string, Record<string, unknown>> = {};
+            for (const [resultKey, value] of Object.entries(results)) {
+              if (!value || typeof value !== "object") continue;
+              const obj = value as Record<string, unknown>;
+              const candidateAgent = typeof obj.agent === "string" ? obj.agent : null;
+              if (candidateAgent) {
+                byAgent[candidateAgent] = obj;
+                continue;
+              }
+              // Orchestrator goal_done is keyed by task id in many paths.
+              // Backfill agent mapping using the live task_id registry.
+              const agentByTaskId = Object.values(next).find(s => s.task_id === resultKey)?.agent;
+              if (agentByTaskId) byAgent[agentByTaskId] = obj;
+            }
+            for (const [agentName, resultObj] of Object.entries(byAgent)) {
+              const curState = next[agentName] ?? {
+                task_id: "",
+                agent: agentName,
+                instruction: "",
+                status: "waiting" as const,
+                currentAction: null,
+                currentTool: null,
+                reasoning: null,
+                result: null,
+                log: [],
+                visitedUrls: [],
+                commits: [],
+              };
+              const doneAdImages = extractAdImagesFromResult(resultObj);
+              next[agentName] = {
+                ...curState,
+                status: "done",
+                currentAction: null,
+                currentTool: null,
+                result: (curState.result ?? resultObj) as Record<string, unknown>,
+                previewUrl: (resultObj.url ?? resultObj.deployment_url ?? resultObj.project_url) as string | undefined,
+                adImages: doneAdImages.length ? doneAdImages : curState.adImages,
+                filesPreview: Array.isArray(resultObj.files_preview) ? (resultObj.files_preview as string[]) : curState.filesPreview,
+                filesCount: (resultObj.files_in_repo as number | undefined) ?? curState.filesCount,
+              };
+            }
+          }
+          setDone(true);
+        }
         else if (event.type === "goal_error") { setError(event.error ?? "Unknown error"); }
 
         return next;
@@ -1745,7 +2074,8 @@ export function GoalWorkspace({
     const activeAction = a.currentAction ?? b.currentAction;
     const activeUrl = a.currentUrl ?? b.currentUrl;
     const mergedResult = a.result || b.result ? { ...(b.result ?? {}), ...(a.result ?? {}) } : null;
-    return { ...a, status: mergedStatus, log: mergedLog, visitedUrls: mergedUrls, commits: mergedCommits, currentTool: activeTool, currentAction: activeAction, currentUrl: activeUrl, result: mergedResult };
+    const mergedAdImages = [...(a.adImages ?? []), ...(b.adImages ?? [])];
+    return { ...a, status: mergedStatus, log: mergedLog, visitedUrls: mergedUrls, commits: mergedCommits, currentTool: activeTool, currentAction: activeAction, currentUrl: activeUrl, result: mergedResult, adImages: mergedAdImages.length ? mergedAdImages : undefined };
   }
 
   const visibleAgents: Record<string, AgentState> = {};
@@ -1807,6 +2137,9 @@ export function GoalWorkspace({
           </span>
           {sessionId && <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)" }}>{sessionId}</span>}
         </div>
+        {autoCompanyName && (
+          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: "var(--font-jetbrains-mono)" }}>{autoCompanyName}</span>
+        )}
         {expandedGoal && (
           <p style={{ margin: 0, fontSize: 12, color: "var(--fg-mute)", lineHeight: 1.6, maxWidth: 820 }}>{expandedGoal}</p>
         )}

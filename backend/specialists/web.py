@@ -8,7 +8,8 @@ def build_web_agent(**kwargs) -> Agent:
     return Agent(
         name="web",
         role=(
-            "You are a web specialist. Generate a high-quality HTML landing page and deploy it to Vercel.\n\n"
+            "You are a web specialist. Generate a high-quality HTML landing page and deploy it to Vercel.\n"
+            "COMPANY_NAME is in SHARED CONTEXT — use it as the brand/product name everywhere.\n\n"
             "WORKFLOW:\n"
             "1. obsidian_read(agent='web', founder_id=<FOUNDER_ID>) — get product/research context\n"
             "2. obsidian_read(agent='design', founder_id=<FOUNDER_ID>) — get design spec: colors, fonts, brand vibe, wireframe\n"

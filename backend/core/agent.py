@@ -129,6 +129,7 @@ class Agent:
         model: str = None,
         model_base_url: str = None,
         model_api_key: str = None,
+        max_iterations: int = None,
     ):
         self.name = name
         self.role = role
@@ -138,6 +139,7 @@ class Agent:
         self.model = model or settings.agent_model_name
         self._model_base_url = model_base_url or settings.agent_model_base_url
         self._model_api_key = model_api_key or settings.agent_model_api_key
+        self._max_iterations = max_iterations
         self._inbox: asyncio.Queue = asyncio.Queue()
         self._llm: Optional[openai.OpenAI] = None
 
@@ -272,12 +274,14 @@ class Agent:
 
     async def _run_loop(self, messages: list[dict], ctx: AgentContext, browser=None) -> dict[str, Any]:
         i = 0
-        MAX_ITERATIONS = 40
+        MAX_ITERATIONS = self._max_iterations or 5
         # Track consecutive failures per tool to break infinite retry loops
         _tool_fail_counts: dict[str, int] = {}
         # One-shot tools: hard-blocked after first success
-        _ONE_SHOT_TOOLS = {"format_legal_document", "generate_landing_page_html", "generate_pdf", "vercel_deploy", "claude_code_scaffold"}
+        _ONE_SHOT_TOOLS = {"generate_landing_page_html", "vercel_deploy", "claude_code_scaffold"}
         _one_shot_done: set[str] = set()
+        _called_tools: set[str] = set()
+        _tool_results: list[tuple[str, dict[str, Any]]] = []
 
         while i < MAX_ITERATIONS:
             i += 1
@@ -304,7 +308,29 @@ class Agent:
             messages.append({"role": "assistant", "content": raw})
 
             if action == "done":
+                required_by_agent = {
+                    "legal": {"format_legal_document", "generate_pdf"},
+                    "sales": {"find_leads", "build_outreach_sequence", "build_crm_contact"},
+                    "design": {"generate_design_spec", "generate_wireframe", "generate_logo_brief"},
+                }
+                missing = sorted(required_by_agent.get(self.name, set()) - _called_tools)
+                if missing:
+                    messages.append({"role": "user", "content": (
+                        f"You cannot call done yet. Missing required tool calls: {', '.join(missing)}. "
+                        "Execute those tool calls now, then call done."
+                    )})
+                    continue
                 output = parsed.get("output", {})
+                if isinstance(output, dict):
+                    output = self._normalize_done_output(output, _tool_results)
+                    missing_output = self._missing_required_output(output)
+                    if missing_output:
+                        messages.append({"role": "user", "content": (
+                            "You cannot call done yet. Output is missing required fields: "
+                            f"{', '.join(missing_output)}. "
+                            "Call the necessary tools, then call done with a complete output payload."
+                        )})
+                        continue
                 await self._emit(ctx, "agent_done", result=output)
                 return output
 
@@ -321,6 +347,10 @@ class Agent:
                 await self._emit(ctx, "agent_action", action="tool", tool=tool_name, args=args, reasoning=reasoning)
                 result = await self._execute_tool(tool_name, args, ctx)
                 await self._emit(ctx, "agent_action_result", tool=tool_name, result=result)
+                if "error" not in result:
+                    _called_tools.add(tool_name)
+                    if isinstance(result, dict):
+                        _tool_results.append((tool_name, result))
                 if "error" in result:
                     _tool_fail_counts[tool_name] = _tool_fail_counts.get(tool_name, 0) + 1
                     if _tool_fail_counts[tool_name] >= 3:
@@ -382,6 +412,10 @@ class Agent:
                 await self._emit(ctx, "agent_action", action="tool", tool=tool_name, args=args, reasoning=reasoning)
                 result = await self._execute_tool(tool_name, args, ctx)
                 await self._emit(ctx, "agent_action_result", tool=tool_name, result=result)
+                if "error" not in result:
+                    _called_tools.add(tool_name)
+                    if isinstance(result, dict):
+                        _tool_results.append((tool_name, result))
                 if "error" in result:
                     messages.append({"role": "user", "content": f"TOOL FAILED: {json.dumps(result)}"})
                 else:
@@ -392,6 +426,48 @@ class Agent:
 
         logger.warning("%s hit MAX_ITERATIONS (%d) — returning partial result", self.name, MAX_ITERATIONS)
         return {"status": "max_iterations_reached", "agent": self.name}
+
+    def _missing_required_output(self, output: dict[str, Any]) -> list[str]:
+        """Require key preview artifacts per role before accepting done."""
+        if self.name == "legal":
+            docs = output.get("documents")
+            if not isinstance(docs, list) or not docs:
+                return ["documents[]"]
+            first = docs[0] if isinstance(docs[0], dict) else {}
+            if not (first.get("path") or first.get("text")):
+                return ["documents[0].path|text"]
+            return []
+        if self.name == "sales":
+            missing: list[str] = []
+            if not isinstance(output.get("leads"), list) or not output.get("leads"):
+                missing.append("leads[]")
+            if not isinstance(output.get("sequence"), list) or not output.get("sequence"):
+                missing.append("sequence[]")
+            if not isinstance(output.get("crm_contacts"), list) or not output.get("crm_contacts"):
+                missing.append("crm_contacts[]")
+            return missing
+        if self.name == "design":
+            missing: list[str] = []
+            if not output.get("design_spec"):
+                missing.append("design_spec")
+            if not isinstance(output.get("wireframes"), list) or not output.get("wireframes"):
+                missing.append("wireframes[]")
+            if not output.get("logo_brief"):
+                missing.append("logo_brief")
+            return missing
+        if self.name == "marketing":
+            missing: list[str] = []
+            if not output.get("reel_package"):
+                missing.append("reel_package")
+            if not output.get("tiktok_package"):
+                missing.append("tiktok_package")
+            if not output.get("meta_ad"):
+                missing.append("meta_ad")
+            ad_images = output.get("ad_images")
+            if not isinstance(ad_images, list) or not ad_images:
+                missing.append("ad_images[]")
+            return missing
+        return []
 
     async def _execute_tool(self, tool_name: str, args: dict, ctx: AgentContext) -> Any:
         fn = self.tools.get(tool_name)
@@ -406,6 +482,83 @@ class Agent:
         except Exception as e:
             logger.error("%s tool %s failed: %s", self.name, tool_name, e)
             return {"error": str(e)}
+
+    def _normalize_done_output(
+        self,
+        output: dict[str, Any],
+        tool_results: list[tuple[str, dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Enrich agent done payload with stable preview-friendly fields."""
+        out = dict(output)
+        if self.name == "marketing":
+            images = []
+            for tool_name, result in tool_results:
+                if tool_name != "generate_ad_image":
+                    continue
+                url = result.get("url") or result.get("image_url")
+                b64 = result.get("base64")
+                if url or b64:
+                    images.append({"url": url, "base64": b64, "prompt": result.get("prompt", "")})
+            if images:
+                out.setdefault("ad_images", images)
+        elif self.name == "sales":
+            leads = out.get("leads")
+            sequences = out.get("sequences")
+            crm_contacts = out.get("crm_contacts")
+            if not isinstance(leads, list):
+                leads = []
+            if not isinstance(sequences, list):
+                sequences = []
+            if not isinstance(crm_contacts, list):
+                crm_contacts = []
+            for tool_name, result in tool_results:
+                if tool_name == "find_leads" and isinstance(result.get("leads"), list):
+                    leads.extend(result["leads"])
+                elif tool_name == "build_outreach_sequence" and isinstance(result.get("sequence"), list):
+                    sequences.append({"lead": result.get("lead", {}), "steps": result["sequence"]})
+                elif tool_name == "build_crm_contact":
+                    crm_contacts.append(result)
+            if leads:
+                out["leads"] = leads
+            if sequences:
+                out["sequences"] = sequences
+                if "sequence" not in out and sequences[0].get("steps"):
+                    out["sequence"] = sequences[0]["steps"]
+            if crm_contacts:
+                out["crm_contacts"] = crm_contacts
+        elif self.name == "design":
+            if "design_spec" not in out or not out.get("design_spec"):
+                for tool_name, result in tool_results:
+                    if tool_name == "generate_design_spec":
+                        out["design_spec"] = result
+                        break
+            wireframes = out.get("wireframes") if isinstance(out.get("wireframes"), list) else []
+            for tool_name, result in tool_results:
+                if tool_name == "generate_wireframe":
+                    wireframes.append(result)
+                if tool_name == "generate_logo_brief" and not out.get("logo_brief"):
+                    out["logo_brief"] = result
+            if wireframes:
+                out["wireframes"] = wireframes
+        elif self.name == "legal":
+            docs = out.get("documents") if isinstance(out.get("documents"), list) else []
+            current_doc: dict[str, Any] | None = None
+            for tool_name, result in tool_results:
+                if tool_name == "format_legal_document":
+                    current_doc = {
+                        "doc_type": result.get("doc_type"),
+                        "title": result.get("doc_type", "document"),
+                        "text": result.get("formatted_text", ""),
+                    }
+                elif tool_name == "generate_pdf":
+                    if current_doc is None:
+                        current_doc = {"doc_type": "document", "title": "document"}
+                    current_doc["path"] = result.get("path") or result.get("filename")
+                    docs.append(current_doc)
+                    current_doc = None
+            if docs:
+                out["documents"] = docs
+        return out
 
     async def _delegate(self, agent_name: str, task: str, ctx: AgentContext) -> Any:
         agent = self.sub_agents.get(agent_name)

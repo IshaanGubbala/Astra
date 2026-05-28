@@ -21,24 +21,41 @@ def get_orchestrator() -> Orchestrator:
     global _orchestrator
     if _orchestrator is None:
         _coder_kwargs = dict(
-            model="deepseek-ai/DeepSeek-V4-Pro",
+            model="deepseek-ai/DeepSeek-V4-Flash",
             model_base_url=settings.planner_model_base_url,
+            model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+        )
+        _highoutput_kwargs = dict(
+            model=settings.highoutput_model_name,
+            model_base_url=settings.highoutput_model_base_url,
+            model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+        )
+        # Qwen3-235B for agents that must follow strict prompt rules
+        _instruct_kwargs = dict(
+            model="Qwen/Qwen3-235B-A22B-Instruct-2507",
+            model_base_url=settings.agent_model_base_url,
             model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         )
         specialists = {
             "research": build_research_agent(agent_name="research", use_computer=True),
             "research_2": build_research_agent(agent_name="research_2", use_computer=True),
+            "research_3": build_research_agent(agent_name="research_3", use_computer=True),
+            "research_4": build_research_agent(agent_name="research_4", use_computer=True),
             "research_competitors": build_research_agent(agent_name="research_competitors", use_computer=True),
             "research_competitors_2": build_research_agent(agent_name="research_competitors_2", use_computer=True),
+            "research_competitors_3": build_research_agent(agent_name="research_competitors_3", use_computer=True),
+            "research_competitors_4": build_research_agent(agent_name="research_competitors_4", use_computer=True),
             "research_execution": build_research_agent(agent_name="research_execution", use_computer=True),
             "research_execution_2": build_research_agent(agent_name="research_execution_2", use_computer=True),
+            "research_execution_3": build_research_agent(agent_name="research_execution_3", use_computer=True),
+            "research_execution_4": build_research_agent(agent_name="research_execution_4", use_computer=True),
             "web": build_web_agent(use_computer=True, **_coder_kwargs),
-            "marketing": build_marketing_agent(use_computer=True),
+            "marketing": build_marketing_agent(use_computer=True, **_highoutput_kwargs),
             "technical": build_technical_agent(use_computer=True, **_coder_kwargs),
-            "legal": build_legal_agent(use_computer=True),
-            "ops": build_ops_agent(use_computer=True),
-            "sales": build_sales_agent(use_computer=False),
-            "design": build_design_agent(use_computer=False),
+            "legal": build_legal_agent(use_computer=True, **_highoutput_kwargs),
+            "ops": build_ops_agent(use_computer=True, **_highoutput_kwargs),
+            "sales": build_sales_agent(use_computer=False, **_instruct_kwargs),
+            "design": build_design_agent(use_computer=False, **_instruct_kwargs),
         }
         from backend.tools.company_brain import (
             add_company_brain_record,

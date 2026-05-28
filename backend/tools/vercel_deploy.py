@@ -634,15 +634,27 @@ The result must look like it was designed by a real product team, not generated.
 
 Start the output with <!DOCTYPE html> immediately."""
 
-    try:
-        from backend.tools._llm import generate
-        html = generate(prompt)
-        html = re.sub(r"^```html?\s*", "", html, flags=re.IGNORECASE | re.MULTILINE).strip().rstrip("`").strip()
-        if html.startswith("<!"):
-            return html
-        logger.warning("LLM HTML didn't start with <!DOCTYPE — falling back to template")
-    except Exception as e:
-        logger.warning("LLM HTML generation failed (%s) — using template", e)
+    from backend.tools._llm import generate
+    for attempt in range(3):
+        try:
+            html = generate(prompt, model="fast")
+            # Strip markdown fences then find DOCTYPE even if LLM added preamble text
+            html = re.sub(r"```html?", "", html, flags=re.IGNORECASE).strip().rstrip("`").strip()
+            doctype_pos = html.lower().find("<!doctype")
+            if doctype_pos != -1:
+                body = html[doctype_pos:]
+                if "astra-fallback-template" not in body.lower():
+                    return body
+            # Accept custom HTML even if DOCTYPE is missing/malformed.
+            # This prevents unnecessary fallback-template usage when LLM output is otherwise valid.
+            html_tag_pos = html.lower().find("<html")
+            if html_tag_pos != -1:
+                body = html[html_tag_pos:]
+                if "astra-fallback-template" not in body.lower():
+                    return "<!DOCTYPE html>\n" + body
+            logger.warning("LLM HTML attempt %d had no valid <!DOCTYPE>", attempt + 1)
+        except Exception as e:
+            logger.warning("LLM HTML generation attempt %d failed (%s)", attempt + 1, e)
 
     # Fallback template
     icons = ["◆", "◈", "◉", "◎", "◇", "◊"]
@@ -665,10 +677,11 @@ Start the output with <!DOCTYPE html> immediately."""
           <p class="step-text">{step}</p>
         </div>"""
 
-    year = 2025
+    year = 2026
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- astra-fallback-template -->
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{page_title}</title>
