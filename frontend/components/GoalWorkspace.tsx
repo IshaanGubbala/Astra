@@ -44,6 +44,13 @@ interface AgentState {
   adImages?: Array<{ url?: string; base64?: string; prompt?: string }>;
 }
 
+const PREVIEW_CARD: React.CSSProperties = {
+  borderRadius: 12,
+  border: "1px solid rgba(0,0,0,0.08)",
+  background: "rgba(255,255,255,0.03)",
+  padding: "10px 12px",
+};
+
 const AGENT_ICONS: Record<string, string> = {
   research: "🔬", research_2: "🔬", research_competitors: "🏆", research_competitors_2: "🏆", research_execution: "📋", research_execution_2: "📋",
   web: "🌐", marketing: "📢", technical: "⚙️",
@@ -158,13 +165,14 @@ function extractAdImagesFromResult(obj: unknown, seen = new Set<string>()): Arra
   const results: Array<{ url?: string; base64?: string; prompt?: string }> = [];
   // Check if this object looks like an image result
   const model = typeof o.model === "string" ? o.model : "";
-  const hasImageUrl = typeof o.url === "string" && /^https?:/.test(o.url);
+  const resolvedUrl = (typeof o.url === "string" && o.url) || (typeof o.image_url === "string" && o.image_url) || "";
+  const hasImageUrl = /^https?:/.test(resolvedUrl);
   const hasBase64 = typeof o.base64 === "string" && o.base64.length > 100;
   if ((model.includes("FLUX") || model.includes("flux") || model.includes("janus")) && (hasImageUrl || hasBase64)) {
-    const key = (o.url as string) || (o.base64 as string).slice(0, 50);
+    const key = resolvedUrl || (o.base64 as string).slice(0, 50);
     if (!seen.has(key)) {
       seen.add(key);
-      results.push({ url: o.url as string | undefined, base64: o.base64 as string | undefined, prompt: o.prompt as string | undefined });
+      results.push({ url: resolvedUrl || undefined, base64: o.base64 as string | undefined, prompt: o.prompt as string | undefined });
     }
   }
   for (const v of Object.values(o)) {
@@ -219,9 +227,15 @@ function ResearchPreview({ state }: { state: AgentState }) {
 function WebPreview({ state }: { state: AgentState }) {
   const url = state.previewUrl ?? (state.result?.url ?? state.result?.deployment_url ?? state.result?.project_url) as string | undefined;
   const commits = state.commits ?? [];
+  const usedFallback = state.log.some(l => l.text.includes("fallback template"));
   if (url) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
+        {usedFallback && (
+          <div style={{ borderRadius: 10, border: "1px solid rgba(192,57,43,0.3)", background: "rgba(192,57,43,0.08)", padding: "8px 10px", fontSize: 11, color: "#C97070" }}>
+            Fallback template was detected in this run. A quality retry should follow.
+          </div>
+        )}
         <div style={{ borderRadius: 28, overflow: "hidden", border: "1px solid rgba(0,0,0,0.09)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(180,205,228,0.10)", borderBottom: "1px solid rgba(0,0,0,0.07)" }}>
             <div style={{ display: "flex", gap: 5 }}>
@@ -269,6 +283,19 @@ function TechnicalPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {(isBuilding || state.currentTool) && (
+        <div style={{ borderRadius: 12, border: "1px solid rgba(37,99,235,0.2)", background: "rgba(37,99,235,0.08)", padding: "8px 10px", display: "grid", gap: 4 }}>
+          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "#2563EB" }}>Live build status</div>
+          <div style={{ fontSize: 12, color: "var(--fg-dim)" }}>
+            {state.currentTool ? `Running ${state.currentTool.replace(/_/g, " ")}` : "Preparing build pipeline"}
+          </div>
+          {state.log.length > 0 && (
+            <div style={{ fontSize: 10, color: "var(--fg-mute)" }}>
+              {state.log.slice(-1)[0]?.text?.slice(0, 140)}
+            </div>
+          )}
+        </div>
+      )}
       {/* Live site iframe */}
       {deploy && (
         <div style={{ borderRadius: 20, overflow: "hidden", border: "1px solid rgba(37,99,235,0.18)" }}>
@@ -334,6 +361,17 @@ function TechnicalPreview({ state }: { state: AgentState }) {
         </div>
       )}
 
+      {state.log.length > 0 && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)" }}>Recent technical activity</span>
+          {state.log.slice(-5).map((entry, i) => (
+            <div key={i} style={{ padding: "5px 9px", borderRadius: 6, fontSize: 10, color: "var(--fg-mute)", background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)" }}>
+              {entry.text.slice(0, 140)}
+            </div>
+          ))}
+        </div>
+      )}
+
       {!repo && !deploy && !isBuilding && <ResultDump result={state.result} />}
       {!repo && !deploy && isBuilding && <BuildingIndicator label="Building MVP with openclaude…" />}
     </div>
@@ -359,6 +397,9 @@ function DesignPreview({ state }: { state: AgentState }) {
     result.design_system ??
     result.css_variables
   ) as string | undefined;
+  const wireframes = (result.wireframes ?? result.pages ?? result.screen_specs) as Array<Record<string, unknown>> | undefined;
+  const logoBriefObj = result.logo_brief as Record<string, unknown> | undefined;
+  const logoBrief = (typeof logoBriefObj === "object" ? JSON.stringify(logoBriefObj, null, 2) : (result.logo_brief ?? result.brand_direction ?? result.logo_direction)) as string | undefined;
 
   const isDone = state.status === "done";
 
@@ -370,7 +411,7 @@ function DesignPreview({ state }: { state: AgentState }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {allColors.slice(0, 12).map((c, i) => (
               <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 24, background: c, border: "1px solid rgba(0,0,0,0.1)", boxShadow: `0 2px 8px ${c}44` }} />
+                <div style={{ width: 44, height: 44, borderRadius: 8, background: c, border: "1px solid rgba(0,0,0,0.1)", boxShadow: `0 2px 8px ${c}44` }} />
                 <span style={{ fontSize: 9, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)" }}>{c}</span>
               </div>
             ))}
@@ -394,6 +435,23 @@ function DesignPreview({ state }: { state: AgentState }) {
           <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 200, overflowY: "auto", padding: "10px 12px", background: "rgba(180,205,228,0.10)", borderRadius: 24, border: "1px solid rgba(0,0,0,0.08)" }}>
             {typeof spec === "string" ? spec.slice(0, 600) : JSON.stringify(spec, null, 2).slice(0, 600)}
           </div>
+        </div>
+      )}
+      {Array.isArray(wireframes) && wireframes.length > 0 && (
+        <div style={{ display: "grid", gap: 6 }}>
+          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)" }}>Wireframes</span>
+          {wireframes.slice(0, 5).map((wf, i) => (
+            <div key={i} style={{ borderRadius: 10, border: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.03)", padding: "8px 10px", fontSize: 11, color: "var(--fg-dim)" }}>
+              <div style={{ fontWeight: 600, color: "var(--fg)" }}>{String(wf.page ?? wf.name ?? `Screen ${i + 1}`)}</div>
+              <div>{String(wf.layout ?? wf.structure ?? wf.notes ?? "").slice(0, 140)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {logoBrief && (
+        <div style={{ borderRadius: 10, border: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.03)", padding: "8px 10px", fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.6 }}>
+          <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", marginBottom: 4 }}>Logo direction</div>
+          {logoBrief.slice(0, 320)}
         </div>
       )}
       {allColors.length === 0 && !spec && isDone && <ResultDump result={state.result} />}
@@ -441,7 +499,7 @@ function MarketingPreview({ state }: { state: AgentState }) {
   }
 
   const CARD = (label: string, lines: [string, string][]) => (
-    <div style={{ borderRadius: 20, border: "1px solid rgba(0,0,0,0.09)", background: "rgba(255,255,255,0.02)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ ...PREVIEW_CARD, display: "flex", flexDirection: "column", gap: 8 }}>
       <span style={{ fontSize: 11, fontWeight: 700, color: "var(--fg)", letterSpacing: "0.03em" }}>{label}</span>
       {lines.filter(([, v]) => v).map(([k, v]) => (
         <div key={k}>
@@ -456,8 +514,21 @@ function MarketingPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
+        {[
+          ["Reels", reelScript ? "1+" : "0"],
+          ["TikTok", tiktokScript ? "1+" : "0"],
+          ["Ads", adHeadline || adBody ? "1+" : "0"],
+          ["Images", String(adImages.length)],
+        ].map(([label, value]) => (
+          <div key={label} style={{ borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.03)", padding: "6px 8px" }}>
+            <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>{label}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--fg)" }}>{value}</div>
+          </div>
+        ))}
+      </div>
       {adImages.length > 0 && (
-        <div style={{ borderRadius: 20, border: "1px solid rgba(0,0,0,0.09)", background: "rgba(255,255,255,0.02)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ ...PREVIEW_CARD, display: "flex", flexDirection: "column", gap: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "var(--fg)", letterSpacing: "0.03em" }}>Ad Images</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {adImages.map((img, i) => {
@@ -603,7 +674,7 @@ function LegalPreview({ state }: { state: AgentState }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {docs.length > 1 && (
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid rgba(0,0,0,0.08)", paddingBottom: 8 }}>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid rgba(0,0,0,0.08)", paddingBottom: 8 }}>
           {docs.map((d, i) => (
             <button key={i} onClick={() => setLegalTab(i)} style={{
               fontSize: 11, padding: "4px 12px", borderRadius: 6, cursor: "pointer",
@@ -630,13 +701,27 @@ function SalesPreview({ state }: { state: AgentState }) {
   const leadsArr = r?.leads as Array<Record<string, unknown>> | undefined;
   const firstLead = Array.isArray(leadsArr) ? leadsArr[0] : undefined;
   const lead = (r?.lead ?? r?.company ?? firstLead?.company ?? firstLead?.name ?? firstLead?.title) as string | undefined;
-  const seq = r?.sequence ?? r?.outreach_sequence ?? r?.email_sequence;
+  const seq = r?.sequence ?? r?.outreach_sequence ?? r?.email_sequence ?? (r?.outreach as Record<string, unknown> | undefined)?.sequence;
+  const crmContacts = (r?.crm_contacts ?? r?.contacts ?? []) as Array<Record<string, unknown>>;
+  const sequences = (r?.sequences ?? []) as Array<Record<string, unknown>>;
   if (!r || !lead) {
     return state.status === "done" ? <ResultDump result={state.result} /> : <BuildingIndicator label="Building outreach…" />;
   }
   const steps: unknown[] = Array.isArray(seq) ? seq : typeof seq === "string" ? (() => { try { return JSON.parse(seq); } catch { return []; } })() : [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
+        {[
+          ["Leads", String(Array.isArray(leadsArr) ? leadsArr.length : (lead ? 1 : 0))],
+          ["Sequence", String(steps.length)],
+          ["CRM", String(Array.isArray(crmContacts) ? crmContacts.length : 0)],
+        ].map(([label, value]) => (
+          <div key={label} style={{ borderRadius: 8, border: "1px solid rgba(0,0,0,0.08)", background: "rgba(255,255,255,0.03)", padding: "6px 8px" }}>
+            <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>{label}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--fg)" }}>{value}</div>
+          </div>
+        ))}
+      </div>
       <div style={{ padding: "8px 12px", borderRadius: 24, background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)" }}>
         <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)", marginBottom: 3 }}>Target Lead</div>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{lead}</div>
@@ -645,7 +730,7 @@ function SalesPreview({ state }: { state: AgentState }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>All leads ({leadsArr.length})</span>
           {leadsArr.slice(0, 5).map((l, i) => (
-            <div key={i} style={{ padding: "5px 10px", borderRadius: 6, background: "rgba(0,0,0,0.03)", fontSize: 11, color: "var(--fg-dim)" }}>
+            <div key={i} style={{ ...PREVIEW_CARD, padding: "6px 10px", fontSize: 11, color: "var(--fg-dim)" }}>
               {String(l.company ?? l.name ?? l.title ?? l.url ?? JSON.stringify(l)).slice(0, 80)}
             </div>
           ))}
@@ -655,10 +740,30 @@ function SalesPreview({ state }: { state: AgentState }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>Email Sequence ({steps.length} steps)</span>
           {(steps as Record<string, unknown>[]).slice(0, 4).map((s, i) => (
-            <div key={i} style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)" }}>
+            <div key={i} style={{ ...PREVIEW_CARD, padding: "8px 10px", background: "rgba(180,205,228,0.10)", border: "1px solid rgba(180,205,228,0.22)" }}>
               <div style={{ fontSize: 10, color: "#2563EB", marginBottom: 3 }}>Day {String(s.send_day ?? i + 1)}</div>
               <div style={{ fontSize: 11, fontWeight: 500, color: "var(--fg)" }}>{String(s.subject ?? "").slice(0, 60)}</div>
               <div style={{ fontSize: 10, color: "var(--fg-mute)", marginTop: 2 }}>{String(s.body ?? "").slice(0, 80)}…</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(sequences) && sequences.length > 1 && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>Additional sequences ({sequences.length - 1})</span>
+          {sequences.slice(1, 4).map((seqObj, i) => (
+            <div key={i} style={{ ...PREVIEW_CARD, padding: "6px 8px", fontSize: 11, color: "var(--fg-dim)" }}>
+              {String((seqObj.lead as Record<string, unknown> | undefined)?.company ?? (seqObj.lead as Record<string, unknown> | undefined)?.name ?? `Lead ${i + 2}`)}
+            </div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(crmContacts) && crmContacts.length > 0 && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--fg-mute)" }}>CRM contacts ({crmContacts.length})</span>
+          {crmContacts.slice(0, 4).map((c, i) => (
+            <div key={i} style={{ ...PREVIEW_CARD, padding: "6px 8px", fontSize: 11, color: "var(--fg-dim)" }}>
+              {String(c.name ?? c.company ?? c.email ?? JSON.stringify(c)).slice(0, 100)}
             </div>
           ))}
         </div>
@@ -691,7 +796,7 @@ function OpsPreview({ state }: { state: AgentState }) {
       {title && <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{title}</div>}
       {allPaths.map(p => <PdfEmbed key={p} path={p} height={300} />)}
       {sop && (
-        <div style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", padding: "10px 12px", background: "rgba(180,205,228,0.10)", borderRadius: 16, border: "1px solid rgba(0,0,0,0.08)" }}>
+      <div style={{ ...PREVIEW_CARD, fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 280, overflowY: "auto", background: "rgba(180,205,228,0.10)" }}>
           {String(sop).slice(0, 1200)}
         </div>
       )}
@@ -1598,9 +1703,9 @@ export function GoalWorkspace({
   // ── Persistent session cache ──────────────────────────────────────────────
   const CACHE_KEY = `astra_session_${sessionId}`;
 
-  const saveCache = useCallback((a: Record<string, AgentState>, p: AgentTask[], d: boolean) => {
+  const saveCache = useCallback((a: Record<string, AgentState>, p: AgentTask[], d: boolean, cn?: string) => {
     if (!sessionId) return;
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d })); } catch {}
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d, autoCompanyName: cn })); } catch {}
   }, [CACHE_KEY, sessionId]);
 
   // Always start with empty state to avoid SSR/client hydration mismatch;
@@ -1609,6 +1714,7 @@ export function GoalWorkspace({
   const [planTasks, setPlanTasks] = useState<AgentTask[]>([]);
   const [activeAgent, setActiveAgent] = useState<string>("");
   const [expandedGoal, setExpandedGoal] = useState<string>("");
+  const [autoCompanyName, setAutoCompanyName] = useState<string>("");
   const [done, setDone] = useState(false);
 
   // Restore from cache after first render (client-only)
@@ -1617,7 +1723,7 @@ export function GoalWorkspace({
     try {
       const raw = localStorage.getItem(CACHE_KEY);
       if (!raw) return;
-      const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean };
+      const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean; autoCompanyName?: string };
       const firstAgent = cached.planTasks?.[0]?.agent ?? Object.keys(cached.agents ?? {})[0] ?? "";
       queueMicrotask(() => {
         if (cached.agents && Object.keys(cached.agents).length > 0) {
@@ -1630,6 +1736,7 @@ export function GoalWorkspace({
         }
         if (cached.planTasks?.length > 0) setPlanTasks(cached.planTasks);
         if (cached.done) setDone(true);
+        if (cached.autoCompanyName) setAutoCompanyName(cached.autoCompanyName);
         if (firstAgent) setActiveAgent(firstAgent);
       });
     } catch {}
@@ -1637,6 +1744,12 @@ export function GoalWorkspace({
   const [newGoalOpen, setNewGoalOpen] = useState(startNew || !sessionId);
   const [planOpen, setPlanOpen] = useState(false);
   const [detailedNodes, setDetailedNodes] = useState<PlanNode[]>([]);
+  const [pendingDetailedNodes, setPendingDetailedNodes] = useState<PlanNode[]>([]);
+  const [nonResearchStarted, setNonResearchStarted] = useState(false);
+  const nonResearchStartedRef = useRef(false);
+  const pendingDetailedNodesRef = useRef<PlanNode[]>([]);
+  useEffect(() => { nonResearchStartedRef.current = nonResearchStarted; }, [nonResearchStarted]);
+  useEffect(() => { pendingDetailedNodesRef.current = pendingDetailedNodes; }, [pendingDetailedNodes]);
   useEffect(() => {
     if (startNew || !sessionId) queueMicrotask(() => setNewGoalOpen(true));
   }, [startNew, sessionId]);
@@ -1648,7 +1761,7 @@ export function GoalWorkspace({
   const errorCount = useRef(0);
 
   // Persist to localStorage whenever state changes
-  useEffect(() => { saveCache(agents, planTasks, done); }, [agents, planTasks, done, saveCache]);
+  useEffect(() => { saveCache(agents, planTasks, done, autoCompanyName); }, [agents, planTasks, done, autoCompanyName, saveCache]);
 
   useEffect(() => {
     if (!sessionId || sessionId === "undefined") return;
@@ -1663,8 +1776,14 @@ export function GoalWorkspace({
     es.onmessage = (e) => {
       const event = JSON.parse(e.data);
       if (event.type === "ping" || event.type === "founder_steer") return;
-      if (event.type === "detailed_plan") { setDetailedNodes(event.nodes ?? []); return; }
+      if (event.type === "detailed_plan") {
+        const nodes = event.nodes ?? [];
+        if (nonResearchStartedRef.current) setDetailedNodes(nodes);
+        else setPendingDetailedNodes(nodes);
+        return;
+      }
       if (event.type === "goal_expanded") { setExpandedGoal(event.expanded ?? ""); return; }
+      if (event.type === "company_name") { setAutoCompanyName(event.name ?? ""); return; }
       if (event.type === "session_expired") { setError("Session expired — backend was restarted. Run a new goal."); es.close(); return; }
 
       setAgents((prev) => {
@@ -1695,6 +1814,13 @@ export function GoalWorkspace({
         const addLog = (type: string, text: string): LogEntry[] => [...cur.log, { ts: Date.now(), type, text }];
 
         if (event.type === "agent_start") {
+          if (!agent.startsWith("research")) {
+            setNonResearchStarted(true);
+            if (pendingDetailedNodesRef.current.length > 0) {
+              setDetailedNodes(pendingDetailedNodesRef.current);
+              setPendingDetailedNodes([]);
+            }
+          }
           const _PAIR_MAP: Record<string, string> = { research_2: "research", research_competitors_2: "research_competitors", research_execution_2: "research_execution" };
           setActiveAgent(_PAIR_MAP[agent] ?? agent);
           next[agent] = { ...cur, status: "running", instruction: event.instruction ?? cur.instruction, task_id: event.task_id ?? cur.task_id, log: addLog("info", "Started") };
@@ -1717,6 +1843,10 @@ export function GoalWorkspace({
           let newUrl: string | undefined;
           if (!ok) {
             text = `✗ ${event.tool}: ${event.result?.error ?? "failed"}`;
+          } else if (event.tool === "generate_landing_page_html" && typeof event.result === "string") {
+            text = event.result.includes("astra-fallback-template")
+              ? "⚠ generate_landing_page_html used fallback template"
+              : "✓ generate_landing_page_html produced custom HTML";
           } else if (SEARCH_TOOLS.has(event.tool)) {
             const resultStr = typeof event.result === "string" ? event.result : JSON.stringify(event.result ?? "");
             const urlMatch = resultStr.match(/https?:\/\/[^\s"')\]]+/);
@@ -1735,8 +1865,9 @@ export function GoalWorkspace({
           const newFilesCount = (event.result?.files_in_repo as number) ?? cur.filesCount;
           // Capture ad images from generate_ad_image tool result
           let newAdImages = cur.adImages;
-          if (event.tool === "generate_ad_image" && ok && (event.result?.url || event.result?.base64)) {
-            const img = { url: event.result.url as string | undefined, base64: event.result.base64 as string | undefined, prompt: event.result.prompt as string | undefined };
+          const eventImageUrl = (event.result?.url as string | undefined) ?? (event.result?.image_url as string | undefined);
+          if (event.tool === "generate_ad_image" && ok && (eventImageUrl || event.result?.base64)) {
+            const img = { url: eventImageUrl, base64: event.result.base64 as string | undefined, prompt: event.result.prompt as string | undefined };
             newAdImages = [...(cur.adImages ?? []), img];
           }
           next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text), visitedUrls: newVisited, currentUrl: newUrl ?? cur.currentUrl, commits: newCommits, filesPreview: newFiles, filesCount: newFilesCount, adImages: newAdImages };
@@ -1865,6 +1996,9 @@ export function GoalWorkspace({
           </span>
           {sessionId && <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)" }}>{sessionId}</span>}
         </div>
+        {autoCompanyName && (
+          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: "var(--font-jetbrains-mono)" }}>{autoCompanyName}</span>
+        )}
         {expandedGoal && (
           <p style={{ margin: 0, fontSize: 12, color: "var(--fg-mute)", lineHeight: 1.6, maxWidth: 820 }}>{expandedGoal}</p>
         )}

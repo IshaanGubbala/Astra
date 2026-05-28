@@ -162,7 +162,7 @@ def _restore_session(session_id: str) -> tuple[bool, bool]:
 
 # Events that establish agent state — safe to replay on fresh connect without flooding the log
 _STATE_EVENTS = frozenset({
-    "goal_start", "plan_done", "goal_expanded", "detailed_plan",
+    "goal_start", "plan_done", "goal_expanded", "detailed_plan", "company_name",
     "agent_start", "agent_done", "agent_error", "mirror_verdict",
     "goal_done", "goal_error",
 })

@@ -27,10 +27,12 @@ def build_marketing_agent(**kwargs) -> Agent:
             "- build_email_html — welcome email + nurture sequence\n"
             "- composio_linkedin_post — post thought leadership content\n"
             "- generate_ad_image — REQUIRED. Call this at least once with a specific ad concept for the product. "
-            "Pass founder_id exactly as it appears in FOUNDER_ID above. "
-            "Example: generate_ad_image(description='editorial ad for <product> targeting <persona>, showing <specific visual>', founder_id='<FOUNDER_ID value>')\n\n"
+            "Pass founder_id and session_id exactly as they appear above. "
+            "Example: generate_ad_image(description='editorial ad for <product> targeting <persona>, showing <specific visual>', founder_id='<FOUNDER_ID value>', session_id='<SESSION value>')\n\n"
             "All copy must use specific language from real user complaints found in research. "
-            "No generic templates. Call obsidian_log then done."
+            "No generic templates. "
+            "Your final done output MUST include reel_package, tiktok_package, meta_ad, and ad_images (array of {url|base64,prompt}) for preview rendering. "
+            "Call obsidian_log then done."
         ),
         tools={
             "search_and_fetch": search_and_fetch,

@@ -85,10 +85,41 @@ def _record_image_spend(founder_id: str) -> None:
         pass
 
 
-def generate_image(description: str, width: int = 1024, height: int = 1024, founder_id: str = "") -> dict:
-    """Generate an ad image using Janus-Pro-7B.
-    Uses Llama-3.3-70B to write an optimized image prompt, then calls Janus.
-    Returns: {prompt, url, base64, model}
+def _save_image_to_vault(url: str | None, b64: str | None, prompt: str, founder_id: str, session_id: str) -> str | None:
+    """Download/decode image and write to vault, embed in marketing note. Returns local path."""
+    try:
+        import base64 as _b64, datetime, requests
+        from backend.config import settings
+        from pathlib import Path
+        vault = Path(settings.obsidian_vault).expanduser()
+        img_dir = vault / "founders" / founder_id / "sessions" / session_id / "images"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        img_path = img_dir / f"ad_{ts}.png"
+        if b64:
+            raw = b64.split(",", 1)[-1] if "," in b64 else b64
+            img_path.write_bytes(_b64.b64decode(raw))
+        elif url:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            img_path.write_bytes(resp.content)
+        else:
+            return None
+        # Append embed to marketing.md
+        note_path = vault / "founders" / founder_id / "sessions" / session_id / "marketing.md"
+        with open(note_path, "a") as f:
+            f.write(f"\n\n## Ad Image\n**Prompt:** {prompt}\n![[images/ad_{ts}.png]]\n")
+        logger.info("Saved ad image to %s", img_path)
+        return str(img_path)
+    except Exception as e:
+        logger.warning("Image vault save failed: %s", e)
+        return None
+
+
+def generate_image(description: str, width: int = 1024, height: int = 1024, founder_id: str = "", session_id: str = "") -> dict:
+    """Generate an ad image using FLUX-2-pro.
+    Uses gpt-oss-120b to write an optimized image prompt, then calls FLUX.
+    Returns: {prompt, url, base64, model, local_path}
     """
     import openai, requests
 
@@ -149,8 +180,11 @@ def generate_image(description: str, width: int = 1024, height: int = 1024, foun
             b64 = img.get("image") if isinstance(img, dict) else img
             if not url and isinstance(img, dict):
                 url = img.get("url")
+        local_path = None
         if founder_id and (url or b64):
             _record_image_spend(founder_id)
+            if session_id:
+                local_path = _save_image_to_vault(url, b64, image_prompt, founder_id, session_id)
         return {
             "prompt": image_prompt,
             "url": url,
@@ -158,6 +192,7 @@ def generate_image(description: str, width: int = 1024, height: int = 1024, foun
             "model": _IMAGE_MODEL,
             "width": width,
             "height": height,
+            "local_path": local_path,
         }
     except Exception as e:
         return {"prompt": image_prompt, "error": str(e), "model": _IMAGE_MODEL}

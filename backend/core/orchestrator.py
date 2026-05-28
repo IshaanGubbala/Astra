@@ -181,6 +181,48 @@ class Orchestrator:
                 pass
         return []
 
+    async def _generate_company_name(self, goal: str) -> str:
+        """Extract or invent a company/product name from the goal."""
+        import re
+        # Explicit name patterns: frontend sends "Company name: X." or "called X", quoted names
+        for pattern in [
+            r'[Cc]ompany\s+name[:\s]+([A-Za-z][a-zA-Z0-9]{2,})',
+            r'(?:called|named|building)\s+"?([A-Z][a-zA-Z0-9]{2,})"?',
+            r'"([A-Z][a-zA-Z0-9]{2,20})"',
+        ]:
+            m = re.search(pattern, goal)
+            if m:
+                return m.group(1).strip()
+        # Generate one
+        try:
+            from openai import OpenAI
+            from backend.config import settings
+            client = OpenAI(
+                base_url=settings.planner_model_base_url or "https://api.deepinfra.com/v1/openai",
+                api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+            )
+            resp = await asyncio.to_thread(
+                client.chat.completions.create,
+                model="meta-llama/Llama-3.3-70B-Instruct",
+                messages=[
+                    {"role": "system", "content": (
+                        "Output ONLY a single company/product name for this startup idea. "
+                        "1-2 words max. CamelCase. Memorable, domain-friendly, not generic. "
+                        "No explanation. No punctuation. Just the name."
+                    )},
+                    {"role": "user", "content": goal[:300]},
+                ],
+                max_tokens=10,
+                temperature=0.85,
+            )
+            raw = (resp.choices[0].message.content or "").strip().split()[0]
+            name = re.sub(r"[^a-zA-Z0-9]", "", raw)
+            if len(name) >= 3:
+                return name
+        except Exception as e:
+            logger.warning("Company name generation failed: %s", e)
+        return "Venture"
+
     async def _expand_goal(self, goal: str, session_id: str) -> str:
         """Expand a terse founder prompt into a rich, specific goal using Llama 3.3 70B."""
         from backend.config import settings
@@ -248,6 +290,12 @@ class Orchestrator:
 
         from backend.core.events import publish
 
+        # Generate company name before expansion so it feeds into expanded goal
+        company_name = await self._generate_company_name(goal)
+        shared["company_name"] = company_name
+        await publish(session_id, {"type": "company_name", "name": company_name})
+        logger.info("Company name: %s", company_name)
+
         # Expand the goal with Llama 3.3 70B before anything else
         goal = await self._expand_goal(goal, session_id)
 
@@ -274,21 +322,20 @@ class Orchestrator:
             if _ag not in _existing_agents and _ag in self.specialists:
                 other_agents_initial.append({"id": f"forced_{_ag}", "agent": _ag, "instruction": _instr, "depends_on": []})
 
-        # Run 4 agents per research track (12 total) in parallel for maximum coverage
+        # Run only configured research specialists in parallel.
         research_instruction = research_task["instruction"] if research_task else f"Research market, competitors, and execution strategy for: {goal}"
+        candidate_research = [
+            ("r_market", "research"),
+            ("r_market_2", "research_2"),
+            ("r_competitors", "research_competitors"),
+            ("r_competitors_2", "research_competitors_2"),
+            ("r_execution", "research_execution"),
+            ("r_execution_2", "research_execution_2"),
+        ]
         parallel_research_tasks = [
-            {"id": "r_market",          "agent": "research",                 "instruction": research_instruction, "depends_on": []},
-            {"id": "r_market_2",        "agent": "research_2",               "instruction": research_instruction, "depends_on": []},
-            {"id": "r_market_3",        "agent": "research_3",               "instruction": research_instruction, "depends_on": []},
-            {"id": "r_market_4",        "agent": "research_4",               "instruction": research_instruction, "depends_on": []},
-            {"id": "r_competitors",     "agent": "research_competitors",     "instruction": research_instruction, "depends_on": []},
-            {"id": "r_competitors_2",   "agent": "research_competitors_2",   "instruction": research_instruction, "depends_on": []},
-            {"id": "r_competitors_3",   "agent": "research_competitors_3",   "instruction": research_instruction, "depends_on": []},
-            {"id": "r_competitors_4",   "agent": "research_competitors_4",   "instruction": research_instruction, "depends_on": []},
-            {"id": "r_execution",       "agent": "research_execution",       "instruction": research_instruction, "depends_on": []},
-            {"id": "r_execution_2",     "agent": "research_execution_2",     "instruction": research_instruction, "depends_on": []},
-            {"id": "r_execution_3",     "agent": "research_execution_3",     "instruction": research_instruction, "depends_on": []},
-            {"id": "r_execution_4",     "agent": "research_execution_4",     "instruction": research_instruction, "depends_on": []},
+            {"id": tid, "agent": agent_name, "instruction": research_instruction, "depends_on": []}
+            for tid, agent_name in candidate_research
+            if agent_name in self.specialists
         ]
 
         # Emit initial plan
@@ -339,6 +386,38 @@ class Orchestrator:
 
             await publish(session_id, {"type": "agent_start", "agent": agent_name, "task_id": tid, "instruction": task["instruction"]})
             result = await agent.run(ctx)
+
+            # Web quality gate: retry once with stronger instruction if fallback template was used.
+            if agent_name == "web":
+                html_result = result.get("html") if isinstance(result, dict) else None
+                used_fallback = isinstance(html_result, str) and "astra-fallback-template" in html_result
+                if used_fallback:
+                    await publish(session_id, {
+                        "type": "agent_action_result",
+                        "agent": agent_name,
+                        "tool": "generate_landing_page_html",
+                        "result": {"error": "fallback template detected; rerunning web task with stricter instruction"},
+                    })
+                    retry_ctx = AgentContext(
+                        goal=(
+                            task["instruction"]
+                            + "\n\nSTRICT QUALITY RETRY: The previous HTML used fallback template output. "
+                              "You MUST regenerate custom HTML with explicit brand colors/fonts and concrete product copy. "
+                              "Do not return fallback/template output."
+                        ),
+                        founder_id=founder_id,
+                        session_id=session_id,
+                        shared={**ctx.shared, "web_quality_retry": True},
+                    )
+                    await publish(session_id, {
+                        "type": "agent_start",
+                        "agent": agent_name,
+                        "task_id": f"{tid}_retry",
+                        "instruction": "Quality retry after fallback detection",
+                    })
+                    retry_result = await agent.run(retry_ctx)
+                    if isinstance(retry_result, dict):
+                        result = retry_result
 
             # Mirror review
             if proprietary_engine:
