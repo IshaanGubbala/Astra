@@ -90,26 +90,33 @@ def generate_image(description: str, width: int = 1024, height: int = 1024, foun
         if not allowed:
             return {"error": f"Monthly image budget exhausted (${_IMAGE_MONTHLY_BUDGET:.2f}/month). Resets next month.", "model": _IMAGE_MODEL}
 
-    # Step 1: gpt-oss-120b writes the image prompt
+    # Step 1: gpt-oss-120b writes the FLUX image prompt
     client = openai.OpenAI(base_url=_DI_BASE, api_key=_api_key())
     prompt_resp = client.chat.completions.create(
         model=_PROMPT_MODEL,
-        messages=[{"role": "user", "content": (
-            f"Write a detailed image generation prompt for FLUX-2-pro to create a high-quality editorial advertisement.\n"
-            f"Ad concept: {description}\n\n"
-            f"Style reference: Think Dove Real Beauty Campaign, Apple, Nike — editorial advertising photography. "
-            f"NOT generic stock photos. The image should look like a full-page magazine ad.\n\n"
-            f"Prompt must specify:\n"
-            f"- Composition: editorial split-panel layout OR bold single subject close-up OR minimalist product shot\n"
-            f"- Subject: specific person or object with emotional resonance relevant to the brand\n"
-            f"- Lighting: cinematic, dramatic, or soft editorial — be specific (e.g. 'soft window light', 'golden hour rim lighting')\n"
-            f"- Mood: aspirational, human, authentic — NOT corporate stock photo feel\n"
-            f"- Space: include clear negative space area (top or right third) for text overlay\n"
-            f"- Style: 'editorial advertising photography, magazine quality, high production value'\n"
-            f"Output ONLY the prompt — no explanation, no quotes."
-        )}],
-        max_tokens=300,
-        temperature=0.8,
+        messages=[
+            {"role": "system", "content": (
+                "You are a creative director at a top-tier advertising agency. "
+                "Your job is to write image generation prompts for FLUX-2-pro diffusion model.\n\n"
+                "FLUX responds best to SHORT, DENSE prompts — 40 to 80 words maximum. "
+                "Long prompts degrade quality. Be precise, not verbose.\n\n"
+                "Great FLUX ad prompts have:\n"
+                "  • A single strong visual anchor (one person, one product, one moment)\n"
+                "  • Specific lighting in 3-5 words ('soft morning window light', 'dramatic side rim')\n"
+                "  • Emotional tone in 2-3 words ('quiet confidence', 'raw joy')\n"
+                "  • Large open area of negative space for text — say exactly where (top third, left half)\n"
+                "  • End with: 'editorial advertising photography, 35mm, magazine quality'\n\n"
+                "DO NOT include: brand names, logos, text, words, watermarks, charts, multiple people unless essential.\n"
+                "DO NOT use: 'photorealistic', 'ultra HD', 'masterpiece', 'beautiful' — these are filler.\n"
+                "Output ONLY the prompt. No explanation. No quotes. No markdown."
+            )},
+            {"role": "user", "content": (
+                f"Ad concept and brand context:\n{description}\n\n"
+                "Write the FLUX-2-pro image prompt now. Keep it under 80 words."
+            )},
+        ],
+        max_tokens=150,
+        temperature=0.75,
         timeout=30.0,
     )
     image_prompt = (prompt_resp.choices[0].message.content or description).strip()
