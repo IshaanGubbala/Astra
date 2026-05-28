@@ -182,7 +182,7 @@ class Orchestrator:
         return []
 
     async def _expand_goal(self, goal: str, session_id: str) -> str:
-        """Expand a terse founder prompt into a rich, specific goal."""
+        """Expand a terse founder prompt into a rich, specific goal using Llama 3.3 70B."""
         from backend.config import settings
         from backend.core.events import publish
         system = (
@@ -195,19 +195,22 @@ class Orchestrator:
             "Output ONLY the expanded goal. No headers, no lists, no meta-commentary."
         )
         try:
+            from openai import OpenAI
+            client = OpenAI(
+                base_url=settings.planner_model_base_url or "https://api.deepinfra.com/v1/openai",
+                api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+            )
             resp = await asyncio.to_thread(
-                self.planner._get_llm().chat.completions.create,
-                model=self.planner.model,
+                client.chat.completions.create,
+                model="meta-llama/Llama-3.3-70B-Instruct",
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": goal},
                 ],
-                max_tokens=300,
+                max_tokens=400,
                 temperature=0.7,
             )
             expanded = resp.choices[0].message.content.strip()
-            import re as _re
-            expanded = _re.sub(r"<think>.*?</think>", "", expanded, flags=_re.DOTALL).strip()
             if expanded and len(expanded) > len(goal):
                 logger.info("Goal expanded: %s → %s", goal[:60], expanded[:80])
                 await publish(session_id, {"type": "goal_expanded", "original": goal, "expanded": expanded})
@@ -245,16 +248,19 @@ class Orchestrator:
 
         from backend.core.events import publish
 
-        # Expand goal and build initial plan in parallel — both only need the original goal
-        expanded_goal, initial_tasks = await asyncio.gather(
-            self._expand_goal(goal, session_id),
-            self._initial_plan(goal),
-        )
-        goal = expanded_goal
+        # Expand the goal with Llama 3.3 70B before anything else
+        goal = await self._expand_goal(goal, session_id)
+
+        # Phase 1: initial plan — research always runs first
+        initial_tasks = await self._initial_plan(goal)
         if not initial_tasks:
             initial_tasks = [{"id": "t1", "agent": "research", "instruction": f"Research the market and competitive landscape for: {goal}", "depends_on": []}]
 
-        _RESEARCH_AGENTS = {"research", "research_2", "research_competitors", "research_competitors_2", "research_execution", "research_execution_2"}
+        _RESEARCH_AGENTS = {
+            "research", "research_2", "research_3", "research_4",
+            "research_competitors", "research_competitors_2", "research_competitors_3", "research_competitors_4",
+            "research_execution", "research_execution_2", "research_execution_3", "research_execution_4",
+        }
         research_task = next((t for t in initial_tasks if t["agent"] == "research"), None)
         other_agents_initial = [t for t in initial_tasks if t["agent"] not in _RESEARCH_AGENTS]
 
@@ -268,15 +274,21 @@ class Orchestrator:
             if _ag not in _existing_agents and _ag in self.specialists:
                 other_agents_initial.append({"id": f"forced_{_ag}", "agent": _ag, "instruction": _instr, "depends_on": []})
 
-        # Run 2 agents per research track (6 total) in parallel for faster, deeper coverage
+        # Run 4 agents per research track (12 total) in parallel for maximum coverage
         research_instruction = research_task["instruction"] if research_task else f"Research market, competitors, and execution strategy for: {goal}"
         parallel_research_tasks = [
-            {"id": "r_market",        "agent": "research",               "instruction": research_instruction, "depends_on": []},
-            {"id": "r_market_2",      "agent": "research_2",             "instruction": research_instruction, "depends_on": []},
-            {"id": "r_competitors",   "agent": "research_competitors",   "instruction": research_instruction, "depends_on": []},
-            {"id": "r_competitors_2", "agent": "research_competitors_2", "instruction": research_instruction, "depends_on": []},
-            {"id": "r_execution",     "agent": "research_execution",     "instruction": research_instruction, "depends_on": []},
-            {"id": "r_execution_2",   "agent": "research_execution_2",   "instruction": research_instruction, "depends_on": []},
+            {"id": "r_market",          "agent": "research",                 "instruction": research_instruction, "depends_on": []},
+            {"id": "r_market_2",        "agent": "research_2",               "instruction": research_instruction, "depends_on": []},
+            {"id": "r_market_3",        "agent": "research_3",               "instruction": research_instruction, "depends_on": []},
+            {"id": "r_market_4",        "agent": "research_4",               "instruction": research_instruction, "depends_on": []},
+            {"id": "r_competitors",     "agent": "research_competitors",     "instruction": research_instruction, "depends_on": []},
+            {"id": "r_competitors_2",   "agent": "research_competitors_2",   "instruction": research_instruction, "depends_on": []},
+            {"id": "r_competitors_3",   "agent": "research_competitors_3",   "instruction": research_instruction, "depends_on": []},
+            {"id": "r_competitors_4",   "agent": "research_competitors_4",   "instruction": research_instruction, "depends_on": []},
+            {"id": "r_execution",       "agent": "research_execution",       "instruction": research_instruction, "depends_on": []},
+            {"id": "r_execution_2",     "agent": "research_execution_2",     "instruction": research_instruction, "depends_on": []},
+            {"id": "r_execution_3",     "agent": "research_execution_3",     "instruction": research_instruction, "depends_on": []},
+            {"id": "r_execution_4",     "agent": "research_execution_4",     "instruction": research_instruction, "depends_on": []},
         ]
 
         # Emit initial plan
@@ -374,8 +386,9 @@ class Orchestrator:
             for rt in parallel_research_tasks:
                 research_result.update(completed.get(rt["id"], {}))
                 try:
-                    # _2 variants write to the same base agent name — deduplicate
-                    base_agent = rt["agent"].removesuffix("_2")
+                    # _2/_3/_4 variants write to same base agent name — deduplicate
+                    import re as _re
+                    base_agent = _re.sub(r"_\d+$", "", rt["agent"])
                     note_file = _note_path(base_agent, session_id, founder_id)
                     note_key = str(note_file)
                     if note_file.exists() and note_key not in _seen_note_paths:

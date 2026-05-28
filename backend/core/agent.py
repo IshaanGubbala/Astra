@@ -129,6 +129,7 @@ class Agent:
         model: str = None,
         model_base_url: str = None,
         model_api_key: str = None,
+        max_iterations: int = None,
     ):
         self.name = name
         self.role = role
@@ -138,6 +139,7 @@ class Agent:
         self.model = model or settings.agent_model_name
         self._model_base_url = model_base_url or settings.agent_model_base_url
         self._model_api_key = model_api_key or settings.agent_model_api_key
+        self._max_iterations = max_iterations
         self._inbox: asyncio.Queue = asyncio.Queue()
         self._llm: Optional[openai.OpenAI] = None
 
@@ -272,7 +274,7 @@ class Agent:
 
     async def _run_loop(self, messages: list[dict], ctx: AgentContext, browser=None) -> dict[str, Any]:
         i = 0
-        MAX_ITERATIONS = 40
+        MAX_ITERATIONS = self._max_iterations or 40
         # Track consecutive failures per tool to break infinite retry loops
         _tool_fail_counts: dict[str, int] = {}
         # One-shot tools: hard-blocked after first success

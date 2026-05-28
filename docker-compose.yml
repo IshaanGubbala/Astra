@@ -14,12 +14,13 @@ services:
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379
+      - OBSIDIAN_VAULT=/data/astra_docs
     depends_on:
       - redis
     ports:
       - "8000:8000"
     volumes:
-      - /tmp/astra_docs:/tmp/astra_docs
+      - astra_docs_data:/data/astra_docs
 
   frontend:
     build:
@@ -57,3 +58,4 @@ services:
 
 volumes:
   redis_data:
+  astra_docs_data:

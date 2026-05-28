@@ -63,7 +63,11 @@ async def _resume_interrupted_sessions() -> None:
                             planned.add(t["agent"])
 
                 completed_agents: set[str] = {e["agent"] for e in event_dicts if e.get("type") == "agent_done"}
-                _RESEARCH = {"research", "research_2", "research_competitors", "research_competitors_2", "research_execution", "research_execution_2"}
+                _RESEARCH = {
+                    "research", "research_2", "research_3", "research_4",
+                    "research_competitors", "research_competitors_2", "research_competitors_3", "research_competitors_4",
+                    "research_execution", "research_execution_2", "research_execution_3", "research_execution_4",
+                }
                 remaining = list(planned - completed_agents - _RESEARCH)
 
                 if not remaining:
