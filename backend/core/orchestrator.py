@@ -217,7 +217,7 @@ class Orchestrator:
             )
             resp = await asyncio.to_thread(
                 client.chat.completions.create,
-                model="Qwen/Qwen3-235B-A22B-Instruct-2507",
+                model="deepseek-ai/DeepSeek-V4-Flash",
                 messages=[
                     {"role": "system", "content": (
                         "Output ONLY a single company/product name for this startup idea. "
@@ -258,7 +258,7 @@ class Orchestrator:
             )
             resp = await asyncio.to_thread(
                 client.chat.completions.create,
-                model="Qwen/Qwen3-235B-A22B-Instruct-2507",
+                model="deepseek-ai/DeepSeek-V4-Flash",
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": goal},
@@ -561,13 +561,22 @@ class Orchestrator:
 
         # Write session index linking all agent notes
         try:
-            from backend.tools.obsidian_logger import obsidian_session_index
+            from backend.tools.obsidian_logger import obsidian_session_index, obsidian_backend_log
+            from backend.core.events import _event_log
             agents_ran = [t["agent"] for t in tasks]
             await asyncio.to_thread(
                 obsidian_session_index, session_id, goal, agents_ran, founder_id
             )
+            await asyncio.to_thread(
+                obsidian_backend_log,
+                session_id,
+                founder_id,
+                goal,
+                _event_log.get(session_id, []),
+                completed,
+            )
         except Exception as _sie:
-            logger.warning("Obsidian session index failed: %s", _sie)
+            logger.warning("Obsidian session log/index failed: %s", _sie)
 
         # Proprietary engine: post-run fingerprint
         if proprietary_engine:
@@ -685,4 +694,17 @@ class Orchestrator:
 
         await asyncio.gather(*[_run_task(t) for t in tasks])
         await publish(session_id, {"type": "goal_done", "results": completed})
+        try:
+            from backend.tools.obsidian_logger import obsidian_backend_log
+            from backend.core.events import _event_log
+            await asyncio.to_thread(
+                obsidian_backend_log,
+                session_id,
+                founder_id,
+                instruction,
+                _event_log.get(session_id, []),
+                completed,
+            )
+        except Exception as _bl:
+            logger.warning("Continuation backend log failed: %s", _bl)
         return {"session_id": session_id, "results": completed}
