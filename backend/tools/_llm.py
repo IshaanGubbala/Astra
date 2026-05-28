@@ -9,10 +9,10 @@ Models:
 import re
 from backend.config import settings
 
-_FAST_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+_FAST_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 _LARGE_MODEL = "openai/gpt-oss-120b"
 _IMAGE_MODEL = "deepseek-ai/Janus-Pro-7B"
-_PROMPT_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+_PROMPT_MODEL = "openai/gpt-oss-120b"
 _DI_BASE = "https://api.deepinfra.com/v1/openai"
 _DI_IMAGE_BASE = "https://api.deepinfra.com/v1/inference"
 
