@@ -224,15 +224,13 @@ def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 
         inner_cmd += ["--session-id", session_id]
     inner_cmd.append(prompt)
 
-    # openclaude blocks --dangerously-skip-permissions when running as root
+    # openclaude blocks --dangerously-skip-permissions when running as root — use sudo -u astra
     if os.getuid() == 0:
-        env_str = " ".join(f"{k}={v}" for k, v in env.items() if k in ("OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL"))
-        shell_cmd = f"{env_str} {' '.join(inner_cmd)}"
-        cmd = ["su", "astra", "-c", shell_cmd]
+        cmd = ["sudo", "-u", "astra", "-E"] + inner_cmd
     else:
         cmd = inner_cmd
 
-    r = subprocess.run(cmd, cwd=local, capture_output=True, text=True, timeout=timeout, env=env if os.getuid() != 0 else None)
+    r = subprocess.run(cmd, cwd=local, capture_output=True, text=True, timeout=timeout, env=env)
     if r.returncode not in (0, 1):
         logger.warning("openclaude exited %d: %s", r.returncode, r.stderr[:200])
     return r.stdout.strip()
