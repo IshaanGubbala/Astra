@@ -487,7 +487,7 @@ function DesignPreview({ state }: { state: AgentState }) {
         </div>
       )}
       {allColors.length === 0 && !spec && isDone && <ResultDump result={state.result} />}
-      {allColors.length === 0 && !spec && !isDone && <BuildingIndicator label="Building design system…" tool={state.currentTool} />}
+      {allColors.length === 0 && !spec && !isDone && <BuildingIndicator label="Building design system…" tool={state.currentTool ?? undefined} />}
     </div>
   );
 }
@@ -527,7 +527,7 @@ function MarketingPreview({ state }: { state: AgentState }) {
   const isDone = state.status === "done";
 
   if (!hasContent) {
-    return isDone ? <ResultDump result={state.result} /> : <BuildingIndicator label="Creating campaigns…" tool={state.currentTool} />;
+    return isDone ? <ResultDump result={state.result} /> : <BuildingIndicator label="Creating campaigns…" tool={state.currentTool ?? undefined} />;
   }
 
   const SocialCard = ({ platform, icon, color, gradient, lines }: { platform: string; icon: string; color: string; gradient: string; lines: [string, string][] }) => (
@@ -881,7 +881,7 @@ function ResultDump({ result }: { result: Record<string, unknown> | null }) {
   );
 }
 
-function BuildingIndicator({ label, tool }: { label: string; tool?: string }) {
+function BuildingIndicator({ label, tool }: { label: string; tool?: string | null }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "18px 0" }}>
       <div style={{ height: 2, borderRadius: 999, background: "rgba(37,99,235,0.12)", overflow: "hidden" }}>
