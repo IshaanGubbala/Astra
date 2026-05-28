@@ -3,9 +3,11 @@ FROM python:3.13-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl git nodejs npm \
+    build-essential curl git nodejs npm sudo \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @gitlawb/openclaude 2>/dev/null || true
+    && npm install -g @gitlawb/openclaude 2>/dev/null || true \
+    && useradd -m -s /bin/bash astra \
+    && echo "astra ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

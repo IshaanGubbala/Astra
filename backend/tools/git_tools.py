@@ -215,16 +215,24 @@ def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 
         raise RuntimeError(f"openclaude not found at {OPENCLAUDE_BIN}")
 
     env = _make_env()
-    cmd = [
+    inner_cmd = [
         OPENCLAUDE_BIN, "--print", "--allow-dangerously-skip-permissions", "--dangerously-skip-permissions",
         "--provider", "openai",
         "--model", env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Flash"),
     ]
     if session_id:
-        cmd += ["--session-id", session_id]
-    cmd.append(prompt)
+        inner_cmd += ["--session-id", session_id]
+    inner_cmd.append(prompt)
 
-    r = subprocess.run(cmd, cwd=local, capture_output=True, text=True, timeout=timeout, env=env)
+    # openclaude blocks --dangerously-skip-permissions when running as root
+    if os.getuid() == 0:
+        env_str = " ".join(f"{k}={v}" for k, v in env.items() if k in ("OPENAI_BASE_URL", "OPENAI_API_KEY", "OPENAI_MODEL"))
+        shell_cmd = f"{env_str} {' '.join(inner_cmd)}"
+        cmd = ["su", "astra", "-c", shell_cmd]
+    else:
+        cmd = inner_cmd
+
+    r = subprocess.run(cmd, cwd=local, capture_output=True, text=True, timeout=timeout, env=env if os.getuid() != 0 else None)
     if r.returncode not in (0, 1):
         logger.warning("openclaude exited %d: %s", r.returncode, r.stderr[:200])
     return r.stdout.strip()
