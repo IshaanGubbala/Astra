@@ -130,7 +130,8 @@ def fetch_and_read(url: str) -> dict:
         es = str(e)
         # Expected HTTP errors — silent, fall back to snippet
         if any(code in es for code in ("400", "401", "403", "404", "410", "429", "302", "301", "503", "521", "444", "codec",
-                                        "SSL", "CERTIFICATE", "certificate", "timed out", "Operation timed out", "TLSV1")):
+                                        "SSL", "CERTIFICATE", "certificate", "timed out", "Operation timed out", "TLSV1",
+                                        "nodename nor servname", "Name or service not known", "Errno 8", "Errno 11001")):
             return {"url": url, "skipped": es[:40], "content": ""}
         logger.warning("fetch_and_read failed for %s: %s", url, e)
         return {"url": url, "skipped": str(e)[:80], "content": ""}

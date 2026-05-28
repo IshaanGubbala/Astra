@@ -41,6 +41,7 @@ interface AgentState {
   legalText?: string;
   salesLead?: string;
   designSpec?: string;
+  adImages?: Array<{ url?: string; base64?: string; prompt?: string }>;
 }
 
 const AGENT_ICONS: Record<string, string> = {
@@ -146,6 +147,27 @@ function summarizeResult(state: AgentState | undefined): string {
   if (state.commits?.length) return `${state.commits.length} code rounds committed so far.`;
   if (Object.keys(result).length) return `${Object.keys(result).length} output fields captured in this lane.`;
   return state.currentAction ? `Currently ${state.currentAction}.` : "This lane is in progress.";
+}
+
+function extractAdImagesFromResult(obj: unknown, seen = new Set<string>()): Array<{ url?: string; base64?: string; prompt?: string }> {
+  if (!obj || typeof obj !== "object") return [];
+  const o = obj as Record<string, unknown>;
+  const results: Array<{ url?: string; base64?: string; prompt?: string }> = [];
+  // Check if this object looks like an image result
+  const model = typeof o.model === "string" ? o.model : "";
+  const hasImageUrl = typeof o.url === "string" && /^https?:/.test(o.url);
+  const hasBase64 = typeof o.base64 === "string" && o.base64.length > 100;
+  if ((model.includes("FLUX") || model.includes("flux") || model.includes("janus")) && (hasImageUrl || hasBase64)) {
+    const key = (o.url as string) || (o.base64 as string).slice(0, 50);
+    if (!seen.has(key)) {
+      seen.add(key);
+      results.push({ url: o.url as string | undefined, base64: o.base64 as string | undefined, prompt: o.prompt as string | undefined });
+    }
+  }
+  for (const v of Object.values(o)) {
+    results.push(...extractAdImagesFromResult(v, seen));
+  }
+  return results;
 }
 
 // ── Agent-specific preview panels ──────────────────────────────────────────
@@ -427,8 +449,32 @@ function MarketingPreview({ state }: { state: AgentState }) {
     </div>
   );
 
+  const adImages = state.adImages ?? [];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {adImages.length > 0 && (
+        <div style={{ borderRadius: 20, border: "1px solid rgba(0,0,0,0.09)", background: "rgba(255,255,255,0.02)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--fg)", letterSpacing: "0.03em" }}>Ad Images</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {adImages.map((img, i) => {
+              const src = img.url ?? (img.base64 ? `data:image/png;base64,${img.base64}` : null);
+              if (!src) return null;
+              return (
+                <div key={i} style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: "1px solid rgba(0,0,0,0.12)" }}>
+                  <img src={src} alt={img.prompt ?? `Ad image ${i + 1}`} style={{ display: "block", maxWidth: 280, maxHeight: 280, objectFit: "cover" }} />
+                  {img.prompt && (
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)", padding: "4px 8px" }}>
+                      <span style={{ fontSize: 9, color: "rgba(255,255,255,0.8)", lineHeight: 1.4 }}>{img.prompt.slice(0, 100)}{img.prompt.length > 100 ? "…" : ""}</span>
+                    </div>
+                  )}
+                  <a href={src} target="_blank" rel="noopener noreferrer" style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.5)", borderRadius: 6, padding: "2px 6px", fontSize: 9, color: "#fff", textDecoration: "none" }}>↗</a>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {(reelScript || reelCaption) && CARD("📸 Instagram Reel", [["Script", reelScript], ["Caption", reelCaption], ["Hashtags", reelHashtags]])}
       {tiktokScript && CARD("🎵 TikTok", [["Script", tiktokScript]])}
       {(adHeadline || adBody) && CARD("📣 Meta Ad", [["Headline", adHeadline], ["Body", adBody], ["CTA", adCta]])}
@@ -1684,13 +1730,25 @@ export function GoalWorkspace({
           // Capture files from run_mvp_loop result
           const newFiles = Array.isArray(event.result?.files_preview) ? event.result.files_preview as string[] : cur.filesPreview;
           const newFilesCount = (event.result?.files_in_repo as number) ?? cur.filesCount;
-          next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text), visitedUrls: newVisited, currentUrl: newUrl ?? cur.currentUrl, commits: newCommits, filesPreview: newFiles, filesCount: newFilesCount };
+          // Capture ad images from generate_ad_image tool result
+          let newAdImages = cur.adImages;
+          if (event.tool === "generate_ad_image" && ok && (event.result?.url || event.result?.base64)) {
+            const img = { url: event.result.url as string | undefined, base64: event.result.base64 as string | undefined, prompt: event.result.prompt as string | undefined };
+            newAdImages = [...(cur.adImages ?? []), img];
+          }
+          next[agent] = { ...cur, log: addLog(ok ? "result" : "error", text), visitedUrls: newVisited, currentUrl: newUrl ?? cur.currentUrl, commits: newCommits, filesPreview: newFiles, filesCount: newFilesCount, adImages: newAdImages };
         } else if (event.type === "agent_thinking") {
           next[agent] = { ...cur, log: addLog("info", `Thinking… (step ${event.iteration})`) };
         } else if (event.type === "agent_done") {
           const result = event.result ?? {};
           const previewUrl = (result.url ?? result.deployment_url ?? result.project_url ?? result.github_url) as string | undefined;
-          next[agent] = { ...cur, status: "done", currentAction: null, currentTool: null, result, previewUrl, log: addLog("result", "Complete") };
+          // Extract any ad images embedded in the final result (in case tool_result events were missed)
+          const doneAdImages = extractAdImagesFromResult(result);
+          const mergedAdImages = doneAdImages.length > 0
+            ? [...(cur.adImages ?? []), ...doneAdImages].filter((img, i, arr) =>
+                arr.findIndex(x => (x.url && x.url === img.url) || (x.base64 && x.base64 === img.base64)) === i)
+            : cur.adImages;
+          next[agent] = { ...cur, status: "done", currentAction: null, currentTool: null, result, previewUrl, adImages: mergedAdImages, log: addLog("result", "Complete") };
         } else if (event.type === "agent_error") {
           next[agent] = { ...cur, status: "error", log: addLog("error", event.error ?? "Error") };
         } else if (event.type === "mirror_verdict") {
@@ -1741,7 +1799,8 @@ export function GoalWorkspace({
     const activeAction = a.currentAction ?? b.currentAction;
     const activeUrl = a.currentUrl ?? b.currentUrl;
     const mergedResult = a.result || b.result ? { ...(b.result ?? {}), ...(a.result ?? {}) } : null;
-    return { ...a, status: mergedStatus, log: mergedLog, visitedUrls: mergedUrls, commits: mergedCommits, currentTool: activeTool, currentAction: activeAction, currentUrl: activeUrl, result: mergedResult };
+    const mergedAdImages = [...(a.adImages ?? []), ...(b.adImages ?? [])];
+    return { ...a, status: mergedStatus, log: mergedLog, visitedUrls: mergedUrls, commits: mergedCommits, currentTool: activeTool, currentAction: activeAction, currentUrl: activeUrl, result: mergedResult, adImages: mergedAdImages.length ? mergedAdImages : undefined };
   }
 
   const visibleAgents: Record<string, AgentState> = {};
