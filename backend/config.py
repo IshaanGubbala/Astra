@@ -13,9 +13,12 @@ class Settings(BaseSettings):
     planner_model_base_url: str = "https://api.deepinfra.com/v1/openai"
     planner_model_api_key: str = ""
     planner_model_name: str = "deepseek-ai/DeepSeek-V4-Flash"
-    # Lighter model for non-reasoning agents (docs, copy, outreach, design specs)
+    # Lighter model for non-reasoning agents (design, web layout)
     light_model_base_url: str = "https://api.deepinfra.com/v1/openai"
     light_model_name: str = "meta-llama/Llama-3.3-70B-Instruct"
+    # High-output model for docs/copy/HTML (small input, large output, non-coding)
+    highoutput_model_base_url: str = "https://api.deepinfra.com/v1/openai"
+    highoutput_model_name: str = "openai/gpt-oss-120b"
     vertex_project: str = ""
     vertex_location: str = "us-central1"
 

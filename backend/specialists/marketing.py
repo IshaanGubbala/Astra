@@ -2,6 +2,7 @@
 from backend.core.agent import Agent
 from backend.tools.obsidian_logger import obsidian_log, obsidian_read, obsidian_append
 from backend.tools.social_content import generate_reel_package, generate_tiktok_package, generate_meta_ad
+from backend.tools._llm import generate_image as generate_ad_image
 from backend.tools.email_campaign import send_email_campaign, build_email_html
 from backend.tools.browser_research import search_and_fetch
 from backend.tools.composio_tools import (
@@ -22,6 +23,7 @@ def build_marketing_agent(**kwargs) -> Agent:
             "THEN CREATE:\n"
             "- generate_tiktok_package — 5 TikTok scripts using exact pain-point language from research\n"
             "- generate_reel_package — 3 Instagram Reels with hooks from trending research\n"
+            "- generate_ad_image(description=<ad concept>) — generate ad image via Janus-Pro-7B. Call once per ad variant with a specific visual concept.\n"
             "- generate_meta_ad — 3 ad variants (pain-point, benefit, social-proof angles)\n"
             "- build_email_html — welcome email + nurture sequence\n"
             "- composio_linkedin_post — post thought leadership content\n"
@@ -33,6 +35,7 @@ def build_marketing_agent(**kwargs) -> Agent:
             "generate_reel_package": generate_reel_package,
             "generate_tiktok_package": generate_tiktok_package,
             "generate_meta_ad": generate_meta_ad,
+            "generate_ad_image": generate_ad_image,
             "build_email_html": build_email_html,
             "send_email_campaign": send_email_campaign,
             "composio_gmail_send": composio_gmail_send,
