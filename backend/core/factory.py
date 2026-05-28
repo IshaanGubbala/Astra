@@ -49,7 +49,7 @@ def get_orchestrator() -> Orchestrator:
             "research_execution_2": build_research_agent(agent_name="research_execution_2", use_computer=True),
             "research_execution_3": build_research_agent(agent_name="research_execution_3", use_computer=True),
             "research_execution_4": build_research_agent(agent_name="research_execution_4", use_computer=True),
-            "web": build_web_agent(use_computer=True, **dict(model=settings.agent_model_name, model_base_url=settings.agent_model_base_url, model_api_key=settings.agent_model_api_key)),
+            "web": build_web_agent(use_computer=True, **_coder_kwargs),
             "marketing": build_marketing_agent(use_computer=True, **_highoutput_kwargs),
             "technical": build_technical_agent(use_computer=True, **_coder_kwargs),
             "legal": build_legal_agent(use_computer=True, **_highoutput_kwargs),

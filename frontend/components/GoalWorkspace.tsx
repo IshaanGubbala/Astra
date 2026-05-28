@@ -42,6 +42,7 @@ interface AgentState {
   salesLead?: string;
   designSpec?: string;
   adImages?: Array<{ url?: string; base64?: string; prompt?: string }>;
+  webQualityError?: string;
 }
 
 const PREVIEW_CARD: React.CSSProperties = {
@@ -49,6 +50,13 @@ const PREVIEW_CARD: React.CSSProperties = {
   border: "1px solid rgba(0,0,0,0.08)",
   background: "rgba(255,255,255,0.03)",
   padding: "10px 12px",
+};
+
+const PREVIEW_HEADER: React.CSSProperties = {
+  fontSize: 10,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase",
+  color: "var(--fg-mute)",
 };
 
 const AGENT_ICONS: Record<string, string> = {
@@ -164,11 +172,10 @@ function extractAdImagesFromResult(obj: unknown, seen = new Set<string>()): Arra
   const o = obj as Record<string, unknown>;
   const results: Array<{ url?: string; base64?: string; prompt?: string }> = [];
   // Check if this object looks like an image result
-  const model = typeof o.model === "string" ? o.model : "";
   const resolvedUrl = (typeof o.url === "string" && o.url) || (typeof o.image_url === "string" && o.image_url) || "";
   const hasImageUrl = /^https?:/.test(resolvedUrl);
   const hasBase64 = typeof o.base64 === "string" && o.base64.length > 100;
-  if ((model.includes("FLUX") || model.includes("flux") || model.includes("janus")) && (hasImageUrl || hasBase64)) {
+  if (hasImageUrl || hasBase64) {
     const key = resolvedUrl || (o.base64 as string).slice(0, 50);
     if (!seen.has(key)) {
       seen.add(key);
@@ -228,9 +235,15 @@ function WebPreview({ state }: { state: AgentState }) {
   const url = state.previewUrl ?? (state.result?.url ?? state.result?.deployment_url ?? state.result?.project_url) as string | undefined;
   const commits = state.commits ?? [];
   const usedFallback = state.log.some(l => l.text.includes("fallback template"));
+  const qualityError = state.webQualityError ?? (state.result?.web_quality_error as string | undefined);
   if (url) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%" }}>
+        {qualityError && (
+          <div style={{ borderRadius: 10, border: "1px solid rgba(192,57,43,0.3)", background: "rgba(192,57,43,0.08)", padding: "8px 10px", fontSize: 11, color: "#C97070" }}>
+            Web quality gate failed: {qualityError.replace(/_/g, " ")}
+          </div>
+        )}
         {usedFallback && (
           <div style={{ borderRadius: 10, border: "1px solid rgba(192,57,43,0.3)", background: "rgba(192,57,43,0.08)", padding: "8px 10px", fontSize: 11, color: "#C97070" }}>
             Fallback template was detected in this run. A quality retry should follow.
@@ -283,6 +296,12 @@ function TechnicalPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Technical Build</span>
+        <span style={{ fontSize: 11, color: state.status === "done" ? "#3D9E5F" : "#2563EB", fontWeight: 600 }}>
+          {state.status === "done" ? "Complete" : state.status === "running" ? "Running" : "Queued"}
+        </span>
+      </div>
       {(isBuilding || state.currentTool) && (
         <div style={{ borderRadius: 12, border: "1px solid rgba(37,99,235,0.2)", background: "rgba(37,99,235,0.08)", padding: "8px 10px", display: "grid", gap: 4 }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "#2563EB" }}>Live build status</div>
@@ -405,6 +424,18 @@ function DesignPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ ...PREVIEW_CARD, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, padding: "8px 10px" }}>
+        {[
+          ["Colors", String(allColors.length)],
+          ["Wireframes", String(Array.isArray(wireframes) ? wireframes.length : 0)],
+          ["Spec", spec ? "Yes" : "No"],
+        ].map(([k, v]) => (
+          <div key={k} style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 9, textTransform: "uppercase", color: "var(--fg-mute)", letterSpacing: "0.08em" }}>{k}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--fg)" }}>{v}</div>
+          </div>
+        ))}
+      </div>
       {allColors.length > 0 && (
         <div>
           <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", display: "block", marginBottom: 8 }}>Color Palette</span>
@@ -455,7 +486,7 @@ function DesignPreview({ state }: { state: AgentState }) {
         </div>
       )}
       {allColors.length === 0 && !spec && isDone && <ResultDump result={state.result} />}
-      {allColors.length === 0 && !spec && !isDone && <BuildingIndicator label="Designing…" />}
+      {allColors.length === 0 && !spec && !isDone && <BuildingIndicator label="Building design system…" tool={state.currentTool} />}
     </div>
   );
 }
@@ -514,6 +545,10 @@ function MarketingPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Campaign Output</span>
+        <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{hasContent ? "Assets ready" : "Generating"}</span>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
         {[
           ["Reels", reelScript ? "1+" : "0"],
@@ -673,6 +708,10 @@ function LegalPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Legal Artifacts</span>
+        <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{docs.length} doc{docs.length === 1 ? "" : "s"}</span>
+      </div>
       {docs.length > 1 && (
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid rgba(0,0,0,0.08)", paddingBottom: 8 }}>
           {docs.map((d, i) => (
@@ -710,6 +749,10 @@ function SalesPreview({ state }: { state: AgentState }) {
   const steps: unknown[] = Array.isArray(seq) ? seq : typeof seq === "string" ? (() => { try { return JSON.parse(seq); } catch { return []; } })() : [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Sales Pipeline</span>
+        <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{Array.isArray(leadsArr) ? leadsArr.length : lead ? 1 : 0} lead(s)</span>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
         {[
           ["Leads", String(Array.isArray(leadsArr) ? leadsArr.length : (lead ? 1 : 0))],
@@ -793,6 +836,10 @@ function OpsPreview({ state }: { state: AgentState }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ ...PREVIEW_CARD, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px" }}>
+        <span style={PREVIEW_HEADER}>Operations Deliverables</span>
+        <span style={{ fontSize: 11, color: "var(--fg-dim)" }}>{allPaths.length} file(s)</span>
+      </div>
       {title && <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>{title}</div>}
       {allPaths.map(p => <PdfEmbed key={p} path={p} height={300} />)}
       {sop && (
@@ -816,11 +863,18 @@ function ResultDump({ result }: { result: Record<string, unknown> | null }) {
   );
 }
 
-function BuildingIndicator({ label }: { label: string }) {
+function BuildingIndicator({ label, tool }: { label: string; tool?: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 0", color: "var(--fg-mute)", fontSize: 12 }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#2563EB", flexShrink: 0 }} className="animate-pulse" />
-      {label}
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "18px 0" }}>
+      <div style={{ height: 2, borderRadius: 999, background: "rgba(37,99,235,0.12)", overflow: "hidden" }}>
+        <div style={{ height: "100%", borderRadius: 999, background: "linear-gradient(90deg, #2563EB, #7C3AED, #2563EB)", backgroundSize: "200% 100%", animation: "shimmer 1.8s linear infinite" }} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#2563EB", flexShrink: 0 }} className="animate-pulse" />
+        <span style={{ fontSize: 11, color: "var(--fg-mute)" }}>{label}</span>
+        {tool && <span style={{ fontSize: 10, color: "#2563EB", fontFamily: "var(--font-jetbrains-mono)", marginLeft: "auto", opacity: 0.8 }}>{tool.replace(/_/g, "_")}</span>}
+      </div>
+      <style>{`@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }`}</style>
     </div>
   );
 }
@@ -829,10 +883,16 @@ function AgentPreview({ state }: { state: AgentState }) {
   switch (state.agent) {
     case "research":
     case "research_2":
+    case "research_3":
+    case "research_4":
     case "research_competitors":
     case "research_competitors_2":
+    case "research_competitors_3":
+    case "research_competitors_4":
     case "research_execution":
     case "research_execution_2":
+    case "research_execution_3":
+    case "research_execution_4":
       return <ResearchPreview state={state} />;
     case "web": return <WebPreview state={state} />;
     case "technical": return <TechnicalPreview state={state} />;
@@ -1882,12 +1942,71 @@ export function GoalWorkspace({
             ? [...(cur.adImages ?? []), ...doneAdImages].filter((img, i, arr) =>
                 arr.findIndex(x => (x.url && x.url === img.url) || (x.base64 && x.base64 === img.base64)) === i)
             : cur.adImages;
-          next[agent] = { ...cur, status: "done", currentAction: null, currentTool: null, result, previewUrl, adImages: mergedAdImages, log: addLog("result", "Complete") };
+          next[agent] = {
+            ...cur,
+            status: "done",
+            currentAction: null,
+            currentTool: null,
+            result,
+            previewUrl,
+            adImages: mergedAdImages,
+            webQualityError: (result.web_quality_error as string | undefined) ?? cur.webQualityError,
+            log: addLog("result", "Complete"),
+          };
         } else if (event.type === "agent_error") {
-          next[agent] = { ...cur, status: "error", log: addLog("error", event.error ?? "Error") };
+          const qualityError = typeof event.error === "string" && event.error.toLowerCase().includes("fallback template")
+            ? "fallback_template_persisted_after_retries"
+            : cur.webQualityError;
+          next[agent] = { ...cur, status: "error", webQualityError: qualityError, log: addLog("error", event.error ?? "Error") };
         } else if (event.type === "mirror_verdict") {
           next[agent] = { ...cur, mirrorVerdict: event.verdict, mirrorCritique: event.critique };
-        } else if (event.type === "goal_done") { setDone(true); }
+        } else if (event.type === "goal_done") {
+          const results = event.results as Record<string, unknown> | undefined;
+          if (results && typeof results === "object") {
+            const byAgent: Record<string, Record<string, unknown>> = {};
+            for (const [resultKey, value] of Object.entries(results)) {
+              if (!value || typeof value !== "object") continue;
+              const obj = value as Record<string, unknown>;
+              const candidateAgent = typeof obj.agent === "string" ? obj.agent : null;
+              if (candidateAgent) {
+                byAgent[candidateAgent] = obj;
+                continue;
+              }
+              // Orchestrator goal_done is keyed by task id in many paths.
+              // Backfill agent mapping using the live task_id registry.
+              const agentByTaskId = Object.values(next).find(s => s.task_id === resultKey)?.agent;
+              if (agentByTaskId) byAgent[agentByTaskId] = obj;
+            }
+            for (const [agentName, resultObj] of Object.entries(byAgent)) {
+              const curState = next[agentName] ?? {
+                task_id: "",
+                agent: agentName,
+                instruction: "",
+                status: "waiting" as const,
+                currentAction: null,
+                currentTool: null,
+                reasoning: null,
+                result: null,
+                log: [],
+                visitedUrls: [],
+                commits: [],
+              };
+              const doneAdImages = extractAdImagesFromResult(resultObj);
+              next[agentName] = {
+                ...curState,
+                status: "done",
+                currentAction: null,
+                currentTool: null,
+                result: (curState.result ?? resultObj) as Record<string, unknown>,
+                previewUrl: (resultObj.url ?? resultObj.deployment_url ?? resultObj.project_url) as string | undefined,
+                adImages: doneAdImages.length ? doneAdImages : curState.adImages,
+                filesPreview: Array.isArray(resultObj.files_preview) ? (resultObj.files_preview as string[]) : curState.filesPreview,
+                filesCount: (resultObj.files_in_repo as number | undefined) ?? curState.filesCount,
+              };
+            }
+          }
+          setDone(true);
+        }
         else if (event.type === "goal_error") { setError(event.error ?? "Unknown error"); }
 
         return next;

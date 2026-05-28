@@ -147,7 +147,7 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
         max_iterations=35,
         role=(
             "You are an elite deep research specialist. You produce investment-grade research. "
-            "You do NOT stop until you have completed ALL mandatory searches below.\n\n"
+            "Prioritize speed + quality: complete core coverage fast, then stop once evidence is sufficient.\n\n"
             "TOOLS:\n"
             "- search_and_fetch(query) — searches + fetches full content from multiple sites. PRIMARY tool.\n"
             "- fetch_and_read(url) — read a specific URL in full depth.\n"

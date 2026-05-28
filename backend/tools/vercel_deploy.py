@@ -637,7 +637,7 @@ Start the output with <!DOCTYPE html> immediately."""
     from backend.tools._llm import generate
     for attempt in range(3):
         try:
-            html = generate(prompt, model="instruct")
+            html = generate(prompt, model="fast")
             # Strip markdown fences then find DOCTYPE even if LLM added preamble text
             html = re.sub(r"```html?", "", html, flags=re.IGNORECASE).strip().rstrip("`").strip()
             doctype_pos = html.lower().find("<!doctype")
@@ -645,6 +645,13 @@ Start the output with <!DOCTYPE html> immediately."""
                 body = html[doctype_pos:]
                 if "astra-fallback-template" not in body.lower():
                     return body
+            # Accept custom HTML even if DOCTYPE is missing/malformed.
+            # This prevents unnecessary fallback-template usage when LLM output is otherwise valid.
+            html_tag_pos = html.lower().find("<html")
+            if html_tag_pos != -1:
+                body = html[html_tag_pos:]
+                if "astra-fallback-template" not in body.lower():
+                    return "<!DOCTYPE html>\n" + body
             logger.warning("LLM HTML attempt %d had no valid <!DOCTYPE>", attempt + 1)
         except Exception as e:
             logger.warning("LLM HTML generation attempt %d failed (%s)", attempt + 1, e)

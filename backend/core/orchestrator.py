@@ -34,6 +34,20 @@ class Orchestrator:
         "  design     — wireframes, color palettes, design specs, logo briefs, UI/UX mockups.\n"
     )
 
+    @staticmethod
+    def _is_web_fallback_html(html: str) -> bool:
+        if not isinstance(html, str):
+            return False
+        h = html.lower()
+        fallback_markers = (
+            "astra-fallback-template",
+            "--bg: #06080f",
+            "--bg2: #0d1117",
+            "define your goal",
+            "astra builds it",
+        )
+        return any(marker in h for marker in fallback_markers)
+
     async def _parse_tasks(self, raw: str) -> list[dict]:
         import json, re
         for pattern in [raw, raw[raw.find("{"):raw.rfind("}")+1]]:
@@ -305,9 +319,9 @@ class Orchestrator:
             initial_tasks = [{"id": "t1", "agent": "research", "instruction": f"Research the market and competitive landscape for: {goal}", "depends_on": []}]
 
         _RESEARCH_AGENTS = {
-            "research", "research_2", "research_3", "research_4",
-            "research_competitors", "research_competitors_2", "research_competitors_3", "research_competitors_4",
-            "research_execution", "research_execution_2", "research_execution_3", "research_execution_4",
+            "research",
+            "research_competitors",
+            "research_execution",
         }
         research_task = next((t for t in initial_tasks if t["agent"] == "research"), None)
         other_agents_initial = [t for t in initial_tasks if t["agent"] not in _RESEARCH_AGENTS]
@@ -325,12 +339,9 @@ class Orchestrator:
         # Run only configured research specialists in parallel.
         research_instruction = research_task["instruction"] if research_task else f"Research market, competitors, and execution strategy for: {goal}"
         candidate_research = [
-            ("r_market", "research"),
-            ("r_market_2", "research_2"),
-            ("r_competitors", "research_competitors"),
-            ("r_competitors_2", "research_competitors_2"),
-            ("r_execution", "research_execution"),
-            ("r_execution_2", "research_execution_2"),
+            ("r_market",          "research"),
+            ("r_competitors",     "research_competitors"),
+            ("r_execution",       "research_execution"),
         ]
         parallel_research_tasks = [
             {"id": tid, "agent": agent_name, "instruction": research_instruction, "depends_on": []}
@@ -387,37 +398,51 @@ class Orchestrator:
             await publish(session_id, {"type": "agent_start", "agent": agent_name, "task_id": tid, "instruction": task["instruction"]})
             result = await agent.run(ctx)
 
-            # Web quality gate: retry once with stronger instruction if fallback template was used.
+            # Web quality gate: retry with stricter instructions when fallback template is detected.
             if agent_name == "web":
-                html_result = result.get("html") if isinstance(result, dict) else None
-                used_fallback = isinstance(html_result, str) and "astra-fallback-template" in html_result
-                if used_fallback:
+                retry_count = 0
+                while retry_count < 2:
+                    html_result = result.get("html") if isinstance(result, dict) else None
+                    used_fallback = isinstance(html_result, str) and self._is_web_fallback_html(html_result)
+                    if not used_fallback:
+                        break
+                    retry_count += 1
                     await publish(session_id, {
                         "type": "agent_action_result",
                         "agent": agent_name,
                         "tool": "generate_landing_page_html",
-                        "result": {"error": "fallback template detected; rerunning web task with stricter instruction"},
+                        "result": {"error": f"fallback template detected (attempt {retry_count}); rerunning with stricter instruction"},
                     })
                     retry_ctx = AgentContext(
                         goal=(
                             task["instruction"]
                             + "\n\nSTRICT QUALITY RETRY: The previous HTML used fallback template output. "
                               "You MUST regenerate custom HTML with explicit brand colors/fonts and concrete product copy. "
-                              "Do not return fallback/template output."
+                              "Use semantic sections and realistic metrics. Do not return fallback/template output."
                         ),
                         founder_id=founder_id,
                         session_id=session_id,
-                        shared={**ctx.shared, "web_quality_retry": True},
+                        shared={**ctx.shared, "web_quality_retry": True, "web_quality_retry_count": retry_count},
                     )
                     await publish(session_id, {
                         "type": "agent_start",
                         "agent": agent_name,
-                        "task_id": f"{tid}_retry",
-                        "instruction": "Quality retry after fallback detection",
+                        "task_id": f"{tid}_retry_{retry_count}",
+                        "instruction": f"Quality retry {retry_count} after fallback detection",
                     })
                     retry_result = await agent.run(retry_ctx)
                     if isinstance(retry_result, dict):
                         result = retry_result
+                html_result = result.get("html") if isinstance(result, dict) else None
+                if isinstance(html_result, str) and self._is_web_fallback_html(html_result):
+                    if isinstance(result, dict):
+                        result["web_quality_error"] = "fallback_template_persisted_after_retries"
+                    await publish(session_id, {
+                        "type": "agent_error",
+                        "agent": agent_name,
+                        "task_id": tid,
+                        "error": "Web output still used fallback template after retries",
+                    })
 
             # Mirror review
             if proprietary_engine:
@@ -448,6 +473,8 @@ class Orchestrator:
             except Exception as _ole:
                 logger.warning("Obsidian auto-log failed for %s: %s", agent_name, _ole)
 
+            if isinstance(result, dict) and "agent" not in result:
+                result["agent"] = agent_name
             completed[tid] = result
             shared[f"result_{tid}"] = result
             shared[f"result_{agent_name}"] = result  # also keyed by agent name for downstream context
