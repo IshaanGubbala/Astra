@@ -38,7 +38,7 @@ def _format_tool_result(tool_name: str, result: Any) -> str:
                 lines.append(f"URL: {r.get('url', '')}")
                 content = r.get("page_content") or r.get("snippet", "")
                 if content:
-                    lines.append(content[:400])
+                    lines.append(content[:1500])
                 lines.append("")
             return "\n".join(lines)
         # fetch_page
