@@ -216,7 +216,7 @@ def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 
 
     env = _make_env()
     cmd = [
-        OPENCLAUDE_BIN, "--print", "--dangerously-skip-permissions",
+        OPENCLAUDE_BIN, "--print", "--allow-dangerously-skip-permissions", "--dangerously-skip-permissions",
         "--provider", "openai",
         "--model", env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Flash"),
     ]
