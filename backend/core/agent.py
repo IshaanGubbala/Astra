@@ -38,7 +38,7 @@ def _format_tool_result(tool_name: str, result: Any) -> str:
                 lines.append(f"URL: {r.get('url', '')}")
                 content = r.get("page_content") or r.get("snippet", "")
                 if content:
-                    lines.append(content[:1500])
+                    lines.append(content[:400])
                 lines.append("")
             return "\n".join(lines)
         # fetch_page
@@ -81,15 +81,14 @@ def _format_tool_result(tool_name: str, result: Any) -> str:
             return "\n".join(lines)
         return json.dumps(result)
 
-    # Default: compact JSON (not full dump for large results)
+    # Default: compact JSON — hard cap at 1000 chars to limit context bloat
     try:
         text = json.dumps(result, indent=2)
-        if len(text) > 3000:
-            # Truncate large results, keeping structure
-            return text[:3000] + "\n... (truncated)"
+        if len(text) > 1000:
+            return text[:1000] + "\n... (truncated)"
         return text
     except Exception:
-        return str(result)
+        return str(result)[:1000]
 
 
 

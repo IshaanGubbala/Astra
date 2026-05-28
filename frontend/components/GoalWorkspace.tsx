@@ -60,7 +60,7 @@ const PREVIEW_HEADER: React.CSSProperties = {
 };
 
 const AGENT_ICONS: Record<string, string> = {
-  research: "🔬", research_2: "🔬", research_competitors: "🏆", research_competitors_2: "🏆", research_execution: "📋", research_execution_2: "📋",
+  research: "🔬", research_competitors: "🏆", research_execution: "📋",
   web: "🌐", marketing: "📢", technical: "⚙️",
   legal: "⚖️", ops: "🚀", sales: "🤝", design: "🎨",
 };
@@ -900,17 +900,8 @@ function BuildingIndicator({ label, tool }: { label: string; tool?: string | nul
 function AgentPreview({ state }: { state: AgentState }) {
   switch (state.agent) {
     case "research":
-    case "research_2":
-    case "research_3":
-    case "research_4":
     case "research_competitors":
-    case "research_competitors_2":
-    case "research_competitors_3":
-    case "research_competitors_4":
     case "research_execution":
-    case "research_execution_2":
-    case "research_execution_3":
-    case "research_execution_4":
       return <ResearchPreview state={state} />;
     case "web": return <WebPreview state={state} />;
     case "technical": return <TechnicalPreview state={state} />;
@@ -1903,8 +1894,7 @@ export function GoalWorkspace({
               setPendingDetailedNodes([]);
             }
           }
-          const _PAIR_MAP: Record<string, string> = { research_2: "research", research_competitors_2: "research_competitors", research_execution_2: "research_execution" };
-          setActiveAgent(_PAIR_MAP[agent] ?? agent);
+          setActiveAgent(agent);
           next[agent] = { ...cur, status: "running", instruction: event.instruction ?? cur.instruction, task_id: event.task_id ?? cur.task_id, log: addLog("info", "Started") };
         } else if (event.type === "agent_action") {
           const rawArgs = event.args;
@@ -2045,12 +2035,7 @@ export function GoalWorkspace({
     }
   }, [done, sessionId]);
 
-  // _2 variants are merged into their base for display — strip them from the sidebar list
-  const PAIR_MAP: Record<string, string> = {
-    research_2: "research",
-    research_competitors_2: "research_competitors",
-    research_execution_2: "research_execution",
-  };
+  const PAIR_MAP: Record<string, string> = {};
   // Also include agents that ran but aren't in planTasks (e.g. cached sessions with old planTasks)
   const agentsWithData = Object.keys(agents).filter(a => agents[a].status !== "waiting" || agents[a].log.length > 0);
   const rawAgentList = planTasks.length > 0

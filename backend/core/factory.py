@@ -43,17 +43,8 @@ def get_orchestrator() -> Orchestrator:
         )
         specialists = {
             "research": build_research_agent(agent_name="research", use_computer=True),
-            "research_2": build_research_agent(agent_name="research_2", use_computer=True),
-            "research_3": build_research_agent(agent_name="research_3", use_computer=True),
-            "research_4": build_research_agent(agent_name="research_4", use_computer=True),
             "research_competitors": build_research_agent(agent_name="research_competitors", use_computer=True),
-            "research_competitors_2": build_research_agent(agent_name="research_competitors_2", use_computer=True),
-            "research_competitors_3": build_research_agent(agent_name="research_competitors_3", use_computer=True),
-            "research_competitors_4": build_research_agent(agent_name="research_competitors_4", use_computer=True),
             "research_execution": build_research_agent(agent_name="research_execution", use_computer=True),
-            "research_execution_2": build_research_agent(agent_name="research_execution_2", use_computer=True),
-            "research_execution_3": build_research_agent(agent_name="research_execution_3", use_computer=True),
-            "research_execution_4": build_research_agent(agent_name="research_execution_4", use_computer=True),
             "web": build_web_agent(use_computer=True, **_coder_kwargs),
             "marketing": build_marketing_agent(use_computer=True, **_highoutput_kwargs),
             "technical": build_technical_agent(use_computer=True, **_coder_kwargs),

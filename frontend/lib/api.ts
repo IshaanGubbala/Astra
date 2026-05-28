@@ -398,17 +398,8 @@ export async function updateBrainProposal(
 
 export const AGENT_LABELS: Record<string, string> = {
   research: "Market Research",
-  research_2: "Market Research II",
-  research_3: "Market Research III",
-  research_4: "Market Research IV",
   research_competitors: "Competitor Intel",
-  research_competitors_2: "Competitor Intel II",
-  research_competitors_3: "Competitor Intel III",
-  research_competitors_4: "Competitor Intel IV",
   research_execution: "Execution Strategy",
-  research_execution_2: "Execution Strategy II",
-  research_execution_3: "Execution Strategy III",
-  research_execution_4: "Execution Strategy IV",
   web: "Web & Landing Page",
   marketing: "Marketing & Social",
   technical: "Technical Architecture",
@@ -418,7 +409,7 @@ export const AGENT_LABELS: Record<string, string> = {
   design: "Design & Brand",
 };
 
-export const AGENT_ORDER = ["research", "research_2", "research_3", "research_4", "research_competitors", "research_competitors_2", "research_competitors_3", "research_competitors_4", "research_execution", "research_execution_2", "research_execution_3", "research_execution_4", "web", "marketing", "technical", "legal", "ops", "sales", "design"];
+export const AGENT_ORDER = ["research", "research_competitors", "research_execution", "web", "marketing", "technical", "legal", "ops", "sales", "design"];
 
 const AGENT_ORDER_INDEX = new Map(AGENT_ORDER.map((agent, index) => [agent, index]));
 
