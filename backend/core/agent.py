@@ -424,7 +424,26 @@ class Agent:
             else:
                 messages.append({"role": "user", "content": "Unknown action. Use: tool, delegate, computer_use, or done."})
 
-        logger.warning("%s hit MAX_ITERATIONS (%d) — returning partial result", self.name, MAX_ITERATIONS)
+        logger.warning("%s hit MAX_ITERATIONS (%d) — forcing synthesis from gathered data", self.name, MAX_ITERATIONS)
+        # Force one final synthesis call using everything gathered so far
+        try:
+            gathered = "\n\n".join(
+                f"[{name}]: {json.dumps(res)[:2000]}" for name, res in _tool_results
+            ) or "No tool results gathered."
+            synthesis_messages = messages + [{"role": "user", "content": (
+                f"You have reached the iteration limit. Synthesize ALL findings gathered above into a final structured response.\n"
+                f"Gathered data summary:\n{gathered[:6000]}\n\n"
+                "Respond with JSON: {\"action\": \"done\", \"output\": {\"summary\": \"...\", \"findings\": [...], \"sources\": [...]}}"
+            )}]
+            raw = await asyncio.to_thread(self._call_llm, synthesis_messages)
+            parsed = self._parse_json(raw)
+            if parsed and parsed.get("action") == "done":
+                output = parsed.get("output", {})
+                output["status"] = "partial"
+                await self._emit(ctx, "agent_done", output=output)
+                return output
+        except Exception as e:
+            logger.warning("%s forced synthesis failed: %s", self.name, e)
         return {"status": "max_iterations_reached", "agent": self.name}
 
     def _missing_required_output(self, output: dict[str, Any]) -> list[str]:
