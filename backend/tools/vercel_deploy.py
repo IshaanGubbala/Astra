@@ -637,10 +637,12 @@ Start the output with <!DOCTYPE html> immediately."""
     try:
         from backend.tools._llm import generate
         html = generate(prompt)
-        html = re.sub(r"^```html?\s*", "", html, flags=re.IGNORECASE | re.MULTILINE).strip().rstrip("`").strip()
-        if html.startswith("<!"):
-            return html
-        logger.warning("LLM HTML didn't start with <!DOCTYPE — falling back to template")
+        # Strip markdown fences then find DOCTYPE even if LLM added preamble text
+        html = re.sub(r"```html?", "", html, flags=re.IGNORECASE).strip().rstrip("`").strip()
+        doctype_pos = html.lower().find("<!doctype")
+        if doctype_pos != -1:
+            return html[doctype_pos:]
+        logger.warning("LLM HTML had no <!DOCTYPE — falling back to template")
     except Exception as e:
         logger.warning("LLM HTML generation failed (%s) — using template", e)
 

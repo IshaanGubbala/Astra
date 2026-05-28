@@ -98,11 +98,14 @@ function extractColors(log: LogEntry[]): string[] {
 
 function extractHexFromObj(obj: unknown, depth = 0): string[] {
   if (depth > 4 || !obj || typeof obj !== "object") return [];
-  return Object.values(obj as Record<string, unknown>).flatMap(v =>
-    typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)
-      ? [v as string]
-      : extractHexFromObj(v, depth + 1)
-  );
+  return Object.values(obj as Record<string, unknown>).flatMap(v => {
+    if (typeof v === "string") {
+      // exact hex value OR hex codes embedded inside a longer string
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) return [v];
+      return Array.from(v.matchAll(/#[0-9a-fA-F]{6}\b/g), m => m[0]);
+    }
+    return extractHexFromObj(v, depth + 1);
+  });
 }
 
 // Find the first nested object that has ≥2 hex string values — that's the color palette
