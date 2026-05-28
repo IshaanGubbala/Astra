@@ -41,7 +41,8 @@ def generate(prompt: str, max_tokens: int | None = None, json_mode: bool = False
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
     )
-    kwargs["max_tokens"] = max_tokens or 4096
+    if max_tokens:
+        kwargs["max_tokens"] = max_tokens
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     resp = client.chat.completions.create(**kwargs, timeout=300.0)
