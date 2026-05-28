@@ -568,7 +568,7 @@ export default function PaymentsPage() {
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                         <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--fg-mute)" }} tickLine={false} axisLine={false} interval={2} />
                         <YAxis tickFormatter={fmtShort} tick={{ fontSize: 10, fill: "var(--fg-mute)" }} tickLine={false} axisLine={false} width={44} />
-                        <Tooltip {...tooltipStyle} formatter={(v: number) => [fmt(v), "Revenue"]} />
+                        <Tooltip {...tooltipStyle} formatter={(v) => [fmt(Number(v)), "Revenue"]} />
                         <Area type="monotone" dataKey="revenue" stroke="#60a5fa" strokeWidth={2} fill="url(#revenueGrad)" dot={false} activeDot={{ r: 4, fill: "#60a5fa" }} />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -592,7 +592,7 @@ export default function PaymentsPage() {
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                           <XAxis dataKey="month" tick={{ fontSize: 10, fill: "var(--fg-mute)" }} tickLine={false} axisLine={false} />
                           <YAxis tickFormatter={fmtShort} tick={{ fontSize: 10, fill: "var(--fg-mute)" }} tickLine={false} axisLine={false} width={44} />
-                          <Tooltip {...tooltipStyle} formatter={(v: number) => [fmt(v), "Payout"]} />
+                          <Tooltip {...tooltipStyle} formatter={(v) => [fmt(Number(v)), "Payout"]} />
                           <Bar dataKey="amount" fill="#4ade80" radius={[6, 6, 0, 0]} />
                         </BarChart>
                       </ResponsiveContainer>
@@ -612,7 +612,7 @@ export default function PaymentsPage() {
                               <Cell key={i} fill={statusColor(entry.name)} opacity={0.85} />
                             ))}
                           </Pie>
-                          <Tooltip {...tooltipStyle} formatter={(v: number, name: string) => [v, name]} />
+                          <Tooltip {...tooltipStyle} formatter={(v, name) => [String(v), String(name)]} />
                           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: "var(--fg-mute)" }} />
                         </PieChart>
                       </ResponsiveContainer>
