@@ -156,7 +156,7 @@ class Agent:
             messages=messages,
             temperature=0.1,
             response_format={"type": "json_object"},
-            timeout=120.0,
+            timeout=300.0,
         )
         msg = resp.choices[0].message
         content = msg.content or ""
