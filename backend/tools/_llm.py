@@ -45,7 +45,7 @@ def generate(prompt: str, max_tokens: int | None = None, json_mode: bool = False
         kwargs["max_tokens"] = max_tokens
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
-    resp = client.chat.completions.create(**kwargs, timeout=120.0)
+    resp = client.chat.completions.create(**kwargs, timeout=300.0)
     content = resp.choices[0].message.content or ""
     return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
