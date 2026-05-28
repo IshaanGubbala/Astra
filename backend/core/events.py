@@ -26,16 +26,22 @@ _REDIS_TTL = 8 * 3600  # 8 hours
 
 # ── Redis helpers ──────────────────────────────────────────────────────────────
 
+_redis_cache: list = [None, False]  # [client_or_None, initialized]
+
+
 def _redis():
-    """Return a connected Redis client or None if unavailable."""
-    try:
-        import redis as _redis_lib
-        from backend.config import settings
-        r = _redis_lib.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=1)
-        r.ping()
-        return r
-    except Exception:
-        return None
+    """Return a cached Redis client or None if unavailable. Lazy-init, never re-pings."""
+    if not _redis_cache[1]:
+        _redis_cache[1] = True
+        try:
+            import redis as _redis_lib
+            from backend.config import settings
+            r = _redis_lib.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=1)
+            r.ping()
+            _redis_cache[0] = r
+        except Exception:
+            _redis_cache[0] = None
+    return _redis_cache[0]
 
 
 def _redis_append(session_id: str, event_id: int, event: dict) -> None:

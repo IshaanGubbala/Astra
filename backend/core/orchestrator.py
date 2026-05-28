@@ -182,7 +182,7 @@ class Orchestrator:
         return []
 
     async def _expand_goal(self, goal: str, session_id: str) -> str:
-        """Expand a terse founder prompt into a rich, specific goal using Llama 3.3 70B."""
+        """Expand a terse founder prompt into a rich, specific goal."""
         from backend.config import settings
         from backend.core.events import publish
         system = (
@@ -195,22 +195,19 @@ class Orchestrator:
             "Output ONLY the expanded goal. No headers, no lists, no meta-commentary."
         )
         try:
-            from openai import OpenAI
-            client = OpenAI(
-                base_url=settings.planner_model_base_url or "https://api.deepinfra.com/v1/openai",
-                api_key=settings.planner_model_api_key or settings.agent_model_api_key,
-            )
             resp = await asyncio.to_thread(
-                client.chat.completions.create,
-                model="meta-llama/Llama-3.3-70B-Instruct",
+                self.planner._get_llm().chat.completions.create,
+                model=self.planner.model,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": goal},
                 ],
-                max_tokens=400,
+                max_tokens=300,
                 temperature=0.7,
             )
             expanded = resp.choices[0].message.content.strip()
+            import re as _re
+            expanded = _re.sub(r"<think>.*?</think>", "", expanded, flags=_re.DOTALL).strip()
             if expanded and len(expanded) > len(goal):
                 logger.info("Goal expanded: %s → %s", goal[:60], expanded[:80])
                 await publish(session_id, {"type": "goal_expanded", "original": goal, "expanded": expanded})
@@ -248,11 +245,12 @@ class Orchestrator:
 
         from backend.core.events import publish
 
-        # Expand the goal with Llama 3.3 70B before anything else
-        goal = await self._expand_goal(goal, session_id)
-
-        # Phase 1: initial plan — research always runs first
-        initial_tasks = await self._initial_plan(goal)
+        # Expand goal and build initial plan in parallel — both only need the original goal
+        expanded_goal, initial_tasks = await asyncio.gather(
+            self._expand_goal(goal, session_id),
+            self._initial_plan(goal),
+        )
+        goal = expanded_goal
         if not initial_tasks:
             initial_tasks = [{"id": "t1", "agent": "research", "instruction": f"Research the market and competitive landscape for: {goal}", "depends_on": []}]
 
