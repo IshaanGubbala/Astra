@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     planner_model_base_url: str = "https://api.deepinfra.com/v1/openai"
     planner_model_api_key: str = ""
     planner_model_name: str = "deepseek-ai/DeepSeek-V4-Flash"
+    # Lighter model for non-reasoning agents (docs, copy, outreach, design specs)
+    light_model_base_url: str = "https://api.deepinfra.com/v1/openai"
+    light_model_name: str = "meta-llama/Llama-3.3-70B-Instruct"
     vertex_project: str = ""
     vertex_location: str = "us-central1"
 

@@ -6,7 +6,7 @@ Pass model="claude" for high-quality creative output (landing pages, design docs
 import re
 from backend.config import settings
 
-_FAST_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+_FAST_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
 _DI_BASE = "https://api.deepinfra.com/v1/openai"
 
 

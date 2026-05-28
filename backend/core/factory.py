@@ -25,6 +25,11 @@ def get_orchestrator() -> Orchestrator:
             model_base_url=settings.planner_model_base_url,
             model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         )
+        _light_kwargs = dict(
+            model=settings.light_model_name,
+            model_base_url=settings.light_model_base_url,
+            model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+        )
         specialists = {
             "research": build_research_agent(agent_name="research", use_computer=True),
             "research_2": build_research_agent(agent_name="research_2", use_computer=True),
@@ -32,13 +37,13 @@ def get_orchestrator() -> Orchestrator:
             "research_competitors_2": build_research_agent(agent_name="research_competitors_2", use_computer=True),
             "research_execution": build_research_agent(agent_name="research_execution", use_computer=True),
             "research_execution_2": build_research_agent(agent_name="research_execution_2", use_computer=True),
-            "web": build_web_agent(use_computer=True, **_coder_kwargs),
-            "marketing": build_marketing_agent(use_computer=True),
+            "web": build_web_agent(use_computer=True, **_light_kwargs),
+            "marketing": build_marketing_agent(use_computer=True, **_light_kwargs),
             "technical": build_technical_agent(use_computer=True, **_coder_kwargs),
-            "legal": build_legal_agent(use_computer=True),
-            "ops": build_ops_agent(use_computer=True),
-            "sales": build_sales_agent(use_computer=False),
-            "design": build_design_agent(use_computer=False),
+            "legal": build_legal_agent(use_computer=True, **_light_kwargs),
+            "ops": build_ops_agent(use_computer=True, **_light_kwargs),
+            "sales": build_sales_agent(use_computer=False, **_light_kwargs),
+            "design": build_design_agent(use_computer=False, **_light_kwargs),
         }
         from backend.tools.company_brain import (
             add_company_brain_record,
