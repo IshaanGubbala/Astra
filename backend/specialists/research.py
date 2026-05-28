@@ -4,7 +4,7 @@ from backend.core.agent import Agent, AgentContext
 from backend.tools.obsidian_logger import obsidian_log, obsidian_read, obsidian_append
 from backend.tools.browser_research import search_and_fetch, fetch_and_read, research_papers
 from backend.tools.patent_search import patent_search
-from backend.tools.web_search import news_search, deep_research
+from backend.tools.web_search import news_search
 from backend.tools.video_research import youtube_research, tiktok_research
 
 
@@ -79,8 +79,7 @@ _FOCUS_ROLES = {
     ),
     "research_competitors": (
         "COMPETITOR INTELLIGENCE (run ALL 15):\n"
-        "1. deep_research('named companies and platforms in the {topic} space — list every startup, scaleup, and incumbent with funding and description')\n"
-        "2. search_and_fetch('{topic} top companies platforms list 2024 2025')\n"
+        "1. search_and_fetch('{topic} top companies platforms list 2024 2025')\n"
         "2. search_and_fetch('{topic} startups to watch named companies founded 2020 2021 2022 2023 2024')\n"
         "3. search_and_fetch('{topic} crunchbase funding raised valuation startup')\n"
         "4. search_and_fetch('{topic} Y Combinator a16z sequoia backed startup company')\n"
@@ -135,7 +134,7 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
     auto_patent = _make_auto_logging_tool(patent_search, "patent_search", ctx_holder, log_name)
     auto_youtube = _make_auto_logging_tool(youtube_research, "youtube_research", ctx_holder, log_name)
     auto_tiktok = _make_auto_logging_tool(tiktok_research, "tiktok_research", ctx_holder, log_name)
-    auto_deep = _make_auto_logging_tool(deep_research, "deep_research", ctx_holder, log_name)
+
 
     from backend.config import settings
     focus_searches = _FOCUS_ROLES.get(agent_name, _FOCUS_ROLES["research"])
@@ -156,7 +155,6 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
             "- patent_search(query) — IP landscape.\n"
             "- youtube_research(query) — YouTube video metadata + transcripts for competitor/creator analysis.\n"
             "- tiktok_research(query) — TikTok video metadata + captions for viral trend analysis.\n"
-            "- deep_research(query) — Gemini + Google Search grounded research. Best for finding named companies, market maps, and entities.\n"
             "- obsidian_log — FINAL step only after ALL searches complete.\n\n"
             "YOUR MANDATORY SEARCH SEQUENCE (replace {topic} with the actual subject):\n\n"
             + focus_searches
@@ -169,7 +167,6 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
             "patent_search": auto_patent,
             "youtube_research": auto_youtube,
             "tiktok_research": auto_tiktok,
-            "deep_research": auto_deep,
             "obsidian_log": obsidian_log,
             "obsidian_read": obsidian_read,
             "obsidian_append": obsidian_append,
