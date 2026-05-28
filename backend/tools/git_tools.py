@@ -187,7 +187,7 @@ def _make_env() -> dict:
     env = os.environ.copy()
     env["OPENAI_BASE_URL"] = "https://api.deepinfra.com/v1/openai"
     env["OPENAI_API_KEY"] = deepinfra_key
-    env["OPENAI_MODEL"] = "deepseek-ai/DeepSeek-V4-Pro"
+    env["OPENAI_MODEL"] = "deepseek-ai/DeepSeek-V4-Flash"
     return env
 
 
@@ -203,7 +203,7 @@ def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 
     cmd = [
         OPENCLAUDE_BIN, "--print", "--dangerously-skip-permissions",
         "--provider", "openai",
-        "--model", env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Pro"),
+        "--model", env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Flash"),
     ]
     if session_id:
         cmd += ["--session-id", session_id]

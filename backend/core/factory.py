@@ -21,7 +21,7 @@ def get_orchestrator() -> Orchestrator:
     global _orchestrator
     if _orchestrator is None:
         _coder_kwargs = dict(
-            model="deepseek-ai/DeepSeek-V4-Pro",
+            model="deepseek-ai/DeepSeek-V4-Flash",
             model_base_url=settings.planner_model_base_url,
             model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         )

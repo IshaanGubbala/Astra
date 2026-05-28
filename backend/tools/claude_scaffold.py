@@ -87,7 +87,7 @@ Start with file 1 immediately. Write each file completely before moving to the n
 
             result = subprocess.run(
                 [OPENCLAUDE_BIN, "--print", "--dangerously-skip-permissions",
-                 "--provider", "openai", "--model", "deepseek-ai/DeepSeek-V4-Pro",
+                 "--provider", "openai", "--model", "deepseek-ai/DeepSeek-V4-Flash",
                  "--session-id", oc_session_id, full_task],
                 cwd=tmpdir,
                 capture_output=True,
