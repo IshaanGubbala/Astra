@@ -14,7 +14,7 @@ _FAST_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 _LARGE_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 _INSTRUCT_MODEL = "Qwen/Qwen3-32B"
 _IMAGE_MODEL = "black-forest-labs/FLUX-2-pro"
-_PROMPT_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
+_PROMPT_MODEL = "Qwen/Qwen3.5-9B"
 _DI_BASE = "https://api.deepinfra.com/v1/openai"
 
 

@@ -30,7 +30,12 @@ def get_orchestrator() -> Orchestrator:
             model_base_url=settings.highoutput_model_base_url,
             model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
         )
-        # Qwen3-235B for agents that must follow strict prompt rules
+        _small_kwargs = dict(
+            model="Qwen/Qwen3.5-9B",
+            model_base_url=settings.agent_model_base_url,
+            model_api_key=settings.planner_model_api_key or settings.agent_model_api_key,
+        )
+        # Qwen3-32B for agents that must follow strict prompt rules
         _instruct_kwargs = dict(
             model="Qwen/Qwen3-32B",
             model_base_url=settings.agent_model_base_url,
@@ -54,7 +59,7 @@ def get_orchestrator() -> Orchestrator:
             "technical": build_technical_agent(use_computer=True, **_coder_kwargs),
             "legal": build_legal_agent(use_computer=True, **_highoutput_kwargs),
             "ops": build_ops_agent(use_computer=True, **_highoutput_kwargs),
-            "sales": build_sales_agent(use_computer=False, **_coder_kwargs),
+            "sales": build_sales_agent(use_computer=False, **_small_kwargs),
             "design": build_design_agent(use_computer=False, **_instruct_kwargs),
         }
         from backend.tools.company_brain import (
