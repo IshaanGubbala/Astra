@@ -30,6 +30,8 @@ _BLOCKED_DOMAINS = {
     "quora.com", "glassdoor.com", "ziprecruiter.com",
     # Redirect-loops / auth-required
     "statista.com", "facebook.com", "reddit.com",
+    # Consistently timeout/block scrapers
+    "mckinsey.com", "enrichlabs.ai", "metro.us",
 }
 
 
@@ -57,8 +59,13 @@ def _http_get(url: str, timeout: float = 20.0) -> str:
     except Exception:
         pass
     try:
+        import ssl, certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = None
+    try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
             data = r.read()
             if r.headers.get("Content-Encoding") == "gzip":
                 data = gzip.decompress(data)
@@ -122,7 +129,8 @@ def fetch_and_read(url: str) -> dict:
     except Exception as e:
         es = str(e)
         # Expected HTTP errors — silent, fall back to snippet
-        if any(code in es for code in ("400", "401", "403", "404", "410", "429", "302", "301", "503", "521", "444", "codec")):
+        if any(code in es for code in ("400", "401", "403", "404", "410", "429", "302", "301", "503", "521", "444", "codec",
+                                        "SSL", "CERTIFICATE", "certificate", "timed out", "Operation timed out", "TLSV1")):
             return {"url": url, "skipped": es[:40], "content": ""}
         logger.warning("fetch_and_read failed for %s: %s", url, e)
         return {"url": url, "skipped": str(e)[:80], "content": ""}

@@ -237,6 +237,15 @@ class Orchestrator:
         except Exception as _pe:
             logger.warning("Proprietary engine pre_run skipped: %s", _pe, exc_info=True)
 
+        try:
+            from backend.tools.company_brain import company_brain_context, sync_company_brain
+            await asyncio.to_thread(sync_company_brain, founder_id, None)
+            shared["company_brain_context"] = await asyncio.to_thread(
+                company_brain_context, founder_id, goal, 8
+            )
+        except Exception as _cb:
+            logger.warning("Company brain pre-run context skipped: %s", _cb)
+
         from backend.core.events import publish
 
         # Expand the goal with Llama 3.3 70B before anything else
@@ -389,17 +398,19 @@ class Orchestrator:
                         "planner_model": self.planner.model,
                         "phase": "detailed",
                     })
-                    # Emit rich branching plan tree for the Plan overlay UI
-                    try:
-                        _rs = research_result.get("obsidian_content") or ""
-                        if not _rs:
-                            import json as _json
-                            _rs = _json.dumps(research_result, default=str)[:5000]
-                        tree_nodes = await self._generate_detailed_plan(goal, _rs, detailed_tasks)
-                        if tree_nodes:
-                            await publish(session_id, {"type": "detailed_plan", "nodes": tree_nodes})
-                    except Exception as _dp_err:
-                        logger.warning("detailed_plan generation failed: %s", _dp_err)
+                    # Emit rich branching plan tree in background — don't block agents
+                    async def _bg_detailed_plan():
+                        try:
+                            _rs = research_result.get("obsidian_content") or ""
+                            if not _rs:
+                                import json as _json
+                                _rs = _json.dumps(research_result, default=str)[:5000]
+                            tree_nodes = await self._generate_detailed_plan(goal, _rs, detailed_tasks)
+                            if tree_nodes:
+                                await publish(session_id, {"type": "detailed_plan", "nodes": tree_nodes})
+                        except Exception as _dp_err:
+                            logger.warning("detailed_plan generation failed: %s", _dp_err)
+                    asyncio.create_task(_bg_detailed_plan())
                     tasks = parallel_research_tasks + detailed_tasks
                 else:
                     tasks = parallel_research_tasks + other_agents_initial
@@ -483,6 +494,15 @@ class Orchestrator:
             shared["company_vault_context"] = "\n\n".join(vault_summary_parts)
         except Exception as _ve:
             logger.warning("Vault load failed: %s", _ve)
+
+        try:
+            from backend.tools.company_brain import company_brain_context, sync_company_brain
+            await asyncio.to_thread(sync_company_brain, founder_id, None)
+            shared["company_brain_context"] = await asyncio.to_thread(
+                company_brain_context, founder_id, instruction, 10
+            )
+        except Exception as _cb:
+            logger.warning("Company brain continuation context skipped: %s", _cb)
 
         # If agents explicitly specified, skip planning
         if agents:

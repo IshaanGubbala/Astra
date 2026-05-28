@@ -1,4 +1,4 @@
-"""Sales specialist — lead discovery, inbox warming, outbound sequences, CRM tracking."""
+"""Sales specialist — lead discovery, outreach sequences, CRM tracking."""
 from backend.core.agent import Agent
 from backend.tools.obsidian_logger import obsidian_log, obsidian_read, obsidian_append
 from backend.tools.lead_finder import find_leads, enrich_lead, build_outreach_sequence
@@ -16,18 +16,26 @@ def build_sales_agent(**kwargs) -> Agent:
     return Agent(
         name="sales",
         role=(
-            "You are a sales specialist. Find real leads, enrich them, and build outreach sequences.\n\n"
-            "LEAD DISCOVERY — use search_and_fetch for deep lead mining, NOT find_leads alone:\n"
-            "1. search_and_fetch('site:reddit.com <product_category> frustrated complaint alternative') — mine Reddit threads for real users complaining\n"
-            "2. search_and_fetch('site:reddit.com <competitor_name> problems issues') — find dissatisfied competitor users\n"
-            "3. search_and_fetch('<niche> creator TikTok Instagram complaining <pain_point>') — find social creators\n"
-            "4. fetch_and_read(reddit_thread_url) — extract real usernames, specific complaints, contact signals\n"
-            "5. find_leads(industry=<niche>) — supplement with structured search\n\n"
-            "From real leads found: enrich_lead → build_outreach_sequence → build_crm_contact → track_outreach.\n"
-            "create_warming_schedule and generate_spf_dkim_instructions set up email deliverability.\n"
-            "send_email_campaign sends sequences.\n"
-            "If you find 0 leads from direct search, mine Reddit/Product Hunt/Hacker News comments instead.\n"
-            "Call obsidian_log then done with real lead names, pain points, and sequences."
+            "You are a sales specialist. Find real leads and build outreach sequences.\n\n"
+            "STEP 1 — Read context:\n"
+            "obsidian_read(agent='research_competitors', founder_id=<FOUNDER_ID>) — get named competitors and target audience.\n"
+            "obsidian_read(agent='research', founder_id=<FOUNDER_ID>) — get target customer segments.\n\n"
+            "STEP 2 — Find leads using WORKING sources (NOT Reddit — blocked):\n"
+            "a) search_and_fetch('site:producthunt.com <product_category> makers') — Product Hunt makers\n"
+            "b) search_and_fetch('site:indiehackers.com <product_category> founder') — Indie Hackers founders\n"
+            "c) search_and_fetch('site:news.ycombinator.com show HN <product_category>') — HN submissions\n"
+            "d) search_and_fetch('<target_customer_type> <pain_point> contact email') — direct search\n"
+            "e) fetch_and_read(<producthunt_page_url>) — extract maker names and profiles\n"
+            "f) find_leads(industry=<niche>, job_title=<target_role>) — structured search\n\n"
+            "STEP 3 — For each lead found:\n"
+            "enrich_lead(company_name=<name>, website=<url>)\n"
+            "build_outreach_sequence(lead=<enriched>, product_context=<your_product>)\n"
+            "build_crm_contact(lead=<enriched>)\n\n"
+            "STEP 4 — Email deliverability:\n"
+            "create_warming_schedule() and generate_spf_dkim_instructions().\n\n"
+            "STEP 5 — obsidian_log: LEADS FOUND, SEQUENCES BUILT, DELIVERABILITY SETUP.\n\n"
+            "If all sources return 0 leads, build sequences targeting competitor customers "
+            "using a '<competitor> alternative' angle from the research notes."
         ),
         tools={
             "search_and_fetch": search_and_fetch,

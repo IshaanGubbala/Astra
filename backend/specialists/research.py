@@ -4,7 +4,7 @@ from backend.core.agent import Agent, AgentContext
 from backend.tools.obsidian_logger import obsidian_log, obsidian_read, obsidian_append
 from backend.tools.browser_research import search_and_fetch, fetch_and_read, research_papers
 from backend.tools.patent_search import patent_search
-from backend.tools.web_search import news_search
+from backend.tools.web_search import news_search, deep_research
 from backend.tools.video_research import youtube_research, tiktok_research
 
 
@@ -78,19 +78,26 @@ _FOCUS_ROLES = {
         "obsidian_log with: MARKET SIZE, GROWTH RATE, TAM/SAM/SOM, KEY SEGMENTS, REGULATORY, VC FUNDING DATA."
     ),
     "research_competitors": (
-        "COMPETITOR INTELLIGENCE (run ALL 10):\n"
-        "1. search_and_fetch('{topic} top competitors companies comparison 2025')\n"
-        "2. search_and_fetch('{topic} pricing model subscription freemium enterprise')\n"
-        "3. search_and_fetch('{topic} Y Combinator startup product hunt launch')\n"
-        "4. search_and_fetch('{topic} alternative software tool review G2 Capterra')\n"
-        "5. search_and_fetch('{topic} startup funding raised Series A B valuation')\n"
-        "6. search_and_fetch('{topic} product features comparison strengths weaknesses')\n"
-        "7. search_and_fetch('{topic} customer reviews complaints reddit forum')\n"
-        "8. patent_search('{topic}')\n"
-        "9. youtube_research('{topic} competitor review demo product walkthrough')\n"
-        "10. tiktok_research('{topic} review product')\n\n"
-        "Then for EACH top competitor found: fetch_and_read(competitor_homepage_url) and fetch_and_read(competitor_pricing_url).\n"
-        "obsidian_log with: COMPETITOR TABLE (name, pricing, strengths, weaknesses, market position), WHITESPACE OPPORTUNITIES, VIDEO INSIGHTS (viral angles, creator sentiment, common complaints)."
+        "COMPETITOR INTELLIGENCE (run ALL 15):\n"
+        "1. deep_research('named companies and platforms in the {topic} space — list every startup, scaleup, and incumbent with funding and description')\n"
+        "2. search_and_fetch('{topic} top companies platforms list 2024 2025')\n"
+        "2. search_and_fetch('{topic} startups to watch named companies founded 2020 2021 2022 2023 2024')\n"
+        "3. search_and_fetch('{topic} crunchbase funding raised valuation startup')\n"
+        "4. search_and_fetch('{topic} Y Combinator a16z sequoia backed startup company')\n"
+        "5. search_and_fetch('{topic} alternatives competitors site:g2.com OR site:capterra.com OR site:producthunt.com')\n"
+        "6. search_and_fetch('{topic} best platform tool ranked review techcrunch venturebeat')\n"
+        "7. search_and_fetch('{topic} pricing model subscription freemium enterprise')\n"
+        "8. search_and_fetch('{topic} customer reviews complaints reddit forum')\n"
+        "9. search_and_fetch('{topic} product features comparison strengths weaknesses')\n"
+        "10. search_and_fetch('{topic} market map landscape 2024 2025')\n"
+        "11. news_search('{topic} company startup launch 2024 2025')\n"
+        "12. patent_search('{topic}')\n"
+        "13. youtube_research('{topic} platform demo review walkthrough')\n"
+        "14. tiktok_research('{topic} review product')\n\n"
+        "CRITICAL: After step 1-6, you MUST have a list of specific named companies/platforms. "
+        "If you haven't found at least 5 named competitors, run additional searches with more specific terms. "
+        "Then for EACH named competitor found: fetch_and_read(competitor_homepage_url) and fetch_and_read(competitor_pricing_url).\n"
+        "obsidian_log with: COMPETITOR TABLE (name, URL, pricing, funding, strengths, weaknesses, market position), WHITESPACE OPPORTUNITIES, VIDEO INSIGHTS."
     ),
     "research_execution": (
         "EXECUTION STRATEGY RESEARCH (run ALL 10):\n"
@@ -127,6 +134,7 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
     auto_patent = _make_auto_logging_tool(patent_search, "patent_search", ctx_holder, log_name)
     auto_youtube = _make_auto_logging_tool(youtube_research, "youtube_research", ctx_holder, log_name)
     auto_tiktok = _make_auto_logging_tool(tiktok_research, "tiktok_research", ctx_holder, log_name)
+    auto_deep = _make_auto_logging_tool(deep_research, "deep_research", ctx_holder, log_name)
 
     from backend.config import settings
     focus_searches = _FOCUS_ROLES.get(agent_name, _FOCUS_ROLES["research"])
@@ -146,6 +154,7 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
             "- patent_search(query) — IP landscape.\n"
             "- youtube_research(query) — YouTube video metadata + transcripts for competitor/creator analysis.\n"
             "- tiktok_research(query) — TikTok video metadata + captions for viral trend analysis.\n"
+            "- deep_research(query) — Gemini + Google Search grounded research. Best for finding named companies, market maps, and entities.\n"
             "- obsidian_log — FINAL step only after ALL searches complete.\n\n"
             "YOUR MANDATORY SEARCH SEQUENCE (replace {topic} with the actual subject):\n\n"
             + focus_searches
@@ -158,6 +167,7 @@ def build_research_agent(agent_name: str = "research", **kwargs) -> Agent:
             "patent_search": auto_patent,
             "youtube_research": auto_youtube,
             "tiktok_research": auto_tiktok,
+            "deep_research": auto_deep,
             "obsidian_log": obsidian_log,
             "obsidian_read": obsidian_read,
             "obsidian_append": obsidian_append,

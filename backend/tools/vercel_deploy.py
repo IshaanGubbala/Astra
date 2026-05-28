@@ -575,34 +575,62 @@ def generate_landing_page_html(
     name = company_name or page_title
     props_text = "\n".join(f"- {p}" for p in value_props)
 
-    prompt = f"""You are a senior frontend engineer and designer. Write a complete single-file HTML landing page. Output ONLY raw HTML — no markdown, no backticks, no explanation.
+    prompt = f"""You are a senior product designer and frontend engineer who specialises in clean, premium, intentional UI. Write a complete single-file HTML landing page. Output ONLY raw HTML — no markdown, no backticks, no explanation.
 
 PRODUCT
 Name: {name}
-Title: {page_title}
 Headline: {headline}
 Subheadline: {subheadline}
 Value props:
 {props_text}
 CTA: "{cta_text}" → {cta_url}
-Context: {business_context or "N/A"}
+Design context (use any hex colors, fonts, brand_vibe specified here — they override all defaults): {business_context or "N/A"}
 
-DESIGN SPEC — follow exactly:
-- Color palette: background #06080f, surface cards #0d1117, borders rgba(255,255,255,0.08), text #f0f4ff, muted text rgba(240,244,255,0.55), accent #3b82f6, accent hover #2563eb
-- Typography: system-ui stack, hero h1 at clamp(2.8rem,6vw,5rem) weight 800 tracking -0.03em, body 1rem line-height 1.65
-- All CSS inline in one <style> block — zero external dependencies, zero CDN links
-- Layout sections IN ORDER:
-  1. Sticky nav: logo left (font-weight:800), CTA pill button right (background accent, white text, border-radius:8px)
-  2. Hero: centered, eyebrow label in accent color uppercase tracking-widest, h1, subheadline in muted color, two buttons (primary filled + ghost outlined), subtle bottom gradient fade into section 3
-  3. Horizontal stats bar: 3 bold numbers with labels, dark surface background, top/bottom 1px borders
-  4. Features grid: 2-col on desktop, 1-col mobile. Each card: dark surface, 1px border, 24px padding, unicode icon top-left in accent color, feature title bold, description in muted color. Hover: border brightens
-  5. How it works: 3 numbered steps in a row, dividers between, step number large and accent colored
-  6. Final CTA banner: centered h2, one sentence, primary button
-  7. Footer: copyright left, 3 text links right, top border
-- Responsive: single breakpoint at 768px, stack columns, full-width buttons on mobile
-- Hover transitions: 0.15s ease on all interactive elements
-- No animations, no JS, no gradients on text (just flat colors)
-- The page must look like a real YC-startup landing page — clean, minimal, confident
+═══════════════════════════════════════
+MANDATORY DESIGN SYSTEM — violating any rule is a failure
+═══════════════════════════════════════
+
+SPACING: Strict 8-point grid. Every margin, padding, gap must be a multiple of 8px (8, 16, 24, 32, 48, 64, 96, 128). Zero random values.
+
+TYPOGRAPHY: Pick ONE distinctive heading font loaded from Google Fonts (NOT Inter, NOT Roboto, NOT Poppins, NOT Montserrat — choose something with character: Fraunces, Playfair Display, Space Grotesk, DM Serif Display, Syne, Cabinet Grotesk, Switzer, Clash Display, etc.). Pair with ONE clean body font. Define a type scale and use it consistently. Hero h1: clamp(3rem,6vw,5.5rem), weight 700-900, letter-spacing -0.03em. Section headers: 1.75rem-2.5rem. Body: 1rem/1.7. Never mix weights randomly.
+
+COLORS: If design context has hex values, use them exactly. Otherwise pick a palette that fits the product — do NOT default to dark blue #06080f every time. Consider: warm off-white with charcoal (#1a1a1a), or sage green with cream, or deep navy with gold, or pure white with black and one sharp accent. The palette must feel intentional for THIS specific product. No purple unless brand calls for it.
+
+BORDERS & RADIUS: Pick ONE radius and use it everywhere (either 4px, 8px, 12px, or 16px — not mixed). Cards, buttons, inputs all match.
+
+LAYOUT SECTIONS (in this order):
+1. Nav: logo left (custom font, brand name), nav links center or right, single CTA button. Position: sticky. Border-bottom: 1px solid. Backdrop-filter: blur(12px). Background: semi-transparent version of page background.
+2. Hero: asymmetric OR centered — choose based on product. Large headline, concise subheadline (1 sentence max), ONE primary CTA button, optional ghost secondary. No sparkles. No emojis. No gradient text. Specific copy only.
+3. Social proof bar: real-looking metrics (format as "X,XXX" or "Y%" or "$ZM") with labels. Thin top/bottom borders. Subtle background.
+4. Features: 3-col grid desktop, 1-col mobile. Each card: consistent padding, ONE small icon or number, bold title, 2-line description. Hover: 0.15s border-color transition only — no lift, no scale, no shadow explosion.
+5. How it works: numbered steps (1, 2, 3) in a horizontal row. Step number large and in accent color. Dividers between. Clean.
+6. CTA section: 1 headline, 1 sentence, 1 button. That's it.
+7. Footer: © {name} 2026. Privacy · Terms · Contact. One line. Top border only.
+
+BANNED — automatic failure if any of these appear:
+✗ Purple gradient hero (unless brand color is purple)
+✗ Sparkle emoji ✨ anywhere
+✗ Emojis as UI icons or in headings
+✗ Fake testimonials with AI-generated-looking avatars
+✗ Social icons linking to # or twitter.com/
+✗ "Build your dreams" / "Launch faster" / "Where ideas become reality" type filler copy
+✗ Card hover that lifts, scales, rotates, or bounces
+✗ Lottie animations or any JS animation
+✗ Inconsistent border radii
+✗ Random spacing not on the 8pt grid
+✗ Inter/Roboto/Poppins/Montserrat as heading font
+✗ Multiple gradient backgrounds stacked
+✗ Copyright saying "YourSiteName" or "2024" (use {name} and 2026)
+
+TECHNICAL:
+- All CSS in one <style> block — zero CDN, zero external dependencies EXCEPT Google Fonts (one @import is fine)
+- Two breakpoints: 768px (tablet) and 480px (mobile)
+- Every button, link, and interactive element must be functional or clearly labeled
+- Meta tags: charset, viewport, description, og:title, og:description
+- Favicon: <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
+- No placeholder text. No "Lorem ipsum". No "Coming soon" unless product is pre-launch.
+
+The result must look like it was designed by a real product team, not generated. Every choice should feel intentional. Restraint and consistency over novelty.
 
 Start the output with <!DOCTYPE html> immediately."""
 

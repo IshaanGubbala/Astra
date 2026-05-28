@@ -1,51 +1,40 @@
-"""Web specialist — builds landing page via Claude Code, deploys to Vercel."""
+"""Web specialist — generates HTML/CSS landing page and deploys to Vercel."""
 from backend.core.agent import Agent
 from backend.tools.obsidian_logger import obsidian_log, obsidian_read, obsidian_append
-from backend.tools.github_scaffold import github_create_repo
-from backend.tools.git_tools import run_claude_in_repo, write_files_to_repo
-from backend.tools.vercel_deploy import vercel_deploy, vercel_deploy_from_github
-from backend.tools.cloudflare_tools import cloudflare_setup_vercel_domain, cloudflare_generate_instructions
-from backend.tools.posthog_tools import posthog_generate_integration
-from backend.tools.clarity_tools import clarity_generate_integration
+from backend.tools.vercel_deploy import vercel_deploy, generate_landing_page_html
 
 
 def build_web_agent(**kwargs) -> Agent:
     return Agent(
         name="web",
         role=(
-            "You are a web specialist. Build a production-quality landing page and deploy it.\n\n"
+            "You are a web specialist. Generate a high-quality HTML landing page and deploy it to Vercel.\n\n"
             "WORKFLOW:\n"
             "1. obsidian_read(agent='web', founder_id=<FOUNDER_ID>) — get product/research context\n"
-            "2. github_create_repo(repo_name=<company-landing>, description=<desc>)\n"
-            "3. run_claude_in_repo(repo_url=<url>, session_id=<SESSION>, context=<research>, task=\n"
-            "   'Build a complete Next.js 14 landing page for <product>. "
-            "Single-page marketing site with: sticky nav, hero section, features grid, "
-            "how-it-works steps, social proof/stats, final CTA, footer. "
-            "Use Tailwind CSS. Dark theme (#06080f background, #3b82f6 accent). "
-            "All copy must be specific to the product — real headlines, real value props, real feature names. "
-            "Include package.json, next.config.js (NOT next.config.ts — use .js only), tailwind.config.js, app/layout.tsx, app/page.tsx, app/globals.css. "
-            "After writing all files run: bash -c \"git add -A && git commit -m feat: landing page\"')\n"
-            "4. vercel_deploy_from_github(repo_url=<url>)\n"
-            "   - If deployed=True: proceed to step 5.\n"
-            "   - If deployed=False: read the error field. Call run_claude_in_repo again with task='Fix this Vercel build error and commit: <paste error>'. "
-            "Then call vercel_deploy_from_github again. Repeat this fix→redeploy loop up to 4 times until deployed=True. "
-            "NEVER give up and log repo_url as the result — keep iterating until Vercel returns a live URL.\n"
-            "5. obsidian_log — log repo_url and the live Vercel deploy URL\n"
-            "6. done — return {repo_url, url} where url is the live Vercel URL\n\n"
-            "Do NOT use generate_landing_page_html or vercel_deploy (HTML upload). "
-            "Always build via GitHub repo + Claude Code. "
-            "A successful deploy (deployed=True with a URL) is the only acceptable outcome."
+            "2. obsidian_read(agent='design', founder_id=<FOUNDER_ID>) — get design spec: colors, fonts, brand vibe, wireframe\n"
+            "3. generate_landing_page_html(\n"
+            "     page_title=<company name>,\n"
+            "     headline=<sharp 6-10 word headline matching brand voice from design spec>,\n"
+            "     subheadline=<one sentence value prop>,\n"
+            "     value_props=<list of 4-6 specific feature/benefit strings>,\n"
+            "     cta_text=<action CTA>,\n"
+            "     cta_url='#waitlist',\n"
+            "     company_name=<company name>,\n"
+            "     business_context=<2-3 sentence summary PLUS the full design spec colors/fonts/vibe from step 2>\n"
+            "   )\n"
+            "   CRITICAL: Pass the design agent's colors, fonts, and brand vibe into business_context so the LLM\n"
+            "   can apply them. The generated page MUST use the exact hex colors from the design spec,\n"
+            "   not the default dark theme. Match the brand_vibe (bold/minimal/friendly/professional/innovative/calm).\n"
+            "   Use SPECIFIC copy — real product names, real metrics, real benefits from research.\n"
+            "4. vercel_deploy(project_slug=<company-landing>, html=<html from step 3>)\n"
+            "5. obsidian_log — log the live Vercel URL\n"
+            "6. done — return {url: <live Vercel URL>}\n\n"
+            "Do NOT use GitHub repos, Next.js, Claude Code scaffolding, or React. "
+            "HTML + CSS only. Fast, clean, no build step."
         ),
         tools={
-            "github_create_repo": github_create_repo,
-            "run_claude_in_repo": run_claude_in_repo,
-            "write_files_to_repo": write_files_to_repo,
-            "vercel_deploy_from_github": vercel_deploy_from_github,
+            "generate_landing_page_html": generate_landing_page_html,
             "vercel_deploy": vercel_deploy,
-            "cloudflare_setup_vercel_domain": cloudflare_setup_vercel_domain,
-            "cloudflare_generate_instructions": cloudflare_generate_instructions,
-            "posthog_generate_integration": posthog_generate_integration,
-            "clarity_generate_integration": clarity_generate_integration,
             "obsidian_log": obsidian_log,
             "obsidian_read": obsidian_read,
             "obsidian_append": obsidian_append,
