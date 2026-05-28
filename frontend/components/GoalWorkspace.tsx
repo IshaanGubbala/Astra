@@ -438,24 +438,25 @@ function DesignPreview({ state }: { state: AgentState }) {
       </div>
       {allColors.length > 0 && (
         <div>
-          <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fg-mute)", display: "block", marginBottom: 8 }}>Color Palette</span>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {allColors.slice(0, 12).map((c, i) => (
-              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 8, background: c, border: "1px solid rgba(0,0,0,0.1)", boxShadow: `0 2px 8px ${c}44` }} />
-                <span style={{ fontSize: 9, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)" }}>{c}</span>
+          {/* Gradient hero bar using the palette */}
+          <div style={{ height: 52, borderRadius: 14, marginBottom: 10, background: `linear-gradient(135deg, ${allColors.slice(0,4).join(", ")})`, boxShadow: `0 4px 24px ${allColors[0]}55` }} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(56px, 1fr))", gap: 6 }}>
+            {allColors.slice(0, 10).map((c, i) => (
+              <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                <div style={{ width: "100%", aspectRatio: "1", borderRadius: 10, background: c, boxShadow: `0 4px 12px ${c}66, inset 0 1px 0 rgba(255,255,255,0.15)` }} />
+                <span style={{ fontSize: 8, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)", textAlign: "center" }}>{c}</span>
               </div>
             ))}
           </div>
         </div>
       )}
       {paletteEntries.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           {paletteEntries.map(([k, v]) => (
-            <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px", borderRadius: 6, background: "rgba(0,0,0,0.03)" }}>
-              <div style={{ width: 14, height: 14, borderRadius: 3, background: v, border: "1px solid rgba(0,0,0,0.12)", flexShrink: 0 }} />
-              <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "capitalize" }}>{k.replace(/_/g, " ")}</span>
-              <span style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-dim)", marginLeft: "auto" }}>{v.slice(0, 40)}</span>
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: `${v}14`, border: `1px solid ${v}33` }}>
+              <div style={{ width: 16, height: 16, borderRadius: 4, background: v, boxShadow: `0 2px 6px ${v}66`, flexShrink: 0 }} />
+              <span style={{ fontSize: 10, color: "var(--fg-dim)", textTransform: "capitalize", flex: 1 }}>{k.replace(/_/g, " ")}</span>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-jetbrains-mono)", color: "var(--fg-mute)" }}>{v}</span>
             </div>
           ))}
         </div>
@@ -526,8 +527,25 @@ function MarketingPreview({ state }: { state: AgentState }) {
   const isDone = state.status === "done";
 
   if (!hasContent) {
-    return isDone ? <ResultDump result={state.result} /> : <BuildingIndicator label="Creating content…" />;
+    return isDone ? <ResultDump result={state.result} /> : <BuildingIndicator label="Creating campaigns…" tool={state.currentTool} />;
   }
+
+  const SocialCard = ({ platform, icon, color, gradient, lines }: { platform: string; icon: string; color: string; gradient: string; lines: [string, string][] }) => (
+    <div style={{ borderRadius: 16, overflow: "hidden", border: `1px solid ${color}33` }}>
+      <div style={{ padding: "8px 12px", background: gradient, display: "flex", alignItems: "center", gap: 7 }}>
+        <span style={{ fontSize: 14 }}>{icon}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", letterSpacing: "0.03em" }}>{platform}</span>
+      </div>
+      <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8, background: "rgba(255,255,255,0.02)" }}>
+        {lines.filter(([, v]) => v).map(([k, v]) => (
+          <div key={k}>
+            <span style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--fg-mute)" }}>{k}</span>
+            <p style={{ margin: "3px 0 0", fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.65, whiteSpace: "pre-wrap", maxHeight: 90, overflowY: "auto" }}>{v.slice(0, 350)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   const CARD = (label: string, lines: [string, string][]) => (
     <div style={{ ...PREVIEW_CARD, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -584,11 +602,11 @@ function MarketingPreview({ state }: { state: AgentState }) {
           </div>
         </div>
       )}
-      {(reelScript || reelCaption) && CARD("📸 Instagram Reel", [["Script", reelScript], ["Caption", reelCaption], ["Hashtags", reelHashtags]])}
-      {tiktokScript && CARD("🎵 TikTok", [["Script", tiktokScript]])}
-      {(adHeadline || adBody) && CARD("📣 Meta Ad", [["Headline", adHeadline], ["Body", adBody], ["CTA", adCta]])}
+      {(reelScript || reelCaption) && <SocialCard platform="Instagram Reel" icon="📸" color="#E1306C" gradient="linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)" lines={[["Script", reelScript], ["Caption", reelCaption], ["Hashtags", reelHashtags]]} />}
+      {tiktokScript && <SocialCard platform="TikTok" icon="🎵" color="#69C9D0" gradient="linear-gradient(135deg,#010101,#69C9D0)" lines={[["Script", tiktokScript]]} />}
+      {(adHeadline || adBody) && <SocialCard platform="Meta Ad" icon="📣" color="#1877F2" gradient="linear-gradient(135deg,#1877F2,#42a5f5)" lines={[["Headline", adHeadline], ["Body", adBody], ["CTA", adCta]]} />}
       {(emailSubject || emailBody) && CARD("📧 Email", [["Subject", emailSubject], ["Body", typeof emailBody === "string" ? emailBody.replace(/<[^>]+>/g, "") : emailBody]])}
-      {linkedin && CARD("💼 LinkedIn", [["Post", linkedin]])}
+      {linkedin && <SocialCard platform="LinkedIn" icon="💼" color="#0A66C2" gradient="linear-gradient(135deg,#0A66C2,#00a0dc)" lines={[["Post", linkedin]]} />}
     </div>
   );
 }
