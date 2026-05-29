@@ -23,7 +23,11 @@ def _format_tool_result(tool_name: str, result: Any) -> str:
     Raw JSON is hard for the LLM to parse — structured text is much better.
     """
     if not isinstance(result, dict):
-        return str(result)
+        text = str(result)
+        # HTML/large blobs: only confirm success + char count, don't dump full content
+        if tool_name == "generate_landing_page_html" or (len(text) > 2000 and text.strip().startswith("<")):
+            return f"HTML generated successfully ({len(text):,} chars). Pass it directly to vercel_deploy."
+        return text
 
     # Web search — format as numbered list
     if tool_name in ("web_search", "news_search") and "formatted" in result:
@@ -276,6 +280,7 @@ class Agent:
         MAX_ITERATIONS = self._max_iterations or 5
         # Track consecutive failures per tool to break infinite retry loops
         _tool_fail_counts: dict[str, int] = {}
+        _large_results: dict[str, Any] = {}  # stores large non-dict results (HTML etc.) by tool name
         # One-shot tools: hard-blocked after first success
         _ONE_SHOT_TOOLS = {"generate_landing_page_html", "vercel_deploy", "claude_code_scaffold",
                            "obsidian_log"}
@@ -362,6 +367,10 @@ class Agent:
                         f"You MUST NOT call it again. Call done with the results you already have."
                     )})
                     continue
+                # Auto-inject previously generated HTML into vercel_deploy call
+                if tool_name == "vercel_deploy" and "html" not in args and _large_results.get("generate_landing_page_html"):
+                    args["html"] = _large_results["generate_landing_page_html"]
+                    logger.debug("[%s] auto-injected cached HTML into vercel_deploy args", self.name)
                 await self._emit(ctx, "agent_action", action="tool", tool=tool_name, args=args, reasoning=reasoning)
                 result = await self._execute_tool(tool_name, args, ctx)
                 await self._emit(ctx, "agent_action_result", tool=tool_name, result=result)
@@ -369,6 +378,8 @@ class Agent:
                     _called_tools.add(tool_name)
                     if isinstance(result, dict):
                         _tool_results.append((tool_name, result))
+                    elif isinstance(result, str) and len(result) > 2000:
+                        _large_results[tool_name] = result
                 if "error" in result:
                     _tool_fail_counts[tool_name] = _tool_fail_counts.get(tool_name, 0) + 1
                     if _tool_fail_counts[tool_name] >= 3:
