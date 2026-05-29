@@ -158,6 +158,20 @@ async def ask_agent(body: AskRequest):
     return {"agent": body.target_agent, "response": result}
 
 
+_AGENT_CHAT_ROLES: dict[str, str] = {
+    "research": "You are Astra's Research agent. You are an expert in market analysis, competitive intelligence, TAM/SAM/SOM sizing, industry trends, and academic research.",
+    "research_competitors": "You are Astra's Competitor Research agent. You are an expert in competitive landscapes, company profiles, funding data, and market positioning.",
+    "research_execution": "You are Astra's Execution Research agent. You are an expert in go-to-market strategy, unit economics, tech stack decisions, and startup execution.",
+    "legal": "You are Astra's Legal agent. You are an expert in startup legal structures, privacy policies, terms of service, NDAs, founder agreements, IP assignment, and LLC/incorporation.",
+    "web": "You are Astra's Web agent. You are an expert in landing page design, Vercel deployments, GitHub repos, and conversion-focused web copy.",
+    "marketing": "You are Astra's Marketing agent. You are an expert in social media content, Instagram Reels, TikTok scripts, Meta ad copy, email campaigns, and growth marketing.",
+    "technical": "You are Astra's Technical agent. You are an expert in software architecture, MVP development, full-stack engineering, auth systems, and database design.",
+    "ops": "You are Astra's Operations agent. You are an expert in fundraising docs, investor outreach, executive summaries, SOPs, and company operations.",
+    "sales": "You are Astra's Sales agent. You are an expert in lead generation, outreach sequences, CRM management, and B2B/B2C sales strategy.",
+    "design": "You are Astra's Design agent. You are an expert in brand identity, color palettes, wireframes, design systems, and UI/UX mockups.",
+}
+
+
 @router.post("/chat/{agent_key}")
 async def chat_agent(agent_key: str, body: AskRequest):
     """
@@ -194,29 +208,40 @@ async def chat_agent(agent_key: str, body: AskRequest):
     except Exception as e:
         logger.warning("Brain context fetch failed: %s", e)
 
-    # ── 2. Obsidian vault note for this agent + session ───────────────────────
+    # ── 2. Obsidian vault — all prior sessions for this agent + founder ───────
     obsidian_context = ""
-    if body.session_id:
-        try:
-            from backend.tools.obsidian_logger import _note_path
+    try:
+        from backend.tools.obsidian_logger import format_vault_context, _note_path
+        # Load notes across all prior sessions for this agent
+        vault_text = format_vault_context(base_key, max_notes=5, founder_id=body.founder_id)
+        # If a specific session is active, also include that note in full (may overlap, that's fine)
+        if body.session_id:
             note_file = _note_path(base_key, body.session_id, body.founder_id)
             if note_file.exists():
-                text = note_file.read_text(encoding="utf-8")[:2000]
-                obsidian_context = f"YOUR PREVIOUS NOTES FOR THIS SESSION:\n{text}"
-        except Exception as e:
-            logger.warning("Obsidian context fetch failed: %s", e)
+                current_text = note_file.read_text(encoding="utf-8")[:3000]
+                if current_text not in vault_text:
+                    vault_text = f"CURRENT SESSION NOTES:\n{current_text}\n\n{vault_text}"
+        if vault_text.strip():
+            obsidian_context = vault_text
+    except Exception as e:
+        logger.warning("Obsidian context fetch failed: %s", e)
 
-    # ── 3. Assemble system prompt ─────────────────────────────────────────────
+    # ── 3. Assemble system prompt with a clean conversational role ────────────
+    role_description = _AGENT_CHAT_ROLES.get(base_key, f"You are Astra's {base_key.capitalize()} agent.")
+
     context_blocks = [b for b in [brain_context, obsidian_context, body.context or ""] if b.strip()]
-    context_section = ("\n\n" + "\n\n".join(context_blocks)) if context_blocks else ""
+    context_section = ("\n\n---\n\n".join(context_blocks)) if context_blocks else ""
 
     system_prompt = (
-        f"{agent.role}\n\n"
+        f"{role_description}\n\n"
         "You are answering a direct question from the founder. "
-        "Use the context below to give a specific, grounded answer. "
-        "Be concise and helpful. Respond in plain text — no JSON, no markdown headers."
-        f"{context_section}"
+        "Use the context below — company knowledge, prior research, and session notes — "
+        "to give a specific, grounded answer. "
+        "Be concise and helpful. Respond in plain conversational text. "
+        "Do NOT output JSON. Do NOT use markdown headers. Bullet points are fine."
     )
+    if context_section:
+        system_prompt += f"\n\n--- CONTEXT ---\n{context_section}"
 
     # Use chat model if configured, otherwise fall back to agent model
     base_url = settings.chat_model_base_url or settings.agent_model_base_url
