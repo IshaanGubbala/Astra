@@ -669,25 +669,25 @@ def generate_landing_page_html(
     _rng = random.Random(_seed + 1)
     _vibe_instruction = _rng.choice(_STRUCTURES)
 
-    prompt = f"""Create a stunning single-file HTML+CSS website for {name}.
+    prompt = f"""Create a comprehensive, long single-page website for {name}. This should be a complete marketing site — not a minimal landing page. Make every section fully built out with real copy, real detail, real visual hierarchy.
 
 Product: {headline}. {subheadline}
 Key features: {props_text}
 CTA: "{cta_text}" → {cta_url}
 Brand: {_design_context or f"Design something world-class for {name}."}
 
-PAGE STRUCTURE — use this layout approach (required):
-{_vibe_instruction}
+REQUIRED SECTIONS — every single one must be fully implemented:
+1. Nav bar with links to each section
+2. Hero — big headline, subheadline, CTA button, maybe a stats bar
+3. How it works — 3-4 steps with icons and real explanations
+4. Features — each value prop above with full descriptions, not just a title
+5. Testimonials — 3 detailed fake quotes with names, job titles, companies
+6. Pricing — 3 tiers (Starter/Pro/Business), monthly prices, feature lists with checkmarks
+7. FAQ — 5 questions with full paragraph answers
+8. Email waitlist / final CTA section
+9. Footer with links and © {name} 2026
 
-REQUIRED SECTIONS — all must appear somewhere in the page:
-1. Hero with headline + CTA
-2. How it works (step-by-step)
-3. Features / value props
-4. Testimonials (2-3 fake ones with names and job titles)
-5. Pricing (3 tiers with fake prices and feature lists)
-6. FAQ (4-5 Q&As)
-7. Email waitlist form
-8. Footer © {name} 2026"""
+Make it long. Make it rich. Make it feel like a real funded startup's website."""
 
     from backend.tools._llm import generate
 
