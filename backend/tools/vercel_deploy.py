@@ -828,7 +828,43 @@ Output ONLY the completed HTML — no explanation, no markdown fences.
                     logger.warning("HTML attempt %d REJECTED — no <!DOCTYPE> or <html>. Preview: %.300r", attempt + 1, html[:300])
                     continue
 
-            logger.info("HTML accepted (%d chars)", len(body))
+            logger.info("HTML accepted (%d chars) — running error-fix pass …", len(body))
+            fix_prompt = (
+                "You are a senior front-end engineer reviewing an HTML landing page.\n"
+                "Find and fix ONLY real errors. Do NOT redesign, do NOT change colors, do NOT change layout.\n"
+                "Fix only:\n"
+                "- Broken JS (accordion not toggling, counter not animating, form not submitting)\n"
+                "- Missing closing tags or malformed HTML\n"
+                "- Placeholder text left in (e.g. 'Lorem ipsum', 'TODO', '[insert]')\n"
+                "- Empty sections with no content\n"
+                "- Duplicate IDs\n"
+                "If no errors found, output the HTML unchanged.\n"
+                "Output ONLY the complete fixed HTML — no explanation, no markdown fences.\n\n"
+                + body
+            )
+            fix_oc_prompt = (
+                "Review this HTML for bugs only (no redesign), fix any errors, then write the fixed HTML "
+                "to `index.html` using the Write tool. No explanation — just write the file.\n\n"
+                + fix_prompt
+            )
+            try:
+                with tempfile.TemporaryDirectory() as fix_dir:
+                    _run_claude(fix_dir, fix_oc_prompt, session_id=None, timeout=480, model="Qwen/Qwen3.6-35B-A3B")
+                    fixed_file = (_Path(fix_dir) / "index.html")
+                    if fixed_file.exists():
+                        fixed_html = fixed_file.read_text(encoding="utf-8")
+                        fixed_html = re.sub(r"```html?", "", fixed_html, flags=re.IGNORECASE).strip().rstrip("`").strip()
+                        dp = fixed_html.lower().find("<!doctype")
+                        if dp != -1 and len(fixed_html) >= len(body) * 0.9:
+                            body = fixed_html[dp:]
+                            logger.info("Error-fix pass done — %d chars", len(body))
+                        else:
+                            logger.warning("Error-fix pass shrank HTML too much (%d→%d) — keeping original", len(body), len(fixed_html))
+                    else:
+                        logger.warning("Error-fix pass wrote no file — keeping original")
+            except Exception as fix_err:
+                logger.warning("Error-fix pass failed (%s) — keeping original", fix_err)
+
             try:
                 open("/tmp/astra_last_html.html", "w").write(body)
             except Exception:
