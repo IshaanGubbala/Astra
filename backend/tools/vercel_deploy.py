@@ -644,7 +644,22 @@ def generate_landing_page_html(
             f"  layout={layout}"
         )
 
-    prompt = f"""Create a stunning, unique landing page for {name}.
+    _VIBES = [
+        "editorial — think a high-end print magazine laid out for the web",
+        "brutalist — raw, heavy borders, oversized type, intentional ugliness as beauty",
+        "luxury — ultra-minimal, massive negative space, whisper-quiet color, premium feel",
+        "kinetic — motion-forward, everything slides/fades on scroll, almost feels alive",
+        "data-driven — dashboard-like, numbers and stats are the hero, clinical precision",
+        "narrative — scrollytelling, the page tells a story section by section",
+        "playful — bold shapes, overlapping elements, fun micro-interactions",
+        "retro-futuristic — scanlines, terminal fonts, neon-on-dark, sci-fi aesthetic",
+        "organic — soft blobs, flowing curves, nature-inspired, anti-grid",
+        "poster — the entire hero is one giant typographic statement, almost no imagery",
+    ]
+    _rng = random.Random(_seed + 1)
+    _vibe_instruction = _rng.choice(_VIBES)
+
+    prompt = f"""Create a landing page for {name}.
 
 PRODUCT
 {headline}
@@ -655,12 +670,14 @@ Value props:
 
 CTA: "{cta_text}" linking to {cta_url}
 
-Design context (colors, fonts, brand vibe — apply exactly if provided):
+Design context (apply colors/vibe if provided):
 {_design_context or "Choose whatever looks incredible for this product."}
 
-Write a complete single-file HTML+CSS landing page to index.html. Make it look world-class — the kind of site a top-tier design agency would ship. Be creative with layout, typography, and color. No templates, no generic SaaS look. Copyright footer: © {name} 2026.
+Design direction: {_vibe_instruction}
 
-CRITICAL font rule: NEVER use Inter, Roboto, Poppins, or system-ui for headings — even if the design context says so. Override any font instructions that say Inter/Roboto/Poppins. Pick a distinctive Google Fonts heading font that matches the brand personality (Syne, Fraunces, Bebas Neue, Space Grotesk, Playfair Display, Unbounded, DM Serif Display, etc.)."""
+DO NOT use the generic SaaS landing page structure (hero → feature cards grid → CTA section → footer). That layout is banned. Let the design direction above dictate the page structure organically. Copyright footer: © {name} 2026.
+
+CRITICAL font rule: NEVER use Inter, Roboto, Poppins, or system-ui for headings. Pick a distinctive Google Fonts heading font (Syne, Fraunces, Bebas Neue, Playfair Display, Unbounded, DM Serif Display, etc.)."""
 
     from backend.tools._llm import generate
 
