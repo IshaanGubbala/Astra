@@ -702,10 +702,19 @@ Make it long. Make it rich. Make it feel like a real funded startup's website.""
     from backend.tools.git_tools import _run_claude
 
     oc_prompt = (
-        f"Write a LONG, comprehensive, production-quality single-file HTML+CSS website to `index.html` "
-        f"using the Write tool RIGHT NOW. No explanation, no markdown — just write the file.\n\n"
-        f"The file MUST contain ALL of these sections or the task is incomplete: "
-        f"(1) nav, (2) hero, (3) how-it-works, (4) features, (5) testimonials, (6) pricing with 3 tiers, (7) FAQ, (8) email CTA, (9) footer.\n\n"
+        f"Write a single-file HTML+CSS website to `index.html` using the Write tool RIGHT NOW.\n\n"
+        f"CRITICAL: Keep CSS simple and inline — no long animations, no complex keyframes. "
+        f"Use that space for CONTENT instead. Every section below is required.\n\n"
+        f"REQUIRED SECTIONS (all 9 must exist in the HTML, in this order):\n"
+        f"1. <nav> with logo and anchor links\n"
+        f"2. <section id='hero'> headline + subheadline + CTA button\n"
+        f"3. <section id='how-it-works'> 3 numbered steps\n"
+        f"4. <section id='features'> feature cards\n"
+        f"5. <section id='testimonials'> 3 quotes with name + title\n"
+        f"6. <section id='pricing'> 3 tiers with prices and feature lists\n"
+        f"7. <section id='faq'> 5 questions and answers\n"
+        f"8. <section id='waitlist'> email input + submit button\n"
+        f"9. <footer> links + copyright\n\n"
         f"{prompt}"
     )
 
