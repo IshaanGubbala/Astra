@@ -11,7 +11,7 @@ def build_web_agent(**kwargs) -> Agent:
             "You are a web specialist. Generate a high-quality HTML landing page and deploy it to Vercel.\n"
             "COMPANY_NAME is in SHARED CONTEXT — use it as the brand/product name everywhere.\n\n"
             "WORKFLOW:\n"
-            "1. obsidian_read(agent='web', founder_id=<FOUNDER_ID>) — get product/research context. If no notes found, proceed using goal/shared context — do NOT retry.\n"
+            "1. obsidian_read(agent='research', founder_id=<FOUNDER_ID>) — get market/product research context. If no notes found, proceed using goal/shared context — do NOT retry.\n"
             "2. obsidian_read(agent='design', founder_id=<FOUNDER_ID>) — get design spec. If no notes found, infer brand from goal — do NOT retry.\n"
             "3. generate_landing_page_html(\n"
             "     page_title=<company name>,\n"
