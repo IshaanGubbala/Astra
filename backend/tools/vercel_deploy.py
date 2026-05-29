@@ -630,10 +630,12 @@ Value props:
 
 CTA: "{cta_text}" linking to {cta_url}
 
-Design context (colors, fonts, brand vibe — apply these if provided):
+Design context (colors, fonts, brand vibe — apply exactly if provided):
 {_design_context or "Choose whatever looks incredible for this product."}
 
-Write a complete single-file HTML+CSS landing page to index.html. Make it look world-class — the kind of site a top-tier design agency would ship. Be creative with layout, typography, and color. No templates, no generic SaaS look. Copyright footer: © {name} 2026."""
+Write a complete single-file HTML+CSS landing page to index.html. Make it look world-class — the kind of site a top-tier design agency would ship. Be creative with layout, typography, and color. No templates, no generic SaaS look. Copyright footer: © {name} 2026.
+
+Font rule: do NOT use Inter, Roboto, or system fonts for headings. Pick something distinctive from Google Fonts that matches the brand personality."""
 
     from backend.tools._llm import generate
 
@@ -643,6 +645,7 @@ Write a complete single-file HTML+CSS landing page to index.html. Make it look w
         # Only flag the explicit HTML comment marker — CSS vars / copy strings are too generic
         return "astra-fallback-template" in text
 
+    logger.info("design_context passed to HTML gen: %.600s", _design_context)
     import time as _time, tempfile
     from pathlib import Path as _Path
     from backend.tools.git_tools import _run_claude
