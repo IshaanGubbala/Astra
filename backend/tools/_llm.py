@@ -24,11 +24,12 @@ def _api_key() -> str:
     return settings.deepinfra_api_key or settings.planner_model_api_key or settings.agent_model_api_key
 
 
-def generate(prompt: str, max_tokens: int | None = None, json_mode: bool = False, model: str = "large") -> str:
+def generate(prompt: str, max_tokens: int | None = None, json_mode: bool = False, model: str = "large", temperature: float = 0.7) -> str:
     """Call an LLM for content generation. Returns raw text.
     model="fast"     → DeepSeek-V4-Flash (general)
     model="large"    → gpt-oss-120b (high-output docs/copy)
     model="instruct" → Qwen3-235B (strict rule-following: HTML, design constraints)
+    model="nemotron" → NVIDIA-Nemotron-3-Super-120B (HTML/design generation)
     """
     import openai
     client = openai.OpenAI(base_url=_DI_BASE, api_key=_api_key())
@@ -43,7 +44,7 @@ def generate(prompt: str, max_tokens: int | None = None, json_mode: bool = False
     kwargs: dict = dict(
         model=selected,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
+        temperature=temperature,
     )
     if max_tokens:
         kwargs["max_tokens"] = max_tokens

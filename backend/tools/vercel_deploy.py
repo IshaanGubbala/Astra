@@ -571,9 +571,53 @@ def generate_landing_page_html(
     business_context: str = "",
 ) -> str:
     """Generate a complete, production-quality landing page HTML. Args: page_title, headline, subheadline, value_props (list of strings), cta_text, cta_url, company_name (optional), business_context (optional)."""
-    import re
+    import re, random, hashlib
     name = company_name or page_title
     props_text = "\n".join(f"- {p}" for p in value_props)
+
+    # When no design agent context, inject a deterministic-random aesthetic seed
+    # so each product gets a unique look instead of the same LLM default
+    _design_context = business_context or ""
+    if not any(kw in _design_context.lower() for kw in ("hex", "#", "font", "color", "palette", "vibe")):
+        _PALETTES = [
+            ("warm cream + charcoal red", "#faf7f2", "#1a1a1a", "#c84b31"),
+            ("jet black + electric lime", "#0a0a0a", "#f0f0f0", "#b5ff47"),
+            ("deep navy + warm sand + cyan", "#0d1b2a", "#e8dcc8", "#4fc3f7"),
+            ("soft sage + forest green", "#f5f7f2", "#2d4a3e", "#5c8a6e"),
+            ("midnight + coral", "#0a0a0a", "#f5f5f5", "#ff4d4d"),
+            ("warm amber + espresso", "#fff8f0", "#2c1a0e", "#e8820c"),
+            ("ice blue + gold", "#f0f4ff", "#1e293b", "#f59e0b"),
+            ("dusty rose + terracotta", "#fdf4f5", "#2a2a2a", "#c97b5a"),
+            ("mint + electric teal", "#f0faf8", "#1a2e2b", "#00c9a7"),
+            ("off-white + violet", "#fafafa", "#1a0a2e", "#7c3aed"),
+        ]
+        _HEADINGS = [
+            "'Fraunces', serif", "'Syne', sans-serif", "'Playfair Display', serif",
+            "'DM Serif Display', serif", "'Bebas Neue', sans-serif",
+            "'Cormorant Garamond', serif", "'Space Grotesk', sans-serif",
+            "'Libre Baskerville', serif", "'Cabinet Grotesk', sans-serif",
+            "'Unbounded', sans-serif",
+        ]
+        _LAYOUTS = [
+            "centered hero, generous whitespace, editorial type scale",
+            "left-aligned hero with large right-side metric panel",
+            "full-bleed dark hero, light content sections below",
+            "split hero: headline left, animated stats right",
+            "brutalist grid layout, thick rule borders, oversized type",
+            "magazine-style: oversized pull quote as hero element",
+        ]
+        seed = int(hashlib.md5(name.encode()).hexdigest(), 16)
+        rng = random.Random(seed)
+        label, bg, fg, accent = rng.choice(_PALETTES)
+        heading = rng.choice(_HEADINGS)
+        layout = rng.choice(_LAYOUTS)
+        _design_context = (
+            f"{_design_context}\n"
+            f"AESTHETIC SEED (apply exactly — palette: {label}):\n"
+            f"  background={bg}  foreground={fg}  accent={accent}\n"
+            f"  heading-font={heading}\n"
+            f"  layout={layout}"
+        )
 
     prompt = f"""You are a senior product designer and frontend engineer who specialises in clean, premium, intentional UI. Write a complete single-file HTML landing page. Output ONLY raw HTML — no markdown, no backticks, no explanation.
 
@@ -584,7 +628,7 @@ Subheadline: {subheadline}
 Value props:
 {props_text}
 CTA: "{cta_text}" → {cta_url}
-Design context (use any hex colors, fonts, brand_vibe specified here — they override all defaults): {business_context or "N/A"}
+Design context (use any hex colors, fonts, brand_vibe specified here — they override all defaults): {_design_context or "N/A"}
 
 ═══════════════════════════════════════
 MANDATORY DESIGN SYSTEM — violating any rule is a failure
@@ -647,7 +691,7 @@ Start the output with <!DOCTYPE html> immediately."""
         logger.info("HTML gen attempt %d/3 (model=nemotron, max_tokens=6000) …", attempt + 1)
         t0 = _time.monotonic()
         try:
-            html = generate(prompt, max_tokens=6000, model="nemotron")
+            html = generate(prompt, max_tokens=6000, model="nemotron", temperature=1.0)
             elapsed = _time.monotonic() - t0
             logger.info("HTML gen attempt %d done in %.1fs — raw len=%d chars", attempt + 1, elapsed, len(html))
             logger.debug("HTML raw preview: %.300s", html[:300])
