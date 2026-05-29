@@ -1043,3 +1043,113 @@ async def llc_stream(websocket: WebSocket, founder_id: str, company_name: str = 
         stop_event.set()
     except Exception:
         stop_event.set()
+
+
+# ── Generic Playwright WebSocket runner ───────────────────────────────────────
+
+async def _run_playwright_ws(websocket: WebSocket, coro_fn) -> None:
+    """
+    Shared boilerplate for all live-browser WebSocket endpoints.
+    Spawns a dedicated thread with its own event loop (required for Playwright on Windows).
+    Bridges send_message / wait_input / event_q (mouse+key) across thread boundaries.
+    """
+    import sys
+    import queue
+    import threading
+
+    await websocket.accept()
+    main_loop = asyncio.get_running_loop()
+    input_q: queue.Queue = queue.Queue()   # for founder_input (form submissions)
+    event_q: queue.Queue = queue.Queue()   # for mouse_event / key_event (canvas interaction)
+    stop_event = threading.Event()
+
+    async def _send(msg: dict) -> None:
+        try:
+            await websocket.send_text(json.dumps(msg))
+        except Exception:
+            pass
+
+    def run_in_thread():
+        import asyncio as _aio
+        _loop = _aio.ProactorEventLoop() if sys.platform == "win32" else _aio.new_event_loop()
+        _aio.set_event_loop(_loop)
+
+        async def send_message(msg: dict) -> None:
+            if stop_event.is_set():
+                return
+            future = asyncio.run_coroutine_threadsafe(_send(msg), main_loop)
+            try:
+                future.result(timeout=10)
+            except Exception:
+                pass
+
+        async def wait_input() -> dict | None:
+            deadline = _loop.time() + 600
+            while _loop.time() < deadline:
+                try:
+                    return input_q.get_nowait()
+                except queue.Empty:
+                    await _aio.sleep(0.3)
+            return None
+
+        try:
+            _loop.run_until_complete(coro_fn(send_message, wait_input, event_q))
+        except Exception as e:
+            future = asyncio.run_coroutine_threadsafe(
+                _send({"type": "error", "message": str(e)}), main_loop
+            )
+            try:
+                future.result(timeout=5)
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
+
+    try:
+        async for msg_text in websocket.iter_text():
+            try:
+                msg = json.loads(msg_text)
+                mtype = msg.get("type")
+                if mtype == "founder_input":
+                    input_q.put(msg.get("data", {}))
+                elif mtype in ("mouse_event", "mouse_move", "key_event"):
+                    event_q.put(msg)
+                elif mtype == "cancel":
+                    stop_event.set()
+                    break
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        stop_event.set()
+    except Exception:
+        stop_event.set()
+
+
+# ── Integration connect WebSocket endpoints ───────────────────────────────────
+
+@router.websocket("/connect/github/stream/{founder_id}")
+async def connect_github_stream(websocket: WebSocket, founder_id: str):
+    from backend.tools.integration_connect import connect_github_live
+    await _run_playwright_ws(websocket, lambda sm, wi, eq: connect_github_live(founder_id, sm, wi, eq))
+
+
+@router.websocket("/connect/vercel/stream/{founder_id}")
+async def connect_vercel_stream(websocket: WebSocket, founder_id: str):
+    from backend.tools.integration_connect import connect_vercel_live
+    await _run_playwright_ws(websocket, lambda sm, wi, eq: connect_vercel_live(founder_id, sm, wi, eq))
+
+
+@router.websocket("/connect/sendgrid/stream/{founder_id}")
+async def connect_sendgrid_stream(websocket: WebSocket, founder_id: str):
+    from backend.tools.integration_connect import connect_sendgrid_live
+    await _run_playwright_ws(websocket, lambda sm, wi, eq: connect_sendgrid_live(founder_id, sm, wi, eq))
+
+
+@router.get("/setup/composio/connected/{founder_id}")
+async def composio_connected(founder_id: str):
+    """Return per-app Composio connection status for the founder."""
+    import asyncio
+    from backend.tools.integration_connect import get_composio_app_status
+    status = await asyncio.to_thread(get_composio_app_status, founder_id)
+    return {"founder_id": founder_id, "apps": status}

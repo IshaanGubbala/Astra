@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { saveServiceCredential, getComposioOAuthUrls, getSetupStatus, SetupStatus } from "@/lib/api";
@@ -17,6 +17,7 @@ const SERVICES = [
     placeholder: "ghp_xxxxxxxxxxxx",
     createUrl: "https://github.com/settings/tokens/new?description=Astra&scopes=repo,workflow",
     createLabel: "github.com/settings/tokens",
+    steps: 3,
   },
   {
     key: "vercel",
@@ -27,6 +28,7 @@ const SERVICES = [
     placeholder: "xxxxxxxxxxxxxxxxxxxxxxxx",
     createUrl: "https://vercel.com/account/tokens",
     createLabel: "vercel.com/account/tokens",
+    steps: 3,
   },
   {
     key: "sendgrid",
@@ -37,6 +39,7 @@ const SERVICES = [
     placeholder: "SG.xxxxxxxxxxxxxxxx",
     createUrl: "https://app.sendgrid.com/settings/api_keys",
     createLabel: "app.sendgrid.com/settings/api_keys",
+    steps: 3,
   },
 ] as const;
 
@@ -48,6 +51,303 @@ const COMPOSIO_APPS = [
   { key: "linear", label: "Linear", icon: "📋", desc: "Track issues" },
   { key: "github", label: "GitHub PRs", icon: "🔀", desc: "Open PRs via Composio" },
 ];
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface FilingField {
+  name: string;
+  label: string;
+  type: "text" | "email" | "password" | "tel" | "select" | "disclaimer";
+  required?: boolean;
+  placeholder?: string;
+  default?: string;
+  options?: { value: string; label: string; description?: string }[];
+}
+
+type ModalPhase = "connecting" | "running" | "user_control" | "interaction_needed" | "bot_filling" | "done" | "error";
+
+// ── IntegrationModal ───────────────────────────────────────────────────────
+
+function IntegrationModal({
+  serviceKey, label, icon, stepCount, founderId, onConnected, onClose,
+}: {
+  serviceKey: string;
+  label: string;
+  icon: string;
+  stepCount: number;
+  founderId: string;
+  onConnected: () => void;
+  onClose: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const [phase, setPhase] = useState<ModalPhase>("connecting");
+  const [stepName, setStepName] = useState("Starting…");
+  const [stepNum, setStepNum] = useState(0);
+  const [message, setMessage] = useState("");
+  const [fields, setFields] = useState<FilingField[]>([]);
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const wsBase = BASE.replace("https://", "wss://").replace("http://", "ws://");
+    const ws = new WebSocket(`${wsBase}/connect/${serviceKey}/stream/${founderId}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => setPhase("running");
+    ws.onerror = () => { setPhase("error"); setMessage("WebSocket connection failed."); };
+    ws.onclose = () => { if (phase !== "done" && phase !== "error") setPhase("error"); };
+
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "frame") {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const img = new Image();
+        img.onload = () => {
+          canvas.width = img.naturalWidth || 1280;
+          canvas.height = img.naturalHeight || 800;
+          ctx.drawImage(img, 0, 0);
+        };
+        img.src = `data:image/jpeg;base64,${msg.data}`;
+        return;
+      }
+      if (msg.type === "user_control") {
+        setStepName(msg.step); setStepNum(msg.step_num ?? 1);
+        setMessage(msg.message || "Sign in in the browser below.");
+        setPhase("user_control");
+      } else if (msg.type === "status") {
+        setStepName(msg.step); setStepNum(msg.step_num);
+        setPhase("running"); setMessage("");
+      } else if (msg.type === "interaction_needed") {
+        setStepName(msg.step); setMessage(msg.message);
+        setFields(msg.fields || []); setFormValues({});
+        setFormError(""); setPhase("interaction_needed");
+      } else if (msg.type === "bot_filling") {
+        setPhase("bot_filling"); setMessage("Filling your information…");
+      } else if (msg.type === "done") {
+        setPhase("done"); onConnected();
+      } else if (msg.type === "error") {
+        setPhase("error"); setMessage(msg.message || "An error occurred.");
+      }
+    };
+
+    return () => { ws.close(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const submitInput = () => {
+    const data = { ...formValues };
+    fields.forEach(f => { if (f.type === "select" && !data[f.name] && f.default) data[f.name] = f.default; });
+    const missing = fields.filter(f => f.required && f.type !== "select" && f.type !== "disclaimer" && !data[f.name]?.trim());
+    if (missing.length) { setFormError(`Required: ${missing.map(f => f.label).join(", ")}`); return; }
+    setSubmitting(true); setFormError("");
+    wsRef.current?.send(JSON.stringify({ type: "founder_input", data }));
+    setPhase("bot_filling"); setSubmitting(false);
+  };
+
+  const stepPercent = stepCount > 0 ? Math.round((stepNum / stepCount) * 100) : 0;
+  const isUserControl = phase === "user_control";
+  const isLocked = phase !== "interaction_needed" && !isUserControl;
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isUserControl) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+    const y = Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
+    wsRef.current?.send(JSON.stringify({ type: "mouse_event", x, y }));
+    canvas.focus();
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isUserControl) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round((e.clientX - rect.left) * (canvas.width / rect.width));
+    const y = Math.round((e.clientY - rect.top) * (canvas.height / rect.height));
+    wsRef.current?.send(JSON.stringify({ type: "mouse_move", x, y }));
+  };
+
+  const handleCanvasKey = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if (!isUserControl) return;
+    e.preventDefault();
+    const printable = e.key.length === 1 ? e.key : "";
+    const special = ["Enter","Tab","Backspace","Delete","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Escape"].includes(e.key) ? e.key : "";
+    if (printable || special) {
+      wsRef.current?.send(JSON.stringify({ type: "key_event", key: e.key, char: printable }));
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "rgba(0,0,0,0.85)", backdropFilter: "blur(12px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+    }}>
+      <div style={{
+        width: "100%", maxWidth: 960, maxHeight: "calc(100vh - 48px)",
+        background: "var(--glass)", backdropFilter: "var(--blur)", WebkitBackdropFilter: "var(--blur)",
+        border: "1px solid var(--line)", borderRadius: 24,
+        boxShadow: "var(--shadow-lg)", overflow: "hidden", display: "flex", flexDirection: "column",
+      }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid var(--line-2)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 16 }}>{icon}</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--fg)" }}>Connecting {label}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-mono)" }}>
+              {stepNum > 0 ? `Step ${stepNum}/${stepCount} — ${stepName}` : stepName}
+            </span>
+            {phase !== "done" && (
+              <button onClick={() => { wsRef.current?.close(); onClose(); }}
+                className="site-btn site-btn-ghost" style={{ fontSize: 11, padding: "0 12px", minHeight: 28 }}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ height: 3, background: "var(--line-2)" }}>
+          <div style={{
+            height: "100%", borderRadius: 999, transition: "width 0.6s",
+            width: `${phase === "done" ? 100 : stepPercent}%`,
+            background: phase === "done" ? "linear-gradient(90deg,#4ade80,#22d3ee)" : "linear-gradient(90deg,#60a5fa,#a78bfa)",
+          }} />
+        </div>
+
+        {/* Browser canvas */}
+        <div style={{ position: "relative", background: "#0a0a0a", flex: "1 1 auto", overflow: "auto", minHeight: 280 }}>
+          <canvas
+            ref={canvasRef}
+            tabIndex={isUserControl ? 0 : -1}
+            onClick={handleCanvasClick}
+            onMouseMove={handleCanvasMouseMove}
+            onKeyDown={handleCanvasKey}
+            style={{
+              width: "100%", height: "auto", maxHeight: "55vh",
+              objectFit: "contain", display: "block",
+              pointerEvents: isUserControl ? "auto" : "none",
+              cursor: isUserControl ? "crosshair" : "default",
+              outline: isUserControl ? "2px solid rgba(96,165,250,0.4)" : "none",
+            }}
+          />
+
+          {/* Lock overlay when bot is running */}
+          {isLocked && phase !== "done" && phase !== "error" && phase !== "connecting" && (
+            <div style={{ position: "absolute", inset: 0, cursor: "not-allowed", zIndex: 10 }} />
+          )}
+
+          {/* User control banner */}
+          {isUserControl && (
+            <div style={{
+              position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)",
+              padding: "8px 18px", borderRadius: 20, zIndex: 20,
+              background: "rgba(96,165,250,0.15)", border: "1px solid rgba(96,165,250,0.4)",
+              display: "flex", alignItems: "center", gap: 8,
+              backdropFilter: "blur(8px)",
+            }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#60a5fa", flexShrink: 0 }} className="animate-pulse" />
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", whiteSpace: "nowrap" }}>
+                {message || "Sign in — click and type directly in the browser"}
+              </span>
+            </div>
+          )}
+
+          {phase === "connecting" && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+              <div style={{ width: 28, height: 28, border: "3px solid rgba(255,255,255,0.15)", borderTopColor: "#60a5fa", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)" }}>Connecting…</span>
+            </div>
+          )}
+
+          {(phase === "running" || phase === "bot_filling") && (
+            <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", padding: "8px 20px", borderRadius: 20, background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", gap: 8, zIndex: 20, whiteSpace: "nowrap" }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#60a5fa", animation: "spin 0.8s linear infinite" }} />
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>{stepName || "Working…"}</span>
+            </div>
+          )}
+
+          {phase === "done" && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20, background: "rgba(0,0,0,0.6)" }}>
+              <div style={{ padding: "24px 36px", borderRadius: 24, background: "rgba(0,0,0,0.8)", border: "1px solid rgba(74,222,128,0.3)", textAlign: "center" }}>
+                <div style={{ fontSize: 36, marginBottom: 10 }}>✓</div>
+                <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#4ade80" }}>{label} Connected!</p>
+                <button onClick={onClose} className="site-btn site-btn-primary" style={{ marginTop: 14, padding: "0 24px", fontSize: 13 }}>Done</button>
+              </div>
+            </div>
+          )}
+
+          {phase === "error" && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20, background: "rgba(0,0,0,0.6)" }}>
+              <div style={{ padding: "20px 28px", borderRadius: 20, background: "rgba(0,0,0,0.8)", border: "1px solid rgba(248,113,113,0.3)", textAlign: "center", maxWidth: 400 }}>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>⚠</div>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#f87171" }}>Connection failed</p>
+                <p style={{ margin: "6px 0 0", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{message}</p>
+                <button onClick={onClose} className="site-btn" style={{ marginTop: 12, fontSize: 12, padding: "0 16px", color: "#f87171", background: "rgba(248,113,113,0.1)", borderColor: "rgba(248,113,113,0.2)" }}>Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Interaction form */}
+        {phase === "interaction_needed" && fields.length > 0 && (
+          <div style={{ padding: "16px 20px", borderTop: "1px solid var(--line-2)", display: "flex", flexDirection: "column", gap: 12 }}>
+            {message && <p style={{ margin: 0, fontSize: 12, color: "var(--fg-dim)" }}>{message}</p>}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+              {fields.filter(f => f.type !== "disclaimer").map(f => (
+                <div key={f.name} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 11, color: "var(--fg-mute)" }}>{f.label}{f.required && " *"}</label>
+                  {f.type === "select" && f.options ? (
+                    <select
+                      value={formValues[f.name] ?? f.default ?? ""}
+                      onChange={e => setFormValues(v => ({ ...v, [f.name]: e.target.value }))}
+                      className="site-input"
+                      style={{ padding: "7px 10px", fontSize: 12 }}
+                    >
+                      {f.options.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}{o.description ? ` — ${o.description}` : ""}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={f.type}
+                      placeholder={f.placeholder}
+                      value={formValues[f.name] ?? ""}
+                      onChange={e => setFormValues(v => ({ ...v, [f.name]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === "Enter") submitInput(); }}
+                      className="site-input"
+                      style={{ padding: "7px 10px", fontSize: 12 }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            {fields.find(f => f.type === "disclaimer") && (
+              <p style={{ margin: 0, fontSize: 11, color: "var(--fg-mute)", fontStyle: "italic" }}>
+                {fields.find(f => f.type === "disclaimer")!.label}
+              </p>
+            )}
+            {formError && <p style={{ margin: 0, fontSize: 11, color: "#f87171" }}>{formError}</p>}
+            <button onClick={submitInput} disabled={submitting} className="site-btn site-btn-primary"
+              style={{ alignSelf: "flex-start", padding: "0 20px", fontSize: 13 }}>
+              {submitting ? "…" : "Continue →"}
+            </button>
+          </div>
+        )}
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
 
 function glass(extra?: React.CSSProperties): React.CSSProperties {
   return {
@@ -80,95 +380,58 @@ function ServiceCard({
   founderId: string;
   onSaved: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [value, setValue] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [justConnected, setJustConnected] = useState(false);
 
-  async function save() {
-    if (!value.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await saveServiceCredential(founderId, svc.key, { [svc.credKey]: value.trim() });
-      setSaved(true);
-      setExpanded(false);
-      onSaved();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const isConnected = connected || saved;
+  const isConnected = connected || justConnected;
 
   return (
-    <div style={{
-      ...glass(),
-      border: `1px solid ${isConnected ? "rgba(60,170,100,0.28)" : "rgba(255,255,255,0.09)"}`,
-      boxShadow: isConnected
-        ? "inset 0 1px 0 rgba(255,255,255,0.10), 0 0 20px rgba(60,170,100,0.04)"
-        : "inset 0 1px 0 rgba(255,255,255,0.10)",
-      overflow: "hidden",
-      transition: "border-color 0.3s",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px" }}>
-        <span style={{ fontSize: 20, flexShrink: 0 }}>{svc.icon}</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)" }}>{svc.label}</span>
-            <StatusDot connected={isConnected} />
-            {isConnected && <span style={{ fontSize: 10, color: "#6DC98A", fontFamily: "var(--font-mono)" }}>connected</span>}
+    <>
+      <div style={{
+        ...glass(),
+        border: `1px solid ${isConnected ? "rgba(60,170,100,0.28)" : "rgba(255,255,255,0.09)"}`,
+        boxShadow: isConnected
+          ? "inset 0 1px 0 rgba(255,255,255,0.10), 0 0 20px rgba(60,170,100,0.04)"
+          : "inset 0 1px 0 rgba(255,255,255,0.10)",
+        overflow: "hidden", transition: "border-color 0.3s",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px" }}>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>{svc.icon}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)" }}>{svc.label}</span>
+              <StatusDot connected={isConnected} />
+              {isConnected && <span style={{ fontSize: 10, color: "#6DC98A", fontFamily: "var(--font-mono)" }}>connected</span>}
+            </div>
+            <span style={{ fontSize: 11, color: "var(--fg-mute)" }}>{svc.desc}</span>
           </div>
-          <span style={{ fontSize: 11, color: "var(--fg-mute)" }}>{svc.desc}</span>
+          <button
+            onClick={() => setShowModal(true)}
+            style={{
+              padding: "5px 14px", borderRadius: 24, fontSize: 12, flexShrink: 0,
+              background: isConnected ? "rgba(60,170,100,0.10)" : "rgba(255,255,255,0.07)",
+              border: `1px solid ${isConnected ? "rgba(60,170,100,0.2)" : "rgba(255,255,255,0.12)"}`,
+              color: isConnected ? "#6DC98A" : "var(--fg-dim)",
+              cursor: "pointer", transition: "all 0.12s",
+            }}
+          >
+            {isConnected ? "Reconnect ↗" : "Connect ↗"}
+          </button>
         </div>
-        <button
-          onClick={() => setExpanded(e => !e)}
-          style={{
-            padding: "5px 14px", borderRadius: 24, fontSize: 12,
-            background: isConnected ? "rgba(60,170,100,0.10)" : "rgba(255,255,255,0.07)",
-            border: `1px solid ${isConnected ? "rgba(60,170,100,0.2)" : "rgba(255,255,255,0.10)"}`,
-            color: isConnected ? "#6DC98A" : "var(--fg-dim)",
-            cursor: "pointer", transition: "all 0.12s", flexShrink: 0,
-          }}
-        >
-          {isConnected ? "Update →" : "Connect →"}
-        </button>
       </div>
 
-      {expanded && (
-        <div style={{ borderTop: "1px solid var(--line-2)", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ fontSize: 11, color: "var(--fg-mute)" }}>
-            Get token at{" "}
-            <a href={svc.createUrl} target="_blank" rel="noopener noreferrer"
-              style={{ color: "var(--fg)", textDecoration: "none" }}>
-              {svc.createLabel} ↗
-            </a>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              value={value}
-              onChange={e => setValue(e.target.value)}
-              placeholder={svc.placeholder}
-              onKeyDown={e => e.key === "Enter" && save()}
-              className="site-input"
-              style={{ flex: 1, padding: "8px 12px", fontSize: 12, fontFamily: "var(--font-mono)" }}
-            />
-            <button
-              onClick={save}
-              disabled={saving || !value.trim()}
-              className="site-btn site-btn-primary"
-              style={{ padding: "0 16px", fontSize: 12, flexShrink: 0 }}
-            >
-              {saving ? "…" : "Save"}
-            </button>
-          </div>
-          {error && <p style={{ fontSize: 11, color: "#C97070", margin: 0 }}>{error}</p>}
-        </div>
+      {showModal && (
+        <IntegrationModal
+          serviceKey={svc.key}
+          label={svc.label}
+          icon={svc.icon}
+          stepCount={svc.steps}
+          founderId={founderId}
+          onConnected={() => { setJustConnected(true); onSaved(); }}
+          onClose={() => setShowModal(false)}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -241,6 +504,98 @@ function StripeCard({ founderId, email }: { founderId: string; email: string }) 
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Composio app grid with popup + polling ────────────────────────────────
+
+function ComposioAppGrid({ founderId, composioUrls }: { founderId: string; composioUrls: Record<string, string> }) {
+  const [connected, setConnected] = useState<Record<string, boolean>>({});
+  const [polling, setPolling] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Load initial status on mount
+  useEffect(() => {
+    fetch(`${BASE}/setup/composio/connected/${founderId}`)
+      .then(r => r.json())
+      .then(data => setConnected(data.apps ?? {}))
+      .catch(() => {});
+  }, [founderId]);
+
+  const openOAuth = (appKey: string, url: string) => {
+    const popup = window.open(url, `composio_${appKey}`, "width=860,height=640,scrollbars=yes,resizable=yes");
+    if (!popup) { window.open(url, "_blank"); return; }
+
+    setPolling(appKey);
+    pollRef.current = setInterval(() => {
+      // Check if popup closed
+      if (popup.closed) {
+        clearInterval(pollRef.current!);
+        setPolling(null);
+        // Final status check
+        fetch(`${BASE}/setup/composio/connected/${founderId}`)
+          .then(r => r.json())
+          .then(data => setConnected(data.apps ?? {}))
+          .catch(() => {});
+        return;
+      }
+      // Poll status while popup is open
+      fetch(`${BASE}/setup/composio/connected/${founderId}`)
+        .then(r => r.json())
+        .then(data => {
+          const apps = data.apps ?? {};
+          if (apps[appKey]) {
+            setConnected(prev => ({ ...prev, [appKey]: true }));
+            popup.close();
+            clearInterval(pollRef.current!);
+            setPolling(null);
+          }
+        })
+        .catch(() => {});
+    }, 2500);
+  };
+
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
+      {COMPOSIO_APPS.map(app => {
+        const url = composioUrls[app.key];
+        const isError = !url || url.startsWith("error:");
+        const isConnected = connected[app.key] === true;
+        const isPolling = polling === app.key;
+
+        return (
+          <button
+            key={app.key}
+            disabled={isError}
+            onClick={() => !isError && openOAuth(app.key, url)}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 24,
+              background: isConnected ? "rgba(60,170,100,0.10)" : isError ? "var(--glass-lo)" : "var(--glass-hi)",
+              border: `1px solid ${isConnected ? "rgba(60,170,100,0.28)" : isError ? "var(--line)" : "var(--line)"}`,
+              opacity: isError ? 0.45 : 1,
+              cursor: isError ? "not-allowed" : "pointer",
+              transition: "all 0.12s", textAlign: "left",
+            }}
+          >
+            <span style={{ fontSize: 16 }}>{app.icon}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 12, fontWeight: 500, color: "var(--fg)" }}>{app.label}</p>
+              <p style={{ margin: 0, fontSize: 10, color: "var(--fg-mute)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {isConnected ? "connected" : isPolling ? "waiting…" : app.desc}
+              </p>
+            </div>
+            {isConnected
+              ? <StatusDot connected={true} />
+              : isPolling
+                ? <span style={{ fontSize: 10, color: "#60a5fa" }}>⟳</span>
+                : !isError && <span style={{ fontSize: 11, color: "var(--fg)", flexShrink: 0 }}>↗</span>
+            }
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -442,37 +797,7 @@ export default function SetupPage() {
 
           {/* OAuth app grid */}
           {composioUrls && Object.keys(composioUrls).length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
-              {COMPOSIO_APPS.map(app => {
-                const url = composioUrls[app.key];
-                const isError = !url || url.startsWith("error:");
-                return (
-                  <a
-                    key={app.key}
-                    href={isError ? undefined : url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 24,
-                    background: isError ? "var(--glass-lo)" : "var(--glass-hi)",
-                    border: `1px solid ${isError ? "var(--line)" : "var(--line)"}`,
-                    textDecoration: "none", opacity: isError ? 0.45 : 1,
-                    cursor: isError ? "not-allowed" : "pointer",
-                    transition: "all 0.12s",
-                  }}
-                    onMouseEnter={e => { if (!isError) (e.currentTarget as HTMLElement).style.background = "var(--glass)"; }}
-                    onMouseLeave={e => { if (!isError) (e.currentTarget as HTMLElement).style.background = "var(--glass-hi)"; }}
-                  >
-                    <span style={{ fontSize: 16 }}>{app.icon}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ margin: 0, fontSize: 12, fontWeight: 500, color: "var(--fg)" }}>{app.label}</p>
-                      <p style={{ margin: 0, fontSize: 10, color: "var(--fg-mute)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app.desc}</p>
-                    </div>
-                    {!isError && <span style={{ fontSize: 11, color: "var(--fg)", flexShrink: 0 }}>↗</span>}
-                  </a>
-                );
-              })}
-            </div>
+            <ComposioAppGrid founderId={founderId} composioUrls={composioUrls} />
           )}
 
           {!composioUrls && (
