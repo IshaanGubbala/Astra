@@ -830,21 +830,28 @@ Output ONLY the completed HTML — no explanation, no markdown fences.
 
             logger.info("HTML accepted (%d chars) — running error-fix pass …", len(body))
             fix_prompt = (
-                "You are a senior front-end engineer reviewing an HTML landing page.\n"
-                "Find and fix ONLY real errors. Do NOT redesign, do NOT change colors, do NOT change layout.\n"
-                "Fix only:\n"
+                "You are a senior front-end engineer and visual designer doing a polish pass on an HTML landing page.\n"
+                "PRESERVE the existing colors, brand identity, and overall layout. Do NOT replace them.\n\n"
+                "Fix these bugs if present:\n"
                 "- Broken JS (accordion not toggling, counter not animating, form not submitting)\n"
                 "- Missing closing tags or malformed HTML\n"
-                "- Placeholder text left in (e.g. 'Lorem ipsum', 'TODO', '[insert]')\n"
+                "- Placeholder text (e.g. 'Lorem ipsum', 'TODO', '[insert]', '[company name]')\n"
                 "- Empty sections with no content\n"
-                "- Duplicate IDs\n"
-                "If no errors found, output the HTML unchanged.\n"
-                "Output ONLY the complete fixed HTML — no explanation, no markdown fences.\n\n"
+                "- Duplicate IDs\n\n"
+                "Then improve visual quality using the EXISTING color palette:\n"
+                "- Add smooth CSS scroll-triggered animations (fade-in, slide-up) using IntersectionObserver\n"
+                "- Strengthen hover states on buttons and cards\n"
+                "- Tighten spacing rhythm — ensure consistent 8px-grid margins/padding\n"
+                "- Add a subtle gradient or texture to hero background for depth\n"
+                "- Ensure all 13 sections have real content (hero, proof, philosophy, bento, stats, how, features, testimonials, pricing, timeline, faq, waitlist, footer)\n"
+                "- Any section that is sparse or empty — fill it with specific product copy\n\n"
+                "Keep the same aesthetic. Make it feel more polished, not different.\n"
+                "Output ONLY the complete improved HTML — no explanation, no markdown fences.\n\n"
                 + body
             )
             fix_oc_prompt = (
-                "Review this HTML for bugs only (no redesign), fix any errors, then write the fixed HTML "
-                "to `index.html` using the Write tool. No explanation — just write the file.\n\n"
+                "Polish this HTML landing page — fix bugs and improve visual quality without changing the design direction. "
+                "Write the final version to `index.html` using the Write tool. No explanation.\n\n"
                 + fix_prompt
             )
             try:
