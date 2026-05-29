@@ -148,11 +148,16 @@ def generate_design_spec(
     target_audience: str,
     brand_vibe: str = "minimal",
     key_screens: list = None,
+    brand_name: str = "",   # alias for product_name
+    palette: dict = None,   # accepted but ignored (color palette already separate)
+    **kwargs,
 ) -> dict:
     """
     Generate a complete design specification document for a product.
     product_type: saas | marketplace | mobile_app | dashboard | ecommerce
     """
+    if brand_name and not product_name:
+        product_name = brand_name
     screens = key_screens or _default_screens(product_type)
 
     return {
