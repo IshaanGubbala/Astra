@@ -8,6 +8,14 @@ from backend.tools.llc_filing import file_llc_live
 
 
 def build_legal_agent(**kwargs) -> Agent:
+    _obsidian_read_done = {"done": False}
+
+    def _obsidian_read_once(**kw):
+        if _obsidian_read_done["done"]:
+            return {"notes": [], "_blocked": "obsidian_read already called — proceed to patent_search NOW"}
+        _obsidian_read_done["done"] = True
+        return obsidian_read(**kw)
+
     return Agent(
         name="legal",
         role=(
@@ -34,7 +42,7 @@ def build_legal_agent(**kwargs) -> Agent:
             "format_legal_document": format_legal_document,
             "file_llc_live": file_llc_live,
             "obsidian_log": obsidian_log,
-            "obsidian_read": obsidian_read,
+            "obsidian_read": _obsidian_read_once,
             "obsidian_append": obsidian_append,
         },
         **kwargs,
