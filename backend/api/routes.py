@@ -158,6 +158,53 @@ async def ask_agent(body: AskRequest):
     return {"agent": body.target_agent, "response": result}
 
 
+@router.post("/chat/{agent_key}")
+async def chat_agent(agent_key: str, body: AskRequest):
+    """
+    Lightweight single-turn chat with a specific agent.
+    Makes a direct LLM call with the agent's role as system prompt —
+    no tool calls, no JSON format, just a plain conversational response.
+    """
+    import openai as _openai
+    from backend.config import settings
+
+    orch = get_orchestrator()
+    # Try exact key first, then strip trailing _N suffix (e.g. "research_3" → "research")
+    import re as _re
+    base_key = _re.sub(r"_\d+$", "", agent_key)
+    agent = orch.specialists.get(agent_key) or orch.specialists.get(base_key)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_key}' not found. Available: {list(orch.specialists.keys())}")
+
+    system_prompt = (
+        f"{agent.role}\n\n"
+        "You are answering a direct question from the founder. "
+        "Be concise, specific, and helpful. Respond in plain text — no JSON, no markdown headers."
+    )
+
+    try:
+        client = _openai.AsyncOpenAI(
+            base_url=settings.agent_model_base_url,
+            api_key=settings.agent_model_api_key,
+        )
+        resp = await client.chat.completions.create(
+            model=settings.agent_model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": body.question},
+            ],
+            temperature=0.3,
+            timeout=60.0,
+        )
+        reply = resp.choices[0].message.content or ""
+        import re
+        reply = re.sub(r"<think>.*?</think>", "", reply, flags=re.DOTALL).strip()
+        return {"agent": agent_key, "response": reply}
+    except Exception as e:
+        logger.error("Chat agent %s error: %s", agent_key, e)
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @router.post("/steer")
 async def steer_session(body: SteerRequest):
     """Inject a founder directive into a running session."""

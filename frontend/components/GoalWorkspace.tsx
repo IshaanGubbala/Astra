@@ -964,6 +964,132 @@ function AgentPreview({ state, founderId, company }: { state: AgentState; founde
   }
 }
 
+// ── Agent chat ─────────────────────────────────────────────────────────────
+
+interface AgentChatMsg { role: "user" | "agent"; text: string; }
+
+function AgentChat({ agentKey, founderId }: { agentKey: string; founderId: string }) {
+  const [msgs, setMsgs] = useState<AgentChatMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const label = AGENT_LABELS[agentKey] ?? agentKey;
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs]);
+
+  const send = async () => {
+    const q = input.trim();
+    if (!q || loading) return;
+    setInput("");
+    setMsgs(m => [...m, { role: "user", text: q }]);
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE}/chat/${agentKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_agent: agentKey, question: q, founder_id: founderId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const reply = typeof data.response === "string" ? data.response : JSON.stringify(data.response);
+      setMsgs(m => [...m, { role: "agent", text: reply }]);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setMsgs(m => [...m, { role: "agent", text: `⚠ ${msg}` }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      borderTop: "1px solid var(--line-2)",
+      paddingTop: 14,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+      marginTop: 4,
+    }}>
+      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--fg-mute)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        Ask {label}
+      </span>
+
+      {msgs.length > 0 && (
+        <div style={{
+          display: "flex", flexDirection: "column", gap: 8,
+          maxHeight: 260, overflowY: "auto",
+          padding: "10px 12px", borderRadius: 14,
+          background: "rgba(180,205,228,0.06)",
+          border: "1px solid var(--line-2)",
+        }}>
+          {msgs.map((m, i) => (
+            <div key={i} style={{
+              display: "flex",
+              justifyContent: m.role === "user" ? "flex-end" : "flex-start",
+            }}>
+              <div style={{
+                maxWidth: "85%",
+                padding: "8px 12px",
+                borderRadius: m.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
+                background: m.role === "user"
+                  ? "linear-gradient(135deg,#3b82f6,#6366f1)"
+                  : "rgba(180,205,228,0.12)",
+                border: m.role === "agent" ? "1px solid var(--line-2)" : "none",
+                fontSize: 12,
+                lineHeight: 1.6,
+                color: m.role === "user" ? "#fff" : "var(--fg-dim)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}>
+                {m.text}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 2px" }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6", animation: "blink 0.8s infinite" }} />
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6", animation: "blink 0.8s 0.15s infinite" }} />
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6", animation: "blink 0.8s 0.3s infinite" }} />
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder={`Ask ${label} something…`}
+          disabled={loading}
+          style={{
+            flex: 1, padding: "9px 14px", borderRadius: 10,
+            background: "rgba(180,205,228,0.07)",
+            border: "1px solid var(--line-2)",
+            color: "var(--fg)", fontSize: 12, outline: "none",
+          }}
+        />
+        <button onClick={send} disabled={loading || !input.trim()}
+          style={{
+            padding: "0 16px", borderRadius: 10, border: "none",
+            background: loading || !input.trim() ? "rgba(59,130,246,0.3)" : "linear-gradient(135deg,#3b82f6,#6366f1)",
+            color: "#fff", fontSize: 12, fontWeight: 600, cursor: loading ? "wait" : "pointer",
+            transition: "background 0.2s",
+          }}>
+          {loading ? "…" : "Send"}
+        </button>
+      </div>
+      <style>{`@keyframes blink{0%,100%{opacity:0.2}50%{opacity:1}}`}</style>
+    </div>
+  );
+}
+
 // ── Agent detail panel ──────────────────────────────────────────────────────
 
 type DetailTab = "preview" | "plan" | "log" | "obsidian";
@@ -1159,6 +1285,9 @@ function AgentDetail({
           </div>
         )}
       </div>
+
+      {/* ── Agent chat ──────────────────────────────────────────────── */}
+      <AgentChat agentKey={state.agent} founderId={founderId} />
     </div>
   );
 }
