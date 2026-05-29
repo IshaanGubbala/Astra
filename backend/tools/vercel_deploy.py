@@ -737,29 +737,37 @@ Output ONLY the completed HTML — no explanation, no markdown fences.
 {scaffold}"""
 
     logger.info("design_context passed to HTML gen: %.600s", _design_context)
-    import time as _time, openai
-    from backend.tools._llm import _api_key, _DI_BASE
+    import time as _time, tempfile
+    from pathlib import Path as _Path
+    from backend.tools.git_tools import _run_claude
+
+    oc_prompt = (
+        "Write the complete HTML to `index.html` using the Write tool RIGHT NOW. "
+        "No explanation, no markdown — just write the file immediately.\n\n"
+        + prompt
+    )
 
     for attempt in range(2):
-        logger.info("HTML gen attempt %d/2 (direct API, nemotron-nano) …", attempt + 1)
+        logger.info("HTML gen attempt %d/2 (openclaude, Qwen3.6-35B) …", attempt + 1)
         t0 = _time.monotonic()
         try:
-            client = openai.OpenAI(base_url=_DI_BASE, api_key=_api_key())
-            resp = client.chat.completions.create(
-                model="Qwen/Qwen3-235B-A22B-Instruct-2507",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=32000,
-                timeout=600.0,
-            )
-            html = resp.choices[0].message.content or ""
-            elapsed = _time.monotonic() - t0
-            logger.info("HTML gen attempt %d done in %.1fs — %d chars", attempt + 1, elapsed, len(html))
-            _preview_path = "/tmp/astra_last_html.html"
-            try:
-                open(_preview_path, "w").write(html)
-                logger.info("HTML saved to %s — open in browser to preview", _preview_path)
-            except Exception:
-                pass
+            with tempfile.TemporaryDirectory() as tmpdir:
+                stdout = _run_claude(tmpdir, oc_prompt, session_id=None, timeout=480, model="Qwen/Qwen3.6-35B-A3B")
+                elapsed = _time.monotonic() - t0
+                logger.info("  openclaude stdout (%d chars): %.300s", len(stdout), stdout)
+                index = _Path(tmpdir) / "index.html"
+                if not index.exists():
+                    logger.warning("HTML attempt %d — index.html not written (%.1fs)", attempt + 1, elapsed)
+                    continue
+                html = index.read_text(encoding="utf-8")
+                elapsed = _time.monotonic() - t0
+                logger.info("HTML gen attempt %d done in %.1fs — %d chars", attempt + 1, elapsed, len(html))
+                _preview_path = "/tmp/astra_last_html.html"
+                try:
+                    open(_preview_path, "w").write(html)
+                    logger.info("HTML saved to %s", _preview_path)
+                except Exception:
+                    pass
 
             # Post-process: swap banned fonts for our chosen heading font
             _banned_re = re.compile(r"\b(Inter|Poppins|Roboto|Lato|Open\+Sans|Open Sans)\b", re.IGNORECASE)
