@@ -720,7 +720,7 @@ Code requirements: Tailwind CDN, Google Fonts, all JS inline in the file."""
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 logger.info("  tmpdir: %s", tmpdir)
-                stdout = _run_claude(tmpdir, oc_prompt, session_id=None, timeout=300, model="anthropic/claude-haiku-4-5")
+                stdout = _run_claude(tmpdir, oc_prompt, session_id=None, timeout=300, model="nvidia/NVIDIA-Nemotron-3-Super-120B-A12B")
                 elapsed = _time.monotonic() - t0
                 logger.info("  openclaude stdout (%d chars): %.500s", len(stdout), stdout)
                 index = _Path(tmpdir) / "index.html"
