@@ -639,19 +639,12 @@ Start the output with <!DOCTYPE html> immediately."""
     def _looks_like_fallback_template(text: str) -> bool:
         if not isinstance(text, str):
             return False
-        lowered = text.lower()
-        markers = (
-            "astra-fallback-template",
-            "--bg: #06080f",
-            "--bg2: #0d1117",
-            "define your goal",
-            "astra builds it",
-        )
-        return any(m in lowered for m in markers)
+        # Only flag the explicit HTML comment marker — CSS vars / copy strings are too generic
+        return "astra-fallback-template" in text
 
     for attempt in range(3):
         try:
-            html = generate(prompt, max_tokens=6000, model="instruct")
+            html = generate(prompt, max_tokens=6000, model="fast")
             # Strip markdown fences then find DOCTYPE even if LLM added preamble text
             html = re.sub(r"```html?", "", html, flags=re.IGNORECASE).strip().rstrip("`").strip()
             doctype_pos = html.lower().find("<!doctype")
@@ -666,7 +659,7 @@ Start the output with <!DOCTYPE html> immediately."""
                 body = html[html_tag_pos:]
                 if not _looks_like_fallback_template(body):
                     return "<!DOCTYPE html>\n" + body
-            logger.warning("LLM HTML attempt %d had no valid <!DOCTYPE>", attempt + 1)
+            logger.warning("LLM HTML attempt %d had no valid <!DOCTYPE>. Preview: %.200r", attempt + 1, html[:200])
         except Exception as e:
             logger.warning("LLM HTML generation attempt %d failed (%s)", attempt + 1, e)
 
