@@ -619,69 +619,21 @@ def generate_landing_page_html(
             f"  layout={layout}"
         )
 
-    prompt = f"""You are a senior product designer and frontend engineer who specialises in clean, premium, intentional UI. Write a complete single-file HTML landing page. Output ONLY raw HTML — no markdown, no backticks, no explanation.
+    prompt = f"""Create a stunning, unique landing page for {name}.
 
 PRODUCT
-Name: {name}
-Headline: {headline}
-Subheadline: {subheadline}
+{headline}
+{subheadline}
+
 Value props:
 {props_text}
-CTA: "{cta_text}" → {cta_url}
-Design context (use any hex colors, fonts, brand_vibe specified here — they override all defaults): {_design_context or "N/A"}
 
-═══════════════════════════════════════
-MANDATORY DESIGN SYSTEM — violating any rule is a failure
-═══════════════════════════════════════
+CTA: "{cta_text}" linking to {cta_url}
 
-SPACING: Strict 8-point grid. Every margin, padding, gap must be a multiple of 8px (8, 16, 24, 32, 48, 64, 96, 128). Zero random values.
+Design context (colors, fonts, brand vibe — apply these if provided):
+{_design_context or "Choose whatever looks incredible for this product."}
 
-TYPOGRAPHY: Pick ONE distinctive heading font loaded from Google Fonts (NOT Inter, NOT Roboto, NOT Poppins, NOT Montserrat — choose something with character: Fraunces, Playfair Display, Space Grotesk, DM Serif Display, Syne, Cabinet Grotesk, Switzer, Clash Display, etc.). Pair with ONE clean body font. Define a type scale and use it consistently. Hero h1: clamp(3rem,6vw,5.5rem), weight 700-900, letter-spacing -0.03em. Section headers: 1.75rem-2.5rem. Body: 1rem/1.7. Never mix weights randomly.
-
-COLORS: If design context has hex values, use them exactly. Otherwise pick a palette that fits the product — do NOT default to dark blue #06080f every time. Consider: warm off-white with charcoal (#1a1a1a), or sage green with cream, or deep navy with gold, or pure white with black and one sharp accent. The palette must feel intentional for THIS specific product. No purple unless brand calls for it.
-
-BORDERS & RADIUS: Pick ONE radius and use it everywhere (either 4px, 8px, 12px, or 16px — not mixed). Cards, buttons, inputs all match.
-
-REQUIRED ELEMENTS (include all, but arrange and design them however suits the product — DO NOT use the same standard section order every time):
-- Sticky nav: brand name left, 1 CTA button. Backdrop-filter: blur(12px). Semi-transparent bg.
-- Hero: make it memorable. Choose ONE of: full-bleed dark, oversized editorial type, split with live UI mockup, asymmetric with floating stat cards, magazine pull-quote style, brutalist oversized grid. NOT a centered headline + subheadline + button — that's the default and it's banned.
-- Social proof: 3-4 real metrics (format "X,XXX" / "Y%" / "$ZM"). Can be inline in hero, a floating bar, or a dark band — your call.
-- Value section: features/benefits. Can be 2-col, 3-col, alternating rows, numbered list, or a large statement grid. NOT always 3-col cards.
-- Process/how-it-works: 3 steps. Horizontal, vertical, diagonal, or timeline — your call.
-- Final CTA: 1 headline, 1 line, 1 button.
-- Footer: © {name} 2026. Privacy · Terms · Contact. One line.
-
-LAYOUT CREATIVITY RULES:
-- Every generation must make a DIFFERENT structural choice. Think: what layout would a top design agency choose for THIS specific product?
-- Use asymmetry, overlap, large whitespace, or tight density — not the standard SaaS template.
-- Hero MUST be unique. If you find yourself doing "big headline, subheadline, button, then stats bar" — stop and redesign it.
-
-BANNED — automatic failure if any of these appear:
-✗ Purple gradient hero (unless brand color is purple)
-✗ Sparkle emoji ✨ anywhere
-✗ Emojis as UI icons or in headings
-✗ Fake testimonials with AI-generated-looking avatars
-✗ Social icons linking to # or twitter.com/
-✗ "Build your dreams" / "Launch faster" / "Where ideas become reality" type filler copy
-✗ Card hover that lifts, scales, rotates, or bounces
-✗ Lottie animations or any JS animation
-✗ Inconsistent border radii
-✗ Random spacing not on the 8pt grid
-✗ Inter/Roboto/Poppins/Montserrat as heading font
-✗ Multiple gradient backgrounds stacked
-✗ Copyright saying "YourSiteName" or "2024" (use {name} and 2026)
-
-TECHNICAL:
-- All CSS in one <style> block — zero CDN, zero external dependencies EXCEPT Google Fonts (one @import is fine)
-- Two breakpoints: 768px (tablet) and 480px (mobile)
-- Every button, link, and interactive element must be functional or clearly labeled
-- Meta tags: charset, viewport, description, og:title, og:description
-- Favicon: <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
-- No placeholder text. No "Lorem ipsum". No "Coming soon" unless product is pre-launch.
-
-The result must look like it was designed by a real product team, not generated. Every choice should feel intentional. Restraint and consistency over novelty.
-
-Start the output with <!DOCTYPE html> immediately."""
+Write a complete single-file HTML+CSS landing page to index.html. Make it look world-class — the kind of site a top-tier design agency would ship. Be creative with layout, typography, and color. No templates, no generic SaaS look. Copyright footer: © {name} 2026."""
 
     from backend.tools._llm import generate
 
