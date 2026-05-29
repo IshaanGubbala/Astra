@@ -229,13 +229,21 @@ async def chat_agent(agent_key: str, body: AskRequest):
     # ── 3. Assemble system prompt with a clean conversational role ────────────
     role_description = _AGENT_CHAT_ROLES.get(base_key, f"You are Astra's {base_key.capitalize()} agent.")
 
-    context_blocks = [b for b in [brain_context, obsidian_context, body.context or ""] if b.strip()]
+    # Company identity block — always at top so model never forgets it
+    identity_lines = []
+    if body.company_name:
+        identity_lines.append(f"Company name: {body.company_name}")
+    if body.goal:
+        identity_lines.append(f"Founder's goal: {body.goal}")
+    identity_block = "\n".join(identity_lines)
+
+    context_blocks = [b for b in [identity_block, brain_context, obsidian_context, body.context or ""] if b.strip()]
     context_section = ("\n\n---\n\n".join(context_blocks)) if context_blocks else ""
 
     system_prompt = (
         f"{role_description}\n\n"
         "You are answering a direct question from the founder. "
-        "Use the context below — company knowledge, prior research, and session notes — "
+        "Use the context below — company identity, company knowledge, prior research, and session notes — "
         "to give a specific, grounded answer. "
         "Be concise and helpful. Respond in plain conversational text. "
         "Do NOT output JSON. Do NOT use markdown headers. Bullet points are fine."

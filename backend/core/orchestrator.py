@@ -310,6 +310,22 @@ class Orchestrator:
         await publish(session_id, {"type": "company_name", "name": company_name})
         logger.info("Company name: %s", company_name)
 
+        # Persist company identity to brain so chat always knows it
+        try:
+            from backend.tools.company_brain import add_company_brain_record
+            await asyncio.to_thread(
+                add_company_brain_record,
+                founder_id=founder_id,
+                source="astra",
+                title="Company Identity",
+                content=f"Company name: {company_name}\nFounder goal: {goal}\nSession: {session_id}",
+                kind="fact",
+                canonical=True,
+                stale_risk="low",
+            )
+        except Exception as _bi:
+            logger.warning("Brain identity record failed: %s", _bi)
+
         # Expand the goal with Qwen3-235B before anything else
         goal = await self._expand_goal(goal, session_id)
 

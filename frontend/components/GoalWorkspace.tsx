@@ -968,7 +968,7 @@ function AgentPreview({ state, founderId, company }: { state: AgentState; founde
 
 interface AgentChatMsg { role: "user" | "agent"; text: string; }
 
-function AgentChat({ agentKey, founderId, sessionId }: { agentKey: string; founderId: string; sessionId?: string }) {
+function AgentChat({ agentKey, founderId, sessionId, company, goal }: { agentKey: string; founderId: string; sessionId?: string; company?: string; goal?: string }) {
   const [msgs, setMsgs] = useState<AgentChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -989,7 +989,7 @@ function AgentChat({ agentKey, founderId, sessionId }: { agentKey: string; found
       const res = await fetch(`${BASE}/chat/${agentKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_agent: agentKey, question: q, founder_id: founderId, session_id: sessionId }),
+        body: JSON.stringify({ target_agent: agentKey, question: q, founder_id: founderId, session_id: sessionId, company_name: company || undefined, goal: goal || undefined }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -1100,12 +1100,14 @@ function AgentDetail({
   sessionId,
   founderId,
   company,
+  goal,
 }: {
   state: AgentState;
   planTask: AgentTask | undefined;
   sessionId: string;
   founderId: string;
   company?: string;
+  goal?: string;
 }) {
   const [tab, setTab] = useState<DetailTab>("preview");
   const [obsidianNote, setObsidianNote] = useState<string | null>(null);
@@ -1287,7 +1289,7 @@ function AgentDetail({
       </div>
 
       {/* ── Agent chat — key resets state when switching agents ── */}
-      <AgentChat key={`${state.agent}-${sessionId ?? "nosession"}`} agentKey={state.agent} founderId={founderId} sessionId={sessionId} />
+      <AgentChat key={`${state.agent}-${sessionId ?? "nosession"}`} agentKey={state.agent} founderId={founderId} sessionId={sessionId} company={company} goal={goal} />
     </div>
   );
 }
@@ -2768,7 +2770,7 @@ export function GoalWorkspace({
           {/* Detail panel */}
           <LiquidGlass style={{ minWidth: 0 }} contentStyle={{ padding: "20px 28px", minHeight: 620, display: "flex", flexDirection: "column" }}>
             {selectedState ? (
-              <AgentDetail state={selectedState} planTask={selectedPlanTask} sessionId={sessionId} founderId={founderId} company={company || autoCompanyName} />
+              <AgentDetail state={selectedState} planTask={selectedPlanTask} sessionId={sessionId} founderId={founderId} company={company || autoCompanyName} goal={instruction} />
             ) : (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: "var(--fg-mute)", fontSize: 13 }}>Select an agent</div>
             )}
