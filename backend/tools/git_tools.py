@@ -21,19 +21,21 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 def _find_claude_bin() -> str:
-    """Find claude/openclaude binary — Mac homebrew or Linux npm global install."""
+    """Find openclaude binary (supports --provider flag). Falls back to claude."""
     import shutil
+    # openclaude first — it supports --provider openai for DeepInfra
     for candidate in [
+        "/opt/homebrew/bin/openclaude",
+        "/usr/local/bin/openclaude",
+        shutil.which("openclaude") or "",
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
         "/usr/bin/claude",
         shutil.which("claude") or "",
-        "/opt/homebrew/bin/openclaude",
-        shutil.which("openclaude") or "",
     ]:
         if candidate and os.path.isfile(candidate):
             return candidate
-    return "claude"  # fall back to PATH lookup at runtime
+    return "openclaude"
 
 OPENCLAUDE_BIN = _find_claude_bin()
 
