@@ -2,10 +2,11 @@
 Sync LLM helper for content-generation tools.
 
 Models:
-  "fast"    → DeepSeek-V4-Flash   (default, general purpose)
-  "large"   → DeepSeek-V4-Flash   (docs, copy)
-  "instruct" → Qwen3-235B      (strict rule-following: HTML, design, sales)
-  "image"   → FLUX-2-pro          (image generation)
+  "fast"      → DeepSeek-V4-Flash        (default, general purpose)
+  "large"     → DeepSeek-V4-Flash        (docs, copy)
+  "instruct"  → Llama-4-Scout-17B        (strict rule-following)
+  "nemotron"  → NVIDIA-Nemotron-3-Super-120B-A12B  (HTML/design generation)
+  "image"     → FLUX-2-pro               (image generation)
 """
 import re
 from backend.config import settings
@@ -13,6 +14,7 @@ from backend.config import settings
 _FAST_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 _LARGE_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
 _INSTRUCT_MODEL = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+_NEMOTRON_MODEL = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B"
 _IMAGE_MODEL = "black-forest-labs/FLUX-2-pro"
 _PROMPT_MODEL = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
 _DI_BASE = "https://api.deepinfra.com/v1/openai"
@@ -34,6 +36,8 @@ def generate(prompt: str, max_tokens: int | None = None, json_mode: bool = False
         selected = _LARGE_MODEL
     elif model == "instruct":
         selected = _INSTRUCT_MODEL
+    elif model == "nemotron":
+        selected = _NEMOTRON_MODEL
     else:
         selected = _FAST_MODEL
     kwargs: dict = dict(
