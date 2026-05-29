@@ -5,7 +5,13 @@ from typing import Optional
 class GoalRequest(BaseModel):
     founder_id: str
     instruction: str
+    stack_id: Optional[str] = None
     constraints: dict = {}
+
+
+class StackRecommendRequest(BaseModel):
+    instruction: str
+    company_stage: Optional[str] = None
 
 
 class ApproveRequest(BaseModel):
@@ -18,6 +24,19 @@ class RejectRequest(BaseModel):
     task_id: str
     reason: str
     redirect_instruction: Optional[str] = None
+
+
+class StackApprovalDecisionRequest(BaseModel):
+    session_id: str
+    gate_key: str
+    decision: str  # "approved" | "skipped"
+    founder_id: Optional[str] = None
+    note: Optional[str] = None
+
+
+class SessionAskRequest(BaseModel):
+    question: str
+    founder_id: Optional[str] = None
 
 
 class AskRequest(BaseModel):

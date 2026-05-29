@@ -596,9 +596,9 @@ function StripeCard({ founderId, email }: { founderId: string; email: string }) 
         {loading ? (
           <span style={{ fontSize: 11, color: "var(--fg-mute)" }}>…</span>
         ) : isConnected ? (
-          <Link href="/payments" className="site-btn site-btn-ghost" style={{ padding: "5px 14px", fontSize: 12, flexShrink: 0 }}>
-            View dashboard →
-          </Link>
+          <span style={{ fontSize: 11, color: "var(--fg-mute)", flexShrink: 0 }}>
+            Ready for stack runs
+          </span>
         ) : (
           <button onClick={connect} disabled={connecting} style={{ padding: "5px 14px", borderRadius: 24, fontSize: 12, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.10)", color: "var(--fg-dim)", cursor: "pointer", flexShrink: 0 }}>
             {connecting ? "Redirecting…" : "Connect →"}
@@ -934,9 +934,6 @@ export default function SetupPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <Link href="/" className="site-btn site-btn-ghost" style={{ padding: "0 14px", fontSize: 12 }}>
             ← Back
-          </Link>
-          <Link href="/brain" className="site-btn site-btn-ghost" style={{ padding: "0 14px", fontSize: 12 }}>
-            Company brain
           </Link>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "var(--fg)", letterSpacing: "-0.02em" }}>

@@ -56,11 +56,7 @@ export default function SettingsPage() {
             Manage →
           </Link>
         } />
-        <Row label="Stripe" desc="View revenue, balance, and transactions" action={
-          <Link href="/payments" className="site-btn site-btn-ghost" style={{ fontSize: 12, padding: "0 14px", minHeight: 34 }}>
-            Payments →
-          </Link>
-        } />
+        <Row label="Stripe" desc="Connect payment context for launch and revenue work" action={<span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 999, background: "var(--glass-hi)", color: "var(--fg-dim)", border: "1px solid var(--line)", fontFamily: "var(--font-mono)" }}>Managed in integrations</span>} />
       </Section>
 
       <Section title="Notifications">

@@ -23,6 +23,9 @@ from backend.api.schemas import (
     RejectRequest,
     SetupRequest,
     SaveCredentialRequest,
+    SessionAskRequest,
+    StackApprovalDecisionRequest,
+    StackRecommendRequest,
     SteerRequest,
     StripeEINUpgradeRequest,
     StripeProductRequest,
@@ -61,18 +64,63 @@ from backend.core.events import stream_events, publish
 router = APIRouter()
 
 
+@router.get("/stacks")
+async def stacks():
+    from backend.stacks import list_stack_templates
+
+    return {"stacks": list_stack_templates()}
+
+
+@router.post("/stacks/recommend")
+async def recommend_stack_route(body: StackRecommendRequest):
+    from backend.stacks import recommend_stack
+
+    return recommend_stack(body.instruction, body.company_stage).to_public_dict()
+
+
+@router.get("/stacks/{stack_id}/operating-plan")
+async def stack_operating_plan_route(stack_id: str, goal: str = "", company_name: str = ""):
+    from backend.stacks import build_stack_operating_plan, get_stack_template
+
+    return build_stack_operating_plan(get_stack_template(stack_id), goal, company_name)
+
+
+@router.get("/stacks/{stack_id}/manifest")
+async def stack_manifest_route(stack_id: str, goal: str = "", company_name: str = ""):
+    from backend.stacks import build_stack_manifest, get_stack_template
+
+    return build_stack_manifest(get_stack_template(stack_id), goal, company_name)
+
+
+@router.get("/stacks/{stack_id}/readiness/{founder_id}")
+async def stack_readiness_route(stack_id: str, founder_id: str):
+    from backend.stacks import stack_readiness
+
+    return stack_readiness(founder_id, stack_id)
+
+
+@router.get("/stacks/{stack_id}/connector-coverage/{founder_id}")
+async def stack_connector_coverage_route(stack_id: str, founder_id: str):
+    from backend.connector_coverage import build_connector_coverage
+
+    return build_connector_coverage(founder_id, stack_id)
+
+
 @router.post("/goal")
 async def submit_goal(body: GoalRequest):
     import uuid as _uuid
     session_id = _uuid.uuid4().hex[:12]
     orch = get_orchestrator()
+    constraints = dict(body.constraints or {})
+    if body.stack_id:
+        constraints["stack_id"] = body.stack_id
 
     async def _run():
         try:
             await orch.run(
                 goal=body.instruction,
                 founder_id=body.founder_id,
-                constraints=body.constraints,
+                constraints=constraints,
                 session_id=session_id,
             )
         except Exception as e:
@@ -104,6 +152,74 @@ async def stream_goal(session_id: str, request: Request):
     })
 
 
+@router.get("/sessions/{session_id}/digest")
+async def session_digest(session_id: str):
+    from backend.core.events import _event_log, _restore_session
+    from backend.session_digest import build_session_digest
+
+    if session_id not in _event_log:
+        await asyncio.to_thread(_restore_session, session_id)
+    events = _event_log.get(session_id, [])
+    if not events:
+        raise HTTPException(status_code=404, detail="session event log not found")
+    return build_session_digest(session_id, events)
+
+
+@router.get("/sessions/{session_id}/subteam-report")
+async def session_subteam_report(session_id: str, team: str = "engineering"):
+    from backend.core.events import _event_log, _restore_session
+    from backend.session_digest import build_subteam_report
+
+    if session_id not in _event_log:
+        await asyncio.to_thread(_restore_session, session_id)
+    events = _event_log.get(session_id, [])
+    if not events:
+        raise HTTPException(status_code=404, detail="session event log not found")
+    return build_subteam_report(session_id, events, team)
+
+
+@router.get("/sessions/{session_id}/workboard")
+async def session_workboard(session_id: str):
+    from backend.core.events import _event_log, _restore_session
+    from backend.workboard import build_session_workboard
+
+    if session_id not in _event_log:
+        await asyncio.to_thread(_restore_session, session_id)
+    events = _event_log.get(session_id, [])
+    if not events:
+        raise HTTPException(status_code=404, detail="session event log not found")
+    return build_session_workboard(session_id, events)
+
+
+@router.get("/sessions/{session_id}/state")
+async def session_state(session_id: str):
+    from backend.core.events import _event_log, _restore_session
+    from backend.workflow_state import build_session_state, load_session_state
+
+    if session_id not in _event_log:
+        await asyncio.to_thread(_restore_session, session_id)
+    events = _event_log.get(session_id, [])
+    if events:
+        return build_session_state(session_id, events)
+    snapshot = await asyncio.to_thread(load_session_state, session_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="session state not found")
+    return snapshot
+
+
+@router.post("/sessions/{session_id}/ask")
+async def ask_session(session_id: str, body: SessionAskRequest):
+    from backend.core.events import _event_log, _restore_session
+    from backend.session_digest import answer_session_question
+
+    if session_id not in _event_log:
+        await asyncio.to_thread(_restore_session, session_id)
+    events = _event_log.get(session_id, [])
+    if not events:
+        raise HTTPException(status_code=404, detail="session event log not found")
+    return answer_session_question(session_id, events, body.question)
+
+
 @router.post("/approve")
 async def approve_task(body: ApproveRequest):
     await update_task_status(body.task_id, "approved")
@@ -114,6 +230,24 @@ async def approve_task(body: ApproveRequest):
 async def reject_task(body: RejectRequest):
     await update_task_status(body.task_id, "rejected")
     return {"task_id": body.task_id, "status": "rejected", "reason": body.reason}
+
+
+@router.post("/stack/approval")
+async def decide_stack_approval(body: StackApprovalDecisionRequest):
+    decision = body.decision.lower().strip()
+    if decision not in {"approved", "skipped"}:
+        raise HTTPException(status_code=400, detail="decision must be 'approved' or 'skipped'")
+    from backend.core.events import approval_decision_push
+    event = {
+        "type": "stack_approval_decision",
+        "gate_key": body.gate_key,
+        "decision": decision,
+        "founder_id": body.founder_id,
+        "note": body.note,
+    }
+    approval_decision_push(body.session_id, body.gate_key, event)
+    await publish(body.session_id, event)
+    return {"ok": True, "session_id": body.session_id, "gate_key": body.gate_key, "decision": decision}
 
 
 @router.post("/goal/continue")
@@ -367,6 +501,15 @@ async def ask_brain(founder_id: str, body: BrainAskRequest):
     """Return a cited answer synthesized from matched company-brain records."""
     from backend.tools.company_brain import ask_company_brain
     return ask_company_brain(founder_id, body.question, body.limit)
+
+
+@router.get("/brain/{founder_id}/subteam-report")
+async def brain_subteam_report(founder_id: str, team: str = "engineering", days: int = 7):
+    """Report subteam activity from persisted Company Brain memory."""
+    from backend.company_reports import build_company_subteam_report, persist_company_subteam_report
+    report = build_company_subteam_report(founder_id, team, days)
+    await asyncio.to_thread(persist_company_subteam_report, report)
+    return report
 
 
 @router.post("/brain/{founder_id}/records")

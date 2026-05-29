@@ -5,7 +5,8 @@ import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { SignInButton, useUser } from "@clerk/nextjs";
-import { streamGoal, continueSession, submitGoal, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder } from "@/lib/api";
+import { streamGoal, continueSession, submitGoal, getStacks, recommendStack, getStackReadiness, getConnectorCoverage, getStackManifest, getSessionDigest, getSubteamReport, getSessionWorkboard, getSessionState, askSession, decideStackApproval, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder } from "@/lib/api";
+import type { AgentDepartmentManifest, AgentStackTemplate, ConnectorCoverage, SessionAnswer, SessionDigest, SessionStateSnapshot, SessionWorkboard, StackOperatingPlan, StackReadiness, StackRecommendation, SubteamReport } from "@/lib/api";
 import { saveSession, getSessionSnapshot, subscribeSessions, deleteSession, clearAllSessions } from "@/lib/history";
 import type { SessionRecord } from "@/lib/history";
 import LiquidGlass from "@/components/LiquidGlass";
@@ -15,6 +16,94 @@ import ThemeToggle from "@/components/ThemeToggle";
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 interface AgentTask { id: string; agent: string; instruction: string; }
+
+interface StackArtifactState {
+  key: string;
+  title: string;
+  owner_agent: string;
+  description: string;
+  required: boolean;
+}
+
+interface StackApprovalGateState {
+  key: string;
+  title: string;
+  trigger: string;
+  required_before: string;
+  reason: string;
+}
+
+interface ApprovalQueueItemState extends StackApprovalGateState {
+  status: "armed" | "triggered" | "approved" | "skipped";
+  triggered_by?: string | null;
+  note?: string | null;
+}
+
+interface StackConnectorRequirementState {
+  key: string;
+  label: string;
+  category: string;
+  purpose: string;
+  required: boolean;
+}
+
+interface RunArtifactState extends StackArtifactState {
+  status: "pending" | "ready";
+  task_id?: string;
+  preview?: string;
+}
+
+interface SafeRunActionState {
+  id: string;
+  tool: string;
+  agent: string;
+  risk_level: "low" | "medium" | "high";
+  category: string;
+  approval_gate: string;
+  approval_required: boolean;
+  mode: string;
+  reason: string;
+  status: "planned" | "waiting_approval" | "approved" | "executed" | "skipped" | "error";
+  result_preview?: string;
+}
+
+interface OutcomeLedgerEvent {
+  id: string;
+  agent: string;
+  task_id: string;
+  metric: string;
+  label: string;
+  value: number;
+  unit: string;
+  source: string;
+  preview?: string;
+}
+
+interface CompanyGenomeState {
+  session_id: string;
+  founder_id: string;
+  company_name: string;
+  goal: string;
+  keywords: string[];
+  stack: {
+    id: string;
+    name: string;
+    target_user: string;
+    primary_outcome: string;
+    dashboard_sections: string[];
+  };
+  operating_model: {
+    agent_lanes: Array<{ id: string; agent: string; title: string; artifacts: string[] }>;
+    required_connectors: Array<{ key: string; label: string; category: string; purpose: string }>;
+    optional_connectors: Array<{ key: string; label: string; category: string }>;
+    approval_gates: Array<{ key: string; title: string; required_before: string; reason: string }>;
+    expected_artifacts: Array<{ key: string; title: string; owner_agent: string; required: boolean }>;
+  };
+  memory: {
+    prior_context_available: boolean;
+    context_preview: string;
+  };
+}
 
 interface LogEntry { ts: number; type: string; text: string; }
 
@@ -93,6 +182,8 @@ const STARTER_PROMPTS = [
     prompt: "Build a real-time co-founder matching platform with live URL, auth, and a pitch deck PDF.",
   },
 ];
+
+const SUBTEAM_OPTIONS = ["engineering", "growth", "sales", "marketing", "product", "support", "ops", "legal"];
 
 function pct(state: AgentState): number {
   if (state.status === "done") return 100;
@@ -1891,9 +1982,66 @@ function NewGoalOverlay({ open, onClose }: { open: boolean; onClose: () => void 
   const [domain, setDomain] = useState("");
   const [instruction, setInstruction] = useState("");
   const [showStack, setShowStack] = useState(false);
-  const [stack, setStack] = useState({ frontend: "Next.js", backend: "FastAPI", database: "Supabase (Postgres)", auth: "Clerk" });
+  const [techStack, setTechStack] = useState({ frontend: "Next.js", backend: "FastAPI", database: "Supabase (Postgres)", auth: "Clerk" });
+  const [stackTemplates, setStackTemplates] = useState<AgentStackTemplate[]>([]);
+  const [selectedStackId, setSelectedStackId] = useState("idea_to_revenue");
+  const [stackRecommendation, setStackRecommendation] = useState<StackRecommendation | null>(null);
+  const [stackReadiness, setStackReadiness] = useState<StackReadiness | null>(null);
+  const [manualStackOverride, setManualStackOverride] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    getStacks()
+      .then(stacks => {
+        if (cancelled) return;
+        setStackTemplates(stacks);
+        if (stacks.length && !stacks.some(stack => stack.stack_id === selectedStackId)) {
+          setSelectedStackId(stacks[0].stack_id);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStackTemplates([]);
+      });
+    return () => { cancelled = true; };
+  }, [open, selectedStackId]);
+
+  useEffect(() => {
+    if (!open || instruction.trim().length < 16) {
+      setStackRecommendation(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      recommendStack(instruction)
+        .then(recommendation => {
+          if (controller.signal.aborted) return;
+          setStackRecommendation(recommendation);
+          if (!manualStackOverride) setSelectedStackId(recommendation.stack.stack_id);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setStackRecommendation(null);
+        });
+    }, 350);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [open, instruction, manualStackOverride]);
+
+  useEffect(() => {
+    if (!open || !selectedStackId) return;
+    let cancelled = false;
+    const founderId = user?.id ?? "anon";
+    getStackReadiness(founderId, selectedStackId)
+      .then(readiness => { if (!cancelled) setStackReadiness(readiness); })
+      .catch(() => { if (!cancelled) setStackReadiness(null); });
+    return () => { cancelled = true; };
+  }, [open, selectedStackId, user?.id]);
+
+  const selectedStack = stackTemplates.find(stack => stack.stack_id === selectedStackId);
 
   if (!open) return null;
 
@@ -1905,12 +2053,13 @@ function NewGoalOverlay({ open, onClose }: { open: boolean; onClose: () => void 
     const parts = [
       companyName.trim() && `Company name: ${companyName.trim()}.`,
       domain.trim() && `Domain: ${domain.trim()}.`,
-      showStack && `Tech stack: Frontend=${stack.frontend}, Backend=${stack.backend}, Database=${stack.database}, Auth=${stack.auth}.`,
+      selectedStack && `Agent stack: ${selectedStack.name}. Outcome: ${selectedStack.primary_outcome}.`,
+      showStack && `Tech stack: Frontend=${techStack.frontend}, Backend=${techStack.backend}, Database=${techStack.database}, Auth=${techStack.auth}.`,
     ].filter(Boolean);
     const full = parts.length ? `${parts.join(" ")}\n\n${instruction}` : instruction;
     const founderId = user?.id ?? "anon";
     try {
-      const result = await submitGoal(founderId, full);
+      const result = await submitGoal(founderId, full, {}, selectedStackId);
       saveSession({
         sessionId: result.session_id,
         founderId,
@@ -1946,6 +2095,97 @@ function NewGoalOverlay({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ border: "1px solid var(--line)", borderRadius: 28, padding: "14px 16px", display: "grid", gap: 12, background: "rgba(255,255,255,0.03)" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
+              <div style={{ display: "grid", gap: 5 }}>
+                <span className="site-label">Agent stack</span>
+                <strong style={{ color: "var(--fg)", fontSize: 15 }}>{selectedStack?.name ?? "Idea to Revenue Stack"}</strong>
+                <span style={{ color: "var(--fg-dim)", fontSize: 12, lineHeight: 1.55 }}>
+                  {selectedStack?.description ?? "Astra will build the company foundation: research, positioning, brand, landing page, roadmap, GTM, sales workflow, legal starter kit, and 30-day operating plan."}
+                </span>
+              </div>
+              <span style={{ border: "1px solid var(--line)", borderRadius: 999, padding: "7px 11px", color: "var(--fg-dim)", fontSize: 11, whiteSpace: "nowrap" }}>
+                {selectedStack?.artifacts.length ?? 18} outputs
+              </span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8 }}>
+              {(stackTemplates.length ? stackTemplates : [{
+                stack_id: "idea_to_revenue",
+                name: "Idea to Revenue Stack",
+                target_user: "Founders starting from a rough startup idea.",
+                primary_outcome: "Turn an idea into a launch-ready company foundation.",
+                description: "Company foundation, launch surface, GTM, sales, legal, and 30-day plan.",
+                input_prompts: [],
+                tasks: [],
+                artifacts: [],
+                approval_gates: [],
+                connector_requirements: [],
+                dashboard_sections: [],
+                completion_rules: [],
+              }]).map(stackTemplate => {
+                const active = stackTemplate.stack_id === selectedStackId;
+                return (
+                  <button
+                    key={stackTemplate.stack_id}
+                    type="button"
+                    onClick={() => {
+                      setManualStackOverride(true);
+                      setSelectedStackId(stackTemplate.stack_id);
+                    }}
+                    disabled={loading}
+                    style={{
+                      display: "grid",
+                      gap: 5,
+                      textAlign: "left",
+                      borderRadius: 20,
+                      border: `1px solid ${active ? "rgba(61,158,95,0.38)" : "var(--line)"}`,
+                      background: active ? "rgba(61,158,95,0.10)" : "rgba(255,255,255,0.025)",
+                      color: "var(--fg)",
+                      padding: "10px 11px",
+                      cursor: "pointer",
+                    }}
+                  >
+                      <span style={{ fontSize: 12, fontWeight: 650 }}>{stackTemplate.name.replace(" Stack", "")}</span>
+                      <span style={{ fontSize: 10, color: active ? "#3D9E5F" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      {stackRecommendation?.stack.stack_id === stackTemplate.stack_id ? "Recommended" : `${stackTemplate.tasks.length || "Template"} lanes`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {stackRecommendation && (
+              <div style={{ display: "grid", gap: 6, borderRadius: 20, border: "1px solid rgba(61,158,95,0.18)", background: "rgba(61,158,95,0.06)", padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <span className="site-label">Stack compiler</span>
+                  <span style={{ fontSize: 11, color: "#3D9E5F", fontFamily: "var(--font-jetbrains-mono)" }}>{Math.round(stackRecommendation.confidence * 100)}%</span>
+                </div>
+                <span style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.45 }}>{stackRecommendation.reason}</span>
+                {stackRecommendation.matched_signals.length > 0 && (
+                  <span style={{ fontSize: 11, color: "var(--fg-mute)", lineHeight: 1.45 }}>
+                    Signals: {stackRecommendation.matched_signals.join(" · ")}
+                  </span>
+                )}
+              </div>
+            )}
+            {stackReadiness && (
+              <div style={{ display: "grid", gap: 7, borderRadius: 20, border: `1px solid ${stackReadiness.ready ? "rgba(61,158,95,0.18)" : "rgba(245,158,11,0.22)"}`, background: stackReadiness.ready ? "rgba(61,158,95,0.05)" : "rgba(245,158,11,0.06)", padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <span className="site-label">Stack readiness</span>
+                  <span style={{ fontSize: 11, color: stackReadiness.ready ? "#3D9E5F" : "#D97706", fontFamily: "var(--font-jetbrains-mono)" }}>
+                    {stackReadiness.readiness_score}%
+                  </span>
+                </div>
+                <span style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.45 }}>
+                  {stackReadiness.connected_required}/{stackReadiness.required_total} required connectors ready
+                  {stackReadiness.missing_required > 0 ? ` · ${stackReadiness.missing_required} missing` : " · ready to operate"}
+                </span>
+                {stackReadiness.next_actions.slice(0, 2).map(action => (
+                  <span key={action} style={{ fontSize: 11, color: "var(--fg-mute)", lineHeight: 1.45 }}>- {action}</span>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label className="site-label">Company</label>
@@ -1989,7 +2229,7 @@ function NewGoalOverlay({ open, onClose }: { open: boolean; onClose: () => void 
                 {(Object.entries(STACK_OPTIONS) as [string, string[]][]).map(([key, opts]) => (
                   <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <label className="site-label">{key}</label>
-                    <select value={stack[key as keyof typeof stack]} onChange={e => setStack(p => ({ ...p, [key]: e.target.value }))} disabled={loading} className="site-input" style={{ padding: "8px 10px", fontSize: 12, background: "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(180,205,228,0.04)), var(--glass-hi)" }}>
+                    <select value={techStack[key as keyof typeof techStack]} onChange={e => setTechStack(p => ({ ...p, [key]: e.target.value }))} disabled={loading} className="site-input" style={{ padding: "8px 10px", fontSize: 12, background: "linear-gradient(135deg, rgba(255,255,255,0.08), rgba(180,205,228,0.04)), var(--glass-hi)" }}>
                       {opts.map(o => <option key={o} value={o} style={{ background: "#0b0e14" }}>{o}</option>)}
                     </select>
                   </div>
@@ -2070,10 +2310,6 @@ function WorkspaceSidebar({
           <span aria-hidden="true">▣</span>
           Plan
         </button>
-        <Link href="/brain" style={navItemStyle}>
-          <span aria-hidden="true">◎</span>
-          Company brain
-        </Link>
         <Link href="/settings" style={navItemStyle}>
           <span aria-hidden="true">⚙</span>
           Account settings
@@ -2081,10 +2317,6 @@ function WorkspaceSidebar({
         <Link href="/integrations" style={navItemStyle}>
           <span aria-hidden="true">⌘</span>
           Integrations
-        </Link>
-        <Link href="/payments" style={navItemStyle}>
-          <span aria-hidden="true">$</span>
-          Payments
         </Link>
         <a href="https://astracreates.com/" style={navItemStyle}>
           <span aria-hidden="true">↗</span>
@@ -2381,9 +2613,9 @@ export function GoalWorkspace({
   // ── Persistent session cache ──────────────────────────────────────────────
   const CACHE_KEY = `astra_session_${sessionId}`;
 
-  const saveCache = useCallback((a: Record<string, AgentState>, p: AgentTask[], d: boolean, cn?: string) => {
+  const saveCache = useCallback((a: Record<string, AgentState>, p: AgentTask[], d: boolean, cn?: string, stack?: AgentStackTemplate | null, artifacts?: RunArtifactState[], saferun?: SafeRunActionState[], outcomeEvents?: OutcomeLedgerEvent[], genome?: CompanyGenomeState | null, approvals?: ApprovalQueueItemState[], operatingPlan?: StackOperatingPlan | null, manifest?: AgentDepartmentManifest | null) => {
     if (!sessionId) return;
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d, autoCompanyName: cn })); } catch {}
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ agents: a, planTasks: p, done: d, autoCompanyName: cn, selectedStack: stack, runArtifacts: artifacts ?? [], safeRunActions: saferun ?? [], outcomes: outcomeEvents ?? [], companyGenome: genome ?? null, approvalQueue: approvals ?? [], stackOperatingPlan: operatingPlan ?? null, stackManifest: manifest ?? null })); } catch {}
   }, [CACHE_KEY, sessionId]);
 
   // Always start with empty state to avoid SSR/client hydration mismatch;
@@ -2395,6 +2627,24 @@ export function GoalWorkspace({
   const [autoCompanyName, setAutoCompanyName] = useState<string>("");
   const [done, setDone] = useState(false);
   const [inputRequest, setInputRequest] = useState<InputRequest | null>(null);
+  const [selectedStack, setSelectedStack] = useState<AgentStackTemplate | null>(null);
+  const [runArtifacts, setRunArtifacts] = useState<RunArtifactState[]>([]);
+  const [safeRunActions, setSafeRunActions] = useState<SafeRunActionState[]>([]);
+  const [outcomes, setOutcomes] = useState<OutcomeLedgerEvent[]>([]);
+  const [companyGenome, setCompanyGenome] = useState<CompanyGenomeState | null>(null);
+  const [approvalQueue, setApprovalQueue] = useState<ApprovalQueueItemState[]>([]);
+  const [stackOperatingPlan, setStackOperatingPlan] = useState<StackOperatingPlan | null>(null);
+  const [stackManifest, setStackManifest] = useState<AgentDepartmentManifest | null>(null);
+  const [stackReadiness, setStackReadiness] = useState<StackReadiness | null>(null);
+  const [connectorCoverage, setConnectorCoverage] = useState<ConnectorCoverage | null>(null);
+  const [sessionDigest, setSessionDigest] = useState<SessionDigest | null>(null);
+  const [subteamReport, setSubteamReport] = useState<SubteamReport | null>(null);
+  const [sessionWorkboard, setSessionWorkboard] = useState<SessionWorkboard | null>(null);
+  const [sessionState, setSessionState] = useState<SessionStateSnapshot | null>(null);
+  const [selectedSubteam, setSelectedSubteam] = useState("engineering");
+  const [sessionQuestion, setSessionQuestion] = useState("What did the engineering subteam do?");
+  const [sessionAnswer, setSessionAnswer] = useState<SessionAnswer | null>(null);
+  const [askingSession, setAskingSession] = useState(false);
 
   // Restore from cache after first render (client-only)
   useEffect(() => {
@@ -2402,7 +2652,7 @@ export function GoalWorkspace({
     try {
       const raw = localStorage.getItem(CACHE_KEY);
       if (!raw) return;
-      const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean; autoCompanyName?: string };
+      const cached = JSON.parse(raw) as { agents: Record<string, AgentState>; planTasks: AgentTask[]; done: boolean; autoCompanyName?: string; selectedStack?: AgentStackTemplate; runArtifacts?: RunArtifactState[]; safeRunActions?: SafeRunActionState[]; outcomes?: OutcomeLedgerEvent[]; companyGenome?: CompanyGenomeState; approvalQueue?: ApprovalQueueItemState[]; stackOperatingPlan?: StackOperatingPlan; stackManifest?: AgentDepartmentManifest };
       const firstAgent = cached.planTasks?.[0]?.agent ?? Object.keys(cached.agents ?? {})[0] ?? "";
       queueMicrotask(() => {
         if (cached.agents && Object.keys(cached.agents).length > 0) {
@@ -2416,6 +2666,14 @@ export function GoalWorkspace({
         if (cached.planTasks?.length > 0) setPlanTasks(cached.planTasks);
         if (cached.done) setDone(true);
         if (cached.autoCompanyName) setAutoCompanyName(cached.autoCompanyName);
+        if (cached.selectedStack) setSelectedStack(cached.selectedStack);
+        if (cached.runArtifacts?.length) setRunArtifacts(cached.runArtifacts);
+        if (cached.safeRunActions?.length) setSafeRunActions(cached.safeRunActions);
+        if (cached.outcomes?.length) setOutcomes(cached.outcomes);
+        if (cached.companyGenome) setCompanyGenome(cached.companyGenome);
+        if (cached.approvalQueue?.length) setApprovalQueue(cached.approvalQueue);
+        if (cached.stackOperatingPlan) setStackOperatingPlan(cached.stackOperatingPlan);
+        if (cached.stackManifest) setStackManifest(cached.stackManifest);
         if (firstAgent) setActiveAgent(firstAgent);
       });
     } catch {}
@@ -2440,7 +2698,54 @@ export function GoalWorkspace({
   const errorCount = useRef(0);
 
   // Persist to localStorage whenever state changes
-  useEffect(() => { saveCache(agents, planTasks, done, autoCompanyName); }, [agents, planTasks, done, autoCompanyName, saveCache]);
+  useEffect(() => { saveCache(agents, planTasks, done, autoCompanyName, selectedStack, runArtifacts, safeRunActions, outcomes, companyGenome, approvalQueue, stackOperatingPlan, stackManifest); }, [agents, planTasks, done, autoCompanyName, selectedStack, runArtifacts, safeRunActions, outcomes, companyGenome, approvalQueue, stackOperatingPlan, stackManifest, saveCache]);
+
+  useEffect(() => {
+    if (!selectedStack?.stack_id || !founderId) return;
+    let cancelled = false;
+    Promise.allSettled([
+      getStackReadiness(founderId, selectedStack.stack_id),
+      getConnectorCoverage(founderId, selectedStack.stack_id),
+      getStackManifest(selectedStack.stack_id, instruction, company || autoCompanyName),
+    ]).then(([readinessResult, coverageResult, manifestResult]) => {
+      if (cancelled) return;
+      setStackReadiness(readinessResult.status === "fulfilled" ? readinessResult.value : null);
+      setConnectorCoverage(coverageResult.status === "fulfilled" ? coverageResult.value : null);
+      if (manifestResult.status === "fulfilled") {
+        setStackManifest(manifestResult.value);
+        if (!stackOperatingPlan) setStackOperatingPlan(manifestResult.value.operating_plan);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [autoCompanyName, company, founderId, instruction, selectedStack?.stack_id, stackOperatingPlan]);
+
+  useEffect(() => {
+    if (!sessionId || sessionId === "undefined") return;
+    let cancelled = false;
+    const loadDigest = () => {
+      Promise.allSettled([getSessionDigest(sessionId), getSubteamReport(sessionId, selectedSubteam), getSessionWorkboard(sessionId), getSessionState(sessionId)])
+        .then(([digestResult, reportResult, workboardResult, stateResult]) => {
+          if (cancelled) return;
+          if (digestResult.status === "fulfilled") setSessionDigest(digestResult.value);
+          if (reportResult.status === "fulfilled") setSubteamReport(reportResult.value);
+          if (workboardResult.status === "fulfilled") setSessionWorkboard(workboardResult.value);
+          if (stateResult.status === "fulfilled") {
+            setSessionState(stateResult.value);
+            if (digestResult.status !== "fulfilled" && stateResult.value.digest) setSessionDigest(stateResult.value.digest);
+            if (workboardResult.status !== "fulfilled" && stateResult.value.workboard) setSessionWorkboard(stateResult.value.workboard);
+            if (!selectedStack && stateResult.value.stack) setSelectedStack(stateResult.value.stack);
+            if (!stackOperatingPlan && stateResult.value.operating_plan) setStackOperatingPlan(stateResult.value.operating_plan);
+            if (!stackManifest && stateResult.value.manifest) setStackManifest(stateResult.value.manifest);
+          }
+        });
+    };
+    loadDigest();
+    const timer = window.setInterval(loadDigest, done ? 30000 : 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [done, selectedStack, selectedSubteam, sessionId, stackManifest, stackOperatingPlan]);
 
   useEffect(() => {
     if (!sessionId || sessionId === "undefined") return;
@@ -2471,6 +2776,49 @@ export function GoalWorkspace({
       }
       if (event.type === "goal_expanded") { setExpandedGoal(event.expanded ?? ""); return; }
       if (event.type === "company_name") { setAutoCompanyName(event.name ?? ""); return; }
+      if (event.type === "stack_selected") { setSelectedStack(event.stack ?? null); return; }
+      if (event.type === "stack_operating_plan" && event.operating_plan) {
+        setStackOperatingPlan(event.operating_plan as StackOperatingPlan);
+        return;
+      }
+      if (event.type === "stack_manifest" && event.manifest) {
+        setStackManifest(event.manifest as AgentDepartmentManifest);
+        if (event.manifest.operating_plan) setStackOperatingPlan(event.manifest.operating_plan as StackOperatingPlan);
+        return;
+      }
+      if (event.type === "stack_approval_queue" && event.approval_queue) {
+        setApprovalQueue(event.approval_queue as ApprovalQueueItemState[]);
+        return;
+      }
+      if (event.type === "company_genome" && event.genome) {
+        setCompanyGenome(event.genome as CompanyGenomeState);
+        return;
+      }
+      if (event.type === "stack_artifact" && event.artifact) {
+        setRunArtifacts(prev => {
+          const nextArtifact = event.artifact as RunArtifactState;
+          const rest = prev.filter(a => a.key !== nextArtifact.key);
+          return [...rest, nextArtifact];
+        });
+        return;
+      }
+      if (event.type === "saferun_action" && event.action) {
+        setSafeRunActions(prev => [...prev.filter(a => a.id !== event.action.id), event.action as SafeRunActionState].slice(-12));
+        setApprovalQueue(prev => prev.map(item => item.key === event.action.approval_gate ? { ...item, status: "triggered", triggered_by: event.action.id } : item));
+        return;
+      }
+      if (event.type === "saferun_result" && event.action_id) {
+        setSafeRunActions(prev => prev.map(a => a.id === event.action_id ? { ...a, status: event.status, result_preview: event.result_preview } : a));
+        return;
+      }
+      if (event.type === "stack_approval_decision" && event.gate_key && event.decision) {
+        setApprovalQueue(prev => prev.map(item => item.key === event.gate_key ? { ...item, status: event.decision, note: event.note ?? null } : item));
+        return;
+      }
+      if (event.type === "outcome_recorded" && event.outcome) {
+        setOutcomes(prev => [...prev.filter(o => o.id !== event.outcome.id), event.outcome as OutcomeLedgerEvent].slice(-30));
+        return;
+      }
       if (event.type === "session_expired") { setError("Session expired — backend was restarted. Run a new goal."); es.close(); return; }
 
       setAgents((prev) => {
@@ -2693,6 +3041,7 @@ export function GoalWorkspace({
   const failedCount = Object.values(visibleAgents).filter(a => a.status === "error").length;
   const totalVisitedUrls = Object.values(visibleAgents).reduce((sum, a) => sum + (a.visitedUrls?.length ?? 0), 0);
   const totalCommits = Object.values(visibleAgents).reduce((sum, a) => sum + (a.commits?.length ?? 0), 0);
+  const outcomeValue = outcomes.reduce((sum, outcome) => sum + (Number.isFinite(outcome.value) ? outcome.value : 0), 0);
   const completedAgents = agentList.filter(a => visibleAgents[a]?.status === "done");
   const activeAgents = agentList.filter(a => visibleAgents[a]?.status === "running");
   const completedArtifacts = agentList
@@ -2704,7 +3053,34 @@ export function GoalWorkspace({
       summary: summarizeResult(state),
     }))
     .slice(0, 4);
+  const stackArtifacts: StackArtifactState[] = selectedStack?.artifacts ?? [];
+  const stackApprovalGates: StackApprovalGateState[] = selectedStack?.approval_gates ?? [];
+  const visibleApprovalQueue: ApprovalQueueItemState[] = approvalQueue.length ? approvalQueue : stackApprovalGates.map(gate => ({ ...gate, status: "armed", triggered_by: null }));
+  const stackConnectorRequirements: StackConnectorRequirementState[] = selectedStack?.connector_requirements ?? [];
+  const runArtifactByKey = new Map(runArtifacts.map(artifact => [artifact.key, artifact]));
+  const artifactProgress = stackArtifacts.length
+    ? Math.round((stackArtifacts.filter(a => runArtifactByKey.get(a.key)?.status === "ready" || visibleAgents[a.owner_agent]?.status === "done").length / stackArtifacts.length) * 100)
+    : 0;
   const statusText = !sessionId ? "ready" : done ? "complete" : error ? "error" : reconnecting ? "reconnecting..." : connected ? "running" : "connecting";
+  const handleApprovalDecision = async (gateKey: string, decision: "approved" | "skipped") => {
+    setApprovalQueue(prev => prev.map(item => item.key === gateKey ? { ...item, status: decision } : item));
+    try {
+      await decideStackApproval(sessionId, gateKey, decision, founderId);
+    } catch {
+      setApprovalQueue(prev => prev.map(item => item.key === gateKey ? { ...item, status: item.triggered_by ? "triggered" : "armed" } : item));
+    }
+  };
+  const handleAskSession = async () => {
+    if (!sessionQuestion.trim()) return;
+    setAskingSession(true);
+    try {
+      const answer = await askSession(sessionId, sessionQuestion, founderId);
+      setSessionAnswer(answer);
+      if (answer.report?.team) setSelectedSubteam(answer.report.team);
+    } finally {
+      setAskingSession(false);
+    }
+  };
 
   return (
     <div className="astra-app-layout" style={{ width: "100%", maxWidth: 1900, margin: "0 auto", display: "grid", gridTemplateColumns: "minmax(190px, 220px) minmax(0, 1fr)", gap: 24, alignItems: "stretch" }}>
@@ -2736,6 +3112,13 @@ export function GoalWorkspace({
           </span>
           {sessionId && <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)" }}>{sessionId}</span>}
         </div>
+        {selectedStack && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)" }}>Agent stack</span>
+            <span style={{ fontSize: 13, color: "var(--fg)", fontWeight: 600 }}>{selectedStack.name}</span>
+            <span style={{ fontSize: 12, color: "var(--fg-dim)" }}>{selectedStack.primary_outcome}</span>
+          </div>
+        )}
         {autoCompanyName && (
           <span style={{ fontSize: 11, fontWeight: 600, color: "var(--fg-dim)", letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: "var(--font-jetbrains-mono)" }}>{autoCompanyName}</span>
         )}
@@ -2815,8 +3198,71 @@ export function GoalWorkspace({
                 </div>
                 <div style={{ padding: "12px 13px", borderRadius: 18, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)", display: "grid", gap: 3 }}>
                   <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Captured activity</span>
-                  <span style={{ fontSize: 13, color: "var(--fg)", lineHeight: 1.45 }}>{totalVisitedUrls} sites visited · {totalCommits} commits</span>
+                  <span style={{ fontSize: 13, color: "var(--fg)", lineHeight: 1.45 }}>{totalVisitedUrls} sites visited · {totalCommits} commits · {outcomes.length} outcomes</span>
                 </div>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <span className="site-label">Outcome ledger</span>
+                  <span style={{ fontSize: 11, color: "var(--fg-mute)", fontFamily: "var(--font-jetbrains-mono)" }}>{outcomeValue} units</span>
+                </div>
+                {outcomes.length ? outcomes.slice(-4).reverse().map(outcome => (
+                  <button
+                    key={outcome.id}
+                    type="button"
+                    onClick={() => setActiveAgent(outcome.agent)}
+                    style={{ display: "grid", gap: 3, padding: "10px 12px", borderRadius: 16, background: "rgba(61,158,95,0.06)", border: "1px solid rgba(61,158,95,0.16)", textAlign: "left" }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <span style={{ fontSize: 12, color: "var(--fg)" }}>{outcome.label}</span>
+                      <span style={{ fontSize: 10, color: "#3D9E5F", textTransform: "uppercase", letterSpacing: "0.08em" }}>{outcome.value} {outcome.unit}</span>
+                    </div>
+                    <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>{outcome.preview || AGENT_LABELS[outcome.agent] || outcome.agent}</span>
+                  </button>
+                )) : (
+                  <div style={{ padding: "10px 12px", borderRadius: 16, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)", color: "var(--fg-mute)", fontSize: 12, lineHeight: 1.5 }}>
+                    Material outputs will be counted here as agents produce leads, pages, docs, repos, and campaigns.
+                  </div>
+                )}
+              </div>
+              {sessionDigest && (
+                <div style={{ display: "grid", gap: 8, borderTop: "1px solid rgba(176,180,186,0.10)", paddingTop: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span className="site-label">Run digest</span>
+                    <span style={{ fontSize: 11, color: sessionDigest.counts.errors ? "#C0392B" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      {sessionDigest.counts.triggered_approvals} gates
+                    </span>
+                  </div>
+                  <div style={{ padding: "11px 12px", borderRadius: 16, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)", display: "grid", gap: 7 }}>
+                    <span style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.45 }}>{sessionDigest.summary}</span>
+                    {sessionDigest.next_actions.slice(0, 3).map(action => (
+                      <span key={action} style={{ fontSize: 11, color: "var(--fg)", lineHeight: 1.4 }}>- {action}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: "grid", gap: 8, borderTop: "1px solid rgba(176,180,186,0.10)", paddingTop: 12 }}>
+                <span className="site-label">Ask Astra</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+                  <input
+                    value={sessionQuestion}
+                    onChange={event => setSessionQuestion(event.target.value)}
+                    onKeyDown={event => { if (event.key === "Enter") void handleAskSession(); }}
+                    placeholder="Ask what a subteam did or what should happen next"
+                    style={{ minWidth: 0, borderRadius: 999, border: "1px solid rgba(176,180,186,0.12)", background: "rgba(255,255,255,0.035)", color: "var(--fg)", padding: "8px 11px", fontSize: 12 }}
+                  />
+                  <button type="button" onClick={handleAskSession} disabled={askingSession || !sessionQuestion.trim()} style={{ border: "1px solid rgba(176,180,186,0.14)", background: "rgba(255,255,255,0.06)", color: "var(--fg)", borderRadius: 999, padding: "0 12px", fontSize: 12, cursor: "pointer" }}>
+                    {askingSession ? "..." : "Ask"}
+                  </button>
+                </div>
+                {sessionAnswer && (
+                  <div style={{ padding: "11px 12px", borderRadius: 16, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)", display: "grid", gap: 6 }}>
+                    <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{sessionAnswer.answer_type.replace("_", " ")} · {Math.round(sessionAnswer.confidence * 100)}%</span>
+                    {sessionAnswer.answer.split("\n").slice(0, 4).map(line => (
+                      <span key={line} style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>{line}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </LiquidGlass>
@@ -2827,6 +3273,71 @@ export function GoalWorkspace({
               <h3 style={{ fontSize: 18, margin: 0 }}>Task graph</h3>
             </div>
             <div style={{ display: "grid", gap: 10, flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
+              {stackOperatingPlan && (
+                <div style={{ display: "grid", gap: 10, padding: "12px 13px", borderRadius: 18, background: "rgba(37,99,235,0.055)", border: "1px solid rgba(37,99,235,0.16)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12, color: "var(--fg)", fontWeight: 600 }}>{stackOperatingPlan.stack_name}</span>
+                    <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      {stackOperatingPlan.lanes.length} lanes · {stackOperatingPlan.artifact_contract.length} artifacts
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.45 }}>{stackOperatingPlan.operator_contract}</span>
+                  <div style={{ display: "grid", gap: 7 }}>
+                    {stackOperatingPlan.phases.slice(0, 4).map(phase => (
+                      <div key={phase.name} style={{ display: "grid", gap: 3 }}>
+                        <span style={{ fontSize: 11, color: "var(--fg)", fontWeight: 600 }}>{phase.name}</span>
+                        <span style={{ fontSize: 11, color: "var(--fg-mute)", lineHeight: 1.4 }}>{phase.objective}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div style={{ display: "grid", gap: 3, padding: "9px 10px", borderRadius: 14, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)" }}>
+                      <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Connectors</span>
+                      <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.4 }}>
+                        {stackOperatingPlan.connector_plan.required.length ? stackOperatingPlan.connector_plan.required.map(c => c.label).join(" · ") : "No required connectors"}
+                      </span>
+                    </div>
+                    <div style={{ display: "grid", gap: 3, padding: "9px 10px", borderRadius: 14, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)" }}>
+                      <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Approvals</span>
+                      <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.4 }}>
+                        {stackOperatingPlan.approval_policy.length ? stackOperatingPlan.approval_policy.map(g => g.title).slice(0, 2).join(" · ") : "No approval gates"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {stackManifest && (
+                <div style={{ display: "grid", gap: 10, padding: "12px 13px", borderRadius: 18, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                    <div style={{ display: "grid", gap: 3 }}>
+                      <span className="site-label">Department manifest</span>
+                      <span style={{ fontSize: 12, color: "var(--fg)", fontWeight: 600 }}>{stackManifest.department_name}</span>
+                    </div>
+                    <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em", whiteSpace: "nowrap" }}>
+                      {stackManifest.workflow.nodes.length} lanes · {stackManifest.dashboards.length} views
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>{stackManifest.positioning}</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div style={{ display: "grid", gap: 4, padding: "9px 10px", borderRadius: 14, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)" }}>
+                      <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Memory</span>
+                      <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.4 }}>{stackManifest.memory_policy.canonical_records.slice(0, 3).join(" · ")}</span>
+                    </div>
+                    <div style={{ display: "grid", gap: 4, padding: "9px 10px", borderRadius: 14, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)" }}>
+                      <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Operator model</span>
+                      <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.4 }}>{stackManifest.human_collaboration.default_mode}</span>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gap: 5 }}>
+                    {stackManifest.dashboards.slice(0, 3).map(section => (
+                      <div key={section.key} style={{ display: "grid", gap: 2 }}>
+                        <span style={{ fontSize: 11, color: "var(--fg)", fontWeight: 600 }}>{section.title}</span>
+                        <span style={{ fontSize: 11, color: "var(--fg-mute)", lineHeight: 1.35 }}>{section.purpose}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {planTasks.length ? sortAgentNamesByOrder(planTasks.map(t => t.agent)).map((agentName, index) => {
                 const task = planTasks.find(t => t.agent === agentName);
                 const state = visibleAgents[agentName];
@@ -2848,6 +3359,83 @@ export function GoalWorkspace({
                   Waiting for the planner to publish the task graph.
                 </div>
               )}
+              {sessionWorkboard && (
+                <div style={{ display: "grid", gap: 9, borderTop: "1px solid rgba(176,180,186,0.10)", paddingTop: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span className="site-label">Workboard</span>
+                    <span style={{ fontSize: 11, color: sessionWorkboard.counts.blocked ? "#D97706" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      {sessionWorkboard.counts.founder_next} founder · {sessionWorkboard.counts.agent_next} agent
+                    </span>
+                  </div>
+                  <div style={{ padding: "12px 13px", borderRadius: 18, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)", display: "grid", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.45 }}>{sessionWorkboard.summary}</span>
+                    {sessionWorkboard.items.slice(0, 5).map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setActiveAgent(item.agent)}
+                        style={{ display: "grid", gap: 4, padding: "9px 10px", borderRadius: 14, background: item.blockers.length ? "rgba(245,158,11,0.08)" : "rgba(255,255,255,0.025)", border: `1px solid ${item.blockers.length ? "rgba(245,158,11,0.18)" : "rgba(176,180,186,0.10)"}`, textAlign: "left" }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ fontSize: 12, color: "var(--fg)" }}>{item.title}</span>
+                          <span style={{ fontSize: 10, color: item.next_actor === "founder" ? "#D97706" : item.next_actor === "founder_review" ? "var(--fg-mute)" : "#2563EB", textTransform: "uppercase", letterSpacing: "0.08em" }}>{item.next_actor.replace("_", " ")}</span>
+                        </div>
+                        <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.4 }}>{item.status}{item.blockers.length ? ` · ${item.blockers[0]}` : item.summary ? ` · ${item.summary}` : ""}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {companyGenome && (
+                <div style={{ display: "grid", gap: 9, borderTop: "1px solid rgba(176,180,186,0.10)", paddingTop: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span className="site-label">Company genome</span>
+                    <span style={{ fontSize: 11, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      {companyGenome.memory.prior_context_available ? "memory linked" : "new memory"}
+                    </span>
+                  </div>
+                  <div style={{ padding: "12px 13px", borderRadius: 18, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)", display: "grid", gap: 8 }}>
+                    <span style={{ fontSize: 13, color: "var(--fg)", lineHeight: 1.45 }}>{companyGenome.stack.primary_outcome}</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {companyGenome.keywords.slice(0, 7).map(keyword => (
+                        <span key={keyword} style={{ borderRadius: 999, border: "1px solid rgba(176,180,186,0.10)", background: "rgba(255,255,255,0.025)", padding: "4px 8px", fontSize: 10, color: "var(--fg-mute)" }}>{keyword}</span>
+                      ))}
+                    </div>
+                    <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>
+                      {companyGenome.operating_model.agent_lanes.length} lanes · {companyGenome.operating_model.expected_artifacts.length} artifacts · {companyGenome.operating_model.approval_gates.length} approval gates
+                    </span>
+                  </div>
+                </div>
+              )}
+              {subteamReport && (
+                <div style={{ display: "grid", gap: 9, borderTop: "1px solid rgba(176,180,186,0.10)", paddingTop: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <span className="site-label">Subteam report</span>
+                    <select
+                      value={selectedSubteam}
+                      onChange={event => setSelectedSubteam(event.target.value)}
+                      style={{ borderRadius: 999, border: "1px solid rgba(176,180,186,0.14)", background: "rgba(255,255,255,0.03)", color: "var(--fg)", padding: "5px 9px", fontSize: 11 }}
+                    >
+                      {SUBTEAM_OPTIONS.map(team => <option key={team} value={team} style={{ background: "#0b0e14" }}>{team}</option>)}
+                    </select>
+                    <span style={{ fontSize: 11, color: subteamReport.blockers.length ? "#D97706" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      {subteamReport.completed.length} done · {subteamReport.active.length} active
+                    </span>
+                  </div>
+                  <div style={{ padding: "12px 13px", borderRadius: 18, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)", display: "grid", gap: 8 }}>
+                    <span style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.45 }}>{subteamReport.summary}</span>
+                    {subteamReport.completed.slice(0, 2).map(item => (
+                      <span key={`${item.agent}-${item.summary}`} style={{ fontSize: 11, color: "#3D9E5F", lineHeight: 1.4 }}>{AGENT_LABELS[item.agent] ?? item.agent}: {item.summary}</span>
+                    ))}
+                    {subteamReport.blockers.slice(0, 2).map(blocker => (
+                      <span key={blocker} style={{ fontSize: 11, color: "#D97706", lineHeight: 1.4 }}>Blocker: {blocker}</span>
+                    ))}
+                    {(subteamReport.next_actions.length ? subteamReport.next_actions : [`No ${selectedSubteam} next action yet.`]).slice(0, 3).map(action => (
+                      <span key={action} style={{ fontSize: 11, color: "var(--fg)", lineHeight: 1.4 }}>- {action}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </LiquidGlass>
 
@@ -2855,17 +3443,71 @@ export function GoalWorkspace({
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span className="site-label">Outputs</span>
-                <h3 style={{ fontSize: 18, margin: 0 }}>Session artifacts</h3>
+                <h3 style={{ fontSize: 18, margin: 0 }}>{selectedStack ? "Stack artifacts" : "Session artifacts"}</h3>
               </div>
-              <span style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fg-mute)", whiteSpace: "nowrap", paddingTop: 3 }}>{completedAgents.length} ready</span>
-            </div>
-            <div style={{ padding: "13px 14px", borderRadius: 20, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(176,180,186,0.10)", display: "grid", gap: 5 }}>
-              <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Selected lane</span>
-              <span style={{ fontSize: 13, color: "var(--fg)", lineHeight: 1.45 }}>{AGENT_LABELS[selected] ?? selected}</span>
-              <span style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.5 }}>{summarizeResult(selectedState)}</span>
+              <span style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fg-mute)", whiteSpace: "nowrap", paddingTop: 3 }}>
+                {selectedStack ? `${artifactProgress}% mapped` : `${completedAgents.length} ready`}
+              </span>
             </div>
             <div style={{ display: "grid", gap: 10, flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
-              {completedArtifacts.length ? completedArtifacts.map((item) => (
+              {selectedStack && (
+                <div style={{ padding: "13px 14px", borderRadius: 20, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(176,180,186,0.10)", display: "grid", gap: 8 }}>
+                  <span style={{ fontSize: 10, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Completion rules</span>
+                  {selectedStack.completion_rules.slice(0, 2).map(rule => (
+                    <span key={rule} style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.45 }}>- {rule}</span>
+                  ))}
+                </div>
+              )}
+              {stackConnectorRequirements.length > 0 && (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span className="site-label">Connectors</span>
+                    <span style={{ fontSize: 11, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      {connectorCoverage ? `${connectorCoverage.coverage_score}% covered` : stackReadiness ? `${stackReadiness.connected_required}/${stackReadiness.required_total} ready` : `${stackConnectorRequirements.filter(connector => connector.required).length} required`}
+                    </span>
+                  </div>
+                  {stackConnectorRequirements.slice(0, 5).map(connector => (
+                    <div key={connector.key} style={{ padding: "10px 12px", borderRadius: 16, background: (connectorCoverage?.connectors.find(item => item.key === connector.key)?.coverage_status === "ready") ? "rgba(61,158,95,0.07)" : connector.required ? "rgba(245,158,11,0.06)" : "rgba(255,255,255,0.025)", border: `1px solid ${(connectorCoverage?.connectors.find(item => item.key === connector.key)?.coverage_status === "ready") ? "rgba(61,158,95,0.18)" : connector.required ? "rgba(245,158,11,0.16)" : "rgba(176,180,186,0.10)"}`, display: "grid", gap: 3 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <span style={{ fontSize: 12, color: "var(--fg)" }}>{connector.label}</span>
+                        <span style={{ fontSize: 10, color: (connectorCoverage?.connectors.find(item => item.key === connector.key)?.coverage_status === "ready") ? "#3D9E5F" : connector.required ? "#D97706" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                          {(connectorCoverage?.connectors.find(item => item.key === connector.key)?.coverage_status ?? (stackReadiness?.connectors.find(item => item.key === connector.key)?.connected ? "connected" : connector.required ? "required" : connector.category)).replaceAll("_", " ")}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>{connector.purpose}</span>
+                      {connectorCoverage?.connectors.find(item => item.key === connector.key) && (
+                        <span style={{ fontSize: 10, color: "var(--fg-mute)", lineHeight: 1.35 }}>
+                          Brain: {connectorCoverage.connectors.find(item => item.key === connector.key)?.brain_record_count ?? 0} records
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {connectorCoverage?.next_actions?.[0] && (
+                    <div style={{ padding: "10px 12px", borderRadius: 16, background: "rgba(37,99,235,0.055)", border: "1px solid rgba(37,99,235,0.14)", color: "var(--fg-dim)", fontSize: 11, lineHeight: 1.45 }}>
+                      {connectorCoverage.next_actions[0]}
+                    </div>
+                  )}
+                </div>
+              )}
+              {stackArtifacts.length ? stackArtifacts.slice(0, 10).map((artifact) => {
+                const ownerState = visibleAgents[artifact.owner_agent];
+                const emittedArtifact = runArtifactByKey.get(artifact.key);
+                const ready = emittedArtifact?.status === "ready" || ownerState?.status === "done";
+                return (
+                  <button
+                    key={artifact.key}
+                    type="button"
+                    onClick={() => setActiveAgent(artifact.owner_agent)}
+                    style={{ display: "grid", gap: 4, padding: "11px 13px", borderRadius: 18, background: ready ? "rgba(61,158,95,0.08)" : "rgba(255,255,255,0.025)", border: `1px solid ${ready ? "rgba(61,158,95,0.22)" : "rgba(176,180,186,0.10)"}`, textAlign: "left" }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <span style={{ fontSize: 12, color: "var(--fg)" }}>{artifact.title}</span>
+                      <span style={{ fontSize: 10, color: ready ? "#3D9E5F" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{ready ? "ready" : AGENT_LABELS[artifact.owner_agent] ?? artifact.owner_agent}</span>
+                    </div>
+                    <span style={{ fontSize: 12, color: "var(--fg-dim)", lineHeight: 1.45 }}>{emittedArtifact?.preview || artifact.description}</span>
+                  </button>
+                );
+              }) : completedArtifacts.length ? completedArtifacts.map((item) => (
                 <button
                   key={item.agent}
                   type="button"
@@ -2877,7 +3519,53 @@ export function GoalWorkspace({
                 </button>
               )) : (
                 <div style={{ padding: "12px 13px", borderRadius: 18, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(176,180,186,0.10)", color: "var(--fg-mute)", fontSize: 13, lineHeight: 1.6 }}>
-                  Completed outputs will appear here as agents finish.
+                  Expected artifacts will appear here after the stack is selected.
+                </div>
+              )}
+              {visibleApprovalQueue.length > 0 && (
+                <div style={{ display: "grid", gap: 8, paddingTop: 2 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span className="site-label">Approval queue</span>
+                    <span style={{ fontSize: 11, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      {visibleApprovalQueue.filter(item => item.status === "triggered").length} triggered
+                    </span>
+                  </div>
+                  {visibleApprovalQueue.slice(0, 4).map(gate => (
+                    <div key={gate.key} style={{ padding: "10px 12px", borderRadius: 16, background: gate.status === "triggered" ? "rgba(245,158,11,0.08)" : "rgba(192,57,43,0.06)", border: `1px solid ${gate.status === "triggered" ? "rgba(245,158,11,0.20)" : "rgba(192,57,43,0.16)"}`, display: "grid", gap: 3 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <span style={{ fontSize: 12, color: "var(--fg)" }}>{gate.title}</span>
+                        <span style={{ fontSize: 10, color: gate.status === "triggered" ? "#D97706" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{gate.status}</span>
+                      </div>
+                      <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>{gate.reason}</span>
+                      <span style={{ fontSize: 10, color: "var(--fg-mute)", lineHeight: 1.4 }}>Before: {gate.required_before}</span>
+                      {gate.status !== "approved" && gate.status !== "skipped" && (
+                        <div style={{ display: "flex", gap: 7, paddingTop: 4 }}>
+                          <button type="button" onClick={() => handleApprovalDecision(gate.key, "approved")} style={{ border: "1px solid rgba(61,158,95,0.22)", background: "rgba(61,158,95,0.08)", color: "#3D9E5F", borderRadius: 999, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>
+                            Approve
+                          </button>
+                          <button type="button" onClick={() => handleApprovalDecision(gate.key, "skipped")} style={{ border: "1px solid rgba(176,180,186,0.12)", background: "rgba(255,255,255,0.025)", color: "var(--fg-mute)", borderRadius: 999, padding: "5px 10px", fontSize: 11, cursor: "pointer" }}>
+                            Skip
+                          </button>
+                        </div>
+                      )}
+                      {gate.note && <span style={{ fontSize: 10, color: "var(--fg-mute)", lineHeight: 1.4 }}>Note: {gate.note}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {safeRunActions.length > 0 && (
+                <div style={{ display: "grid", gap: 8, paddingTop: 2 }}>
+                  <span className="site-label">SafeRun audit</span>
+                  {safeRunActions.slice(-4).reverse().map(action => (
+                    <div key={action.id} style={{ padding: "10px 12px", borderRadius: 16, background: action.risk_level === "high" ? "rgba(192,57,43,0.06)" : "rgba(245,158,11,0.06)", border: `1px solid ${action.risk_level === "high" ? "rgba(192,57,43,0.16)" : "rgba(245,158,11,0.16)"}`, display: "grid", gap: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <span style={{ fontSize: 12, color: "var(--fg)" }}>{TOOL_DESCRIPTIONS[action.tool] ?? action.tool}</span>
+                        <span style={{ fontSize: 10, color: action.status === "executed" || action.status === "approved" ? "#3D9E5F" : action.status === "error" ? "#C0392B" : action.status === "waiting_approval" ? "#D97706" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{action.status.replace("_", " ")}</span>
+                      </div>
+                      <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>{action.reason}</span>
+                      {action.result_preview && <span style={{ fontSize: 11, color: "var(--fg-mute)", lineHeight: 1.45 }}>{action.result_preview}</span>}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

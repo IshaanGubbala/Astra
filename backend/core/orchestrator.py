@@ -102,7 +102,7 @@ class Orchestrator:
         ]
         return await self._llm_plan(messages)
 
-    async def _replan_with_research(self, goal: str, research_result: dict, agents_needed: list[str]) -> list[dict]:
+    async def _replan_with_research(self, goal: str, research_result: dict, agents_needed: list[str], stack_context: str = "") -> list[dict]:
         """Phase 2: replan non-research agents with full research context. Returns detailed instructions."""
         import json
         research_summary = ""
@@ -142,6 +142,7 @@ class Orchestrator:
         user = (
             f"Goal: {goal}\n\n"
             f"Agents to assign: {agents_str}\n\n"
+            f"Stack context:\n{stack_context}\n\n"
             f"Research findings:\n{research_summary}\n\n"
             "Write detailed task instructions for each agent using the research above."
         )
@@ -275,12 +276,145 @@ class Orchestrator:
             logger.warning("Goal expansion failed (%s) — using original", e)
         return goal
 
+    @staticmethod
+    def _artifact_preview(result: Any, artifact_key: str) -> str:
+        """Create a compact preview for a typed stack artifact event."""
+        if not isinstance(result, dict):
+            return str(result)[:280]
+        candidates = [
+            result.get(artifact_key),
+            result.get("summary"),
+            result.get("output_summary"),
+            result.get("formatted_text"),
+            result.get("report"),
+            result.get("text"),
+            result.get("url"),
+            result.get("preview_url"),
+            result.get("html"),
+        ]
+        for candidate in candidates:
+            if candidate:
+                if isinstance(candidate, str):
+                    return candidate.replace("\n", " ").strip()[:360]
+                return str(candidate)[:360]
+        return str(result)[:360]
+
+    async def _publish_stack_artifacts(
+        self,
+        session_id: str,
+        task: dict,
+        result: Any,
+        stack_template: Any,
+    ) -> None:
+        """Emit typed artifact events for artifacts owned by the completed task."""
+        from backend.core.events import publish
+
+        agent_name = task.get("agent", "")
+        expected_keys = task.get("expected_artifacts") or []
+        if not expected_keys and stack_template:
+            expected_keys = [
+                artifact.key
+                for artifact in getattr(stack_template, "artifacts", [])
+                if artifact.owner_agent == agent_name
+            ]
+        artifact_by_key = {
+            artifact.key: artifact
+            for artifact in getattr(stack_template, "artifacts", [])
+        }
+        for artifact_key in expected_keys:
+            artifact = artifact_by_key.get(artifact_key)
+            if not artifact:
+                continue
+            await publish(session_id, {
+                "type": "stack_artifact",
+                "artifact": {
+                    "key": artifact.key,
+                    "title": artifact.title,
+                    "owner_agent": artifact.owner_agent,
+                    "description": artifact.description,
+                    "required": artifact.required,
+                    "status": "ready",
+                    "task_id": task.get("id", ""),
+                    "preview": self._artifact_preview(result, artifact.key),
+                },
+            })
+
+    async def _publish_outcomes(self, session_id: str, task: dict, result: Any) -> None:
+        """Emit measurable Outcome Ledger events from a completed task result."""
+        from backend.core.events import publish
+        from backend.outcomes import build_outcome_events
+
+        for outcome in build_outcome_events(task.get("agent", ""), result, task):
+            await publish(session_id, {"type": "outcome_recorded", "outcome": outcome})
+
+    async def _persist_brain_record(
+        self,
+        founder_id: str,
+        title: str,
+        content: str,
+        kind: str,
+        canonical: bool = False,
+        stale_risk: str = "medium",
+    ) -> None:
+        """Best-effort write of operator records into the Company Brain."""
+        try:
+            from backend.tools.company_brain import add_company_brain_record
+            await asyncio.to_thread(
+                add_company_brain_record,
+                founder_id=founder_id,
+                source="astra",
+                title=title,
+                content=content,
+                kind=kind,
+                canonical=canonical,
+                stale_risk=stale_risk,
+            )
+        except Exception as exc:
+            logger.warning("Company brain record write failed for %s: %s", title, exc)
+
     async def run(self, goal: str, founder_id: str, constraints: dict = None, session_id: str = None) -> dict[str, Any]:
         session_id = session_id or uuid.uuid4().hex[:8]
         shared: dict[str, Any] = {"constraints": constraints or {}}
 
         from backend.core.events import publish
         await publish(session_id, {"type": "goal_start", "goal": goal, "founder_id": founder_id})
+
+        from backend.stacks import build_approval_queue, build_stack_manifest, build_stack_operating_plan, get_stack_template
+        stack_template = get_stack_template((constraints or {}).get("stack_id"))
+        approval_queue = build_approval_queue(stack_template)
+        operating_plan = build_stack_operating_plan(stack_template, goal)
+        stack_manifest = build_stack_manifest(stack_template, goal)
+        shared["stack_template"] = stack_template.to_public_dict()
+        shared["approval_queue"] = approval_queue
+        shared["stack_operating_plan"] = operating_plan
+        shared["stack_manifest"] = stack_manifest
+        stack_context = (
+            f"{stack_template.name}: {stack_template.primary_outcome}\n"
+            f"Target user: {stack_template.target_user}\n"
+            f"Expected artifacts: "
+            + ", ".join(a.title for a in stack_template.artifacts)
+            + "\nConnector requirements: "
+            + ", ".join(
+                f"{connector.label} ({connector.category})"
+                for connector in getattr(stack_template, "connector_requirements", [])
+            )
+        )
+        await publish(session_id, {
+            "type": "stack_selected",
+            "stack": stack_template.to_public_dict(),
+        })
+        await publish(session_id, {
+            "type": "stack_operating_plan",
+            "operating_plan": operating_plan,
+        })
+        await publish(session_id, {
+            "type": "stack_manifest",
+            "manifest": stack_manifest,
+        })
+        await publish(session_id, {
+            "type": "stack_approval_queue",
+            "approval_queue": approval_queue,
+        })
 
         # Proprietary engine: pre-run context (graph + fingerprints + observer alerts)
         proprietary_engine = None
@@ -307,7 +441,33 @@ class Orchestrator:
         # Generate company name before expansion so it feeds into expanded goal
         company_name = await self._generate_company_name(goal)
         shared["company_name"] = company_name
+        operating_plan = build_stack_operating_plan(stack_template, goal, company_name)
+        stack_manifest = build_stack_manifest(stack_template, goal, company_name)
+        shared["stack_operating_plan"] = operating_plan
+        shared["stack_manifest"] = stack_manifest
         await publish(session_id, {"type": "company_name", "name": company_name})
+        await publish(session_id, {"type": "stack_operating_plan", "operating_plan": operating_plan})
+        await publish(session_id, {"type": "stack_manifest", "manifest": stack_manifest})
+        try:
+            import json as _json
+            await self._persist_brain_record(
+                founder_id=founder_id,
+                title=f"Stack Operating Plan - {company_name}",
+                content=_json.dumps(operating_plan, indent=2),
+                kind="operating_plan",
+                canonical=True,
+                stale_risk="low",
+            )
+            await self._persist_brain_record(
+                founder_id=founder_id,
+                title=f"Agent Department Manifest - {company_name}",
+                content=_json.dumps(stack_manifest, indent=2),
+                kind="department_manifest",
+                canonical=True,
+                stale_risk="low",
+            )
+        except Exception as _op:
+            logger.warning("Stack manifest brain record failed: %s", _op)
         logger.info("Company name: %s", company_name)
 
         # Persist company identity to brain so chat always knows it
@@ -326,11 +486,46 @@ class Orchestrator:
         except Exception as _bi:
             logger.warning("Brain identity record failed: %s", _bi)
 
+        try:
+            from backend.genome import build_company_genome
+            genome = build_company_genome(
+                session_id=session_id,
+                founder_id=founder_id,
+                company_name=company_name,
+                goal=goal,
+                stack_template=stack_template,
+                brain_context=str(shared.get("company_brain_context", "")),
+            )
+            shared["company_genome"] = genome
+            await publish(session_id, {"type": "company_genome", "genome": genome})
+            try:
+                from backend.tools.company_brain import add_company_brain_record
+                import json as _json
+                await asyncio.to_thread(
+                    add_company_brain_record,
+                    founder_id=founder_id,
+                    source="astra",
+                    title=f"Company Genome - {company_name}",
+                    content=_json.dumps(genome, indent=2),
+                    kind="genome",
+                    canonical=True,
+                    stale_risk="low",
+                )
+            except Exception as _gb:
+                logger.warning("Brain genome record failed: %s", _gb)
+        except Exception as _ge:
+            logger.warning("Company genome build failed: %s", _ge)
+
         # Expand the goal with Qwen3-235B before anything else
         goal = await self._expand_goal(goal, session_id)
 
-        # Phase 1: initial plan — research always runs first
-        initial_tasks = await self._initial_plan(goal)
+        # Phase 1: stack plan — default to the productized outcome stack.
+        initial_tasks = [
+            task for task in stack_template.build_tasks(goal)
+            if task["agent"] in self.specialists
+        ]
+        if not initial_tasks:
+            initial_tasks = await self._initial_plan(goal)
         if not initial_tasks:
             initial_tasks = [{"id": "t1", "agent": "research", "instruction": f"Research the market and competitive landscape for: {goal}", "depends_on": []}]
 
@@ -339,6 +534,7 @@ class Orchestrator:
             "research_competitors",
             "research_execution",
         }
+        stack_task_by_agent = {t.agent: t for t in stack_template.tasks}
         research_task = next((t for t in initial_tasks if t["agent"] == "research"), None)
         other_agents_initial = [t for t in initial_tasks if t["agent"] not in _RESEARCH_AGENTS]
 
@@ -494,6 +690,8 @@ class Orchestrator:
             completed[tid] = result
             shared[f"result_{tid}"] = result
             shared[f"result_{agent_name}"] = result  # also keyed by agent name for downstream context
+            await self._publish_stack_artifacts(session_id, task, result, stack_template)
+            await self._publish_outcomes(session_id, task, result)
             logger.info("Task %s (%s) done", tid, agent_name)
 
         # Phase A: run all 3 research agents in parallel
@@ -522,8 +720,23 @@ class Orchestrator:
                 research_result["obsidian_content"] = "\n\n---\n\n".join(merged_notes)
             agents_needed = [t["agent"] for t in other_agents_initial]
             if agents_needed:
-                detailed_tasks = await self._replan_with_research(goal, research_result, agents_needed)
+                detailed_tasks = await self._replan_with_research(goal, research_result, agents_needed, stack_context)
                 if detailed_tasks:
+                    detailed_by_agent = {t["agent"]: t for t in detailed_tasks}
+                    for task in detailed_tasks:
+                        template_task = stack_task_by_agent.get(task["agent"])
+                        if not template_task:
+                            continue
+                        task["stack_task_title"] = template_task.title
+                        task["expected_artifacts"] = list(template_task.artifacts)
+                        stack_deps = [
+                            detailed_by_agent[stack_task_by_agent[dep_agent].agent]["id"]
+                            for dep_agent in stack_task_by_agent
+                            if stack_task_by_agent[dep_agent].id in template_task.depends_on
+                            and stack_task_by_agent[dep_agent].agent in detailed_by_agent
+                            and stack_task_by_agent[dep_agent].agent not in _RESEARCH_AGENTS
+                        ]
+                        task["depends_on"] = stack_deps
                     # Re-emit updated plan with detailed instructions
                     await publish(session_id, {
                         "type": "plan_done",
@@ -546,6 +759,13 @@ class Orchestrator:
                     asyncio.create_task(_bg_detailed_plan())
                     tasks = parallel_research_tasks + detailed_tasks
                 else:
+                    # Research has already completed under runtime ids, so stack
+                    # dependencies that point at template research ids are satisfied.
+                    for task in other_agents_initial:
+                        task["depends_on"] = [
+                            dep for dep in task.get("depends_on", [])
+                            if dep not in {rt["id"] for rt in initial_tasks if rt["agent"] in _RESEARCH_AGENTS}
+                        ]
                     tasks = parallel_research_tasks + other_agents_initial
 
             remaining = [t for t in tasks if t["agent"] not in _RESEARCH_AGENTS]
@@ -582,6 +802,23 @@ class Orchestrator:
                 in_flight.discard(t["id"])
 
         await publish(session_id, {"type": "goal_done", "results": completed})
+        try:
+            from backend.core.events import _event_log
+            from backend.session_digest import build_session_digest
+            from backend.workflow_state import save_session_state
+            import json as _json
+            save_session_state(session_id, _event_log.get(session_id, []))
+            digest = build_session_digest(session_id, _event_log.get(session_id, []))
+            await self._persist_brain_record(
+                founder_id=founder_id,
+                title=f"Run Digest - {company_name} - {session_id}",
+                content=_json.dumps(digest, indent=2),
+                kind="run_digest",
+                canonical=False,
+                stale_risk="low",
+            )
+        except Exception as _digest_err:
+            logger.warning("Run digest brain record failed: %s", _digest_err)
 
         # Write session index linking all agent notes
         try:
@@ -714,6 +951,7 @@ class Orchestrator:
                 pass
             completed[tid] = result
             shared[f"result_{agent_name}"] = result
+            await self._publish_outcomes(session_id, task, result)
             logger.info("Continue task %s (%s) done", tid, agent_name)
 
         await asyncio.gather(*[_run_task(t) for t in tasks])

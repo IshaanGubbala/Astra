@@ -542,6 +542,66 @@ class Agent:
         if fn is None:
             return {"error": f"Unknown tool: {tool_name}"}
         import time as _time
+        saferun_action = None
+        try:
+            from backend.core.events import publish
+            from backend.safety import build_saferun_action
+            saferun_action = build_saferun_action(tool_name, args, self.name)
+            if saferun_action:
+                await publish(ctx.session_id, {
+                    "type": "saferun_action",
+                    "action": saferun_action,
+                })
+        except Exception as e:
+            logger.warning("[%s] SafeRun planning failed for %s: %s", self.name, tool_name, e)
+        if saferun_action and saferun_action.get("approval_required"):
+            gate_key = saferun_action.get("approval_gate")
+            try:
+                from backend.core.events import approval_decision_wait, publish
+                await publish(ctx.session_id, {
+                    "type": "saferun_result",
+                    "action_id": saferun_action["id"],
+                    "tool": tool_name,
+                    "agent": self.name,
+                    "status": "waiting_approval",
+                    "result_preview": f"Waiting for founder approval gate: {gate_key}",
+                    "approval_gate": gate_key,
+                })
+                decision = await approval_decision_wait(ctx.session_id, str(gate_key), timeout=300.0)
+                if not decision:
+                    await publish(ctx.session_id, {
+                        "type": "saferun_result",
+                        "action_id": saferun_action["id"],
+                        "tool": tool_name,
+                        "agent": self.name,
+                        "status": "error",
+                        "result_preview": f"Timed out waiting for approval gate: {gate_key}",
+                        "approval_gate": gate_key,
+                    })
+                    return {"error": f"SafeRun blocked {tool_name}: approval timed out for gate {gate_key}"}
+                if decision.get("decision") != "approved":
+                    await publish(ctx.session_id, {
+                        "type": "saferun_result",
+                        "action_id": saferun_action["id"],
+                        "tool": tool_name,
+                        "agent": self.name,
+                        "status": "skipped",
+                        "result_preview": f"Founder skipped approval gate: {gate_key}",
+                        "approval_gate": gate_key,
+                    })
+                    return {"error": f"SafeRun skipped {tool_name}: founder skipped approval gate {gate_key}"}
+                await publish(ctx.session_id, {
+                    "type": "saferun_result",
+                    "action_id": saferun_action["id"],
+                    "tool": tool_name,
+                    "agent": self.name,
+                    "status": "approved",
+                    "result_preview": f"Founder approved gate: {gate_key}",
+                    "approval_gate": gate_key,
+                })
+            except Exception as e:
+                logger.warning("[%s] SafeRun approval wait failed for %s: %s", self.name, tool_name, e)
+                return {"error": f"SafeRun approval check failed for {tool_name}: {e}"}
         args_preview = {k: (str(v)[:120] + "…" if isinstance(v, str) and len(str(v)) > 120 else v) for k, v in args.items()}
         logger.debug("[%s] → %s  args=%s", self.name, tool_name, args_preview)
         t0 = _time.monotonic()
@@ -553,10 +613,38 @@ class Agent:
             elapsed = _time.monotonic() - t0
             result_preview = str(result)[:200] if result is not None else "None"
             logger.debug("[%s] ← %s  %.1fs  result=%.200s", self.name, tool_name, elapsed, result_preview)
+            if saferun_action:
+                try:
+                    from backend.core.events import publish
+                    await publish(ctx.session_id, {
+                        "type": "saferun_result",
+                        "action_id": saferun_action["id"],
+                        "tool": tool_name,
+                        "agent": self.name,
+                        "status": "error" if isinstance(result, dict) and result.get("error") else "executed",
+                        "result_preview": result_preview,
+                        "elapsed_seconds": round(elapsed, 2),
+                    })
+                except Exception as e:
+                    logger.warning("[%s] SafeRun result emit failed for %s: %s", self.name, tool_name, e)
             return result
         except Exception as e:
             elapsed = _time.monotonic() - t0
             logger.error("[%s] ✗ %s  %.1fs  %s: %s", self.name, tool_name, elapsed, type(e).__name__, e)
+            if saferun_action:
+                try:
+                    from backend.core.events import publish
+                    await publish(ctx.session_id, {
+                        "type": "saferun_result",
+                        "action_id": saferun_action["id"],
+                        "tool": tool_name,
+                        "agent": self.name,
+                        "status": "error",
+                        "result_preview": str(e)[:240],
+                        "elapsed_seconds": round(elapsed, 2),
+                    })
+                except Exception as emit_error:
+                    logger.warning("[%s] SafeRun error emit failed for %s: %s", self.name, tool_name, emit_error)
             return {"error": str(e)}
 
     def _normalize_done_output(

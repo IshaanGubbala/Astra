@@ -930,6 +930,75 @@ def ask_company_brain(founder_id: str, question: str, limit: int = 8) -> dict[st
             "citations": [],
             "confidence": 0.0,
         }
+    lower_query = query.lower()
+    report_terms = ("what did", "last week", "this week", "subteam", "team do", "worked on", "assigned")
+    team_terms = ("engineering", "growth", "sales", "marketing", "product", "support", "ops", "legal")
+    if any(term in lower_query for term in report_terms) and any(team in lower_query for team in team_terms):
+        from backend.company_reports import build_company_subteam_report, persist_company_subteam_report
+
+        team = next((candidate for candidate in team_terms if candidate in lower_query), "engineering")
+        days = 7 if "week" in lower_query else 30
+        report = build_company_subteam_report(founder_id, team, days)
+        try:
+            persist_company_subteam_report(report)
+        except Exception:
+            pass
+        evidence = [
+            f"{item.get('title')} ({item.get('source')}): {item.get('snippet')}"
+            for item in report.get("highlights", [])[:6]
+        ]
+        return {
+            "ok": True,
+            "question": question,
+            "answer": report["summary"] + (" " + " ".join(report["next_actions"][:2]) if report.get("next_actions") else ""),
+            "confidence": 0.84 if report.get("record_count") else 0.35,
+            "citations": [
+                {
+                    "index": index,
+                    "record_id": item.get("id"),
+                    "title": item.get("title"),
+                    "source": item.get("source"),
+                    "url": "",
+                    "canonical": bool(item.get("canonical")),
+                    "score": 1.0,
+                }
+                for index, item in enumerate(report.get("highlights", [])[:6], start=1)
+            ],
+            "evidence": evidence,
+            "context": "\n".join(evidence) if evidence else "No matching Company Brain records for this report window.",
+            "report": report,
+        }
+    if any(term in lower_query for term in ("connector", "integration", "connected", "coverage", "sync")):
+        from backend.connector_coverage import build_connector_coverage
+
+        stack_id = "idea_to_revenue"
+        if "sales" in lower_query:
+            stack_id = "sales"
+        elif "marketing" in lower_query:
+            stack_id = "marketing"
+        elif "support" in lower_query:
+            stack_id = "support"
+        elif "product" in lower_query:
+            stack_id = "product"
+        elif "ops" in lower_query:
+            stack_id = "founder_ops"
+        coverage = build_connector_coverage(founder_id, stack_id)
+        return {
+            "ok": True,
+            "question": question,
+            "answer": coverage["summary"] + (" " + " ".join(coverage["next_actions"][:3]) if coverage.get("next_actions") else ""),
+            "confidence": 0.82,
+            "citations": [],
+            "evidence": [
+                f"{item['label']}: {item['coverage_status']} ({item['brain_record_count']} brain records)"
+                for item in coverage.get("connectors", [])[:8]
+            ],
+            "context": "\n".join(
+                f"- {item['label']}: {item['coverage_status']} ({item['brain_record_count']} brain records)"
+                for item in coverage.get("connectors", [])[:8]
+            ),
+            "connector_coverage": coverage,
+        }
     search = search_company_brain(founder_id, query, limit=limit)
     records = search.get("results", [])
     if not records:

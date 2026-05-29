@@ -16,6 +16,7 @@ _sessions: dict[str, asyncio.Queue] = {}
 _completed: set[str] = set()  # sessions that finished — reconnect gets immediate replay + close
 _steer: dict[str, list[str]] = {}  # inbound founder directives per session
 _input_responses: dict[str, dict] = {}  # request_id → founder input response
+_approval_decisions: dict[str, dict[str, dict]] = {}  # session_id -> gate_key -> decision event
 
 # Persistent event log per session: list of (event_id, event_dict)
 _event_log: dict[str, list[tuple[int, dict]]] = {}
@@ -107,8 +108,25 @@ def _buffer(session_id: str, event_id: int, event: dict) -> None:
         _event_log[session_id] = []
     log = _event_log[session_id]
     log.append((event_id, event))
+    _capture_approval_decision(session_id, event)
     if len(log) > _MAX_BUFFER:
         log.pop(0)
+
+
+def _capture_approval_decision(session_id: str, event: dict) -> None:
+    """Mirror approval decision events into the in-memory wait store."""
+    if event.get("type") != "stack_approval_decision":
+        return
+    gate_key = event.get("gate_key")
+    if not gate_key:
+        return
+    _approval_decisions.setdefault(session_id, {})[str(gate_key)] = event
+
+
+def _rebuild_approval_decisions(session_id: str, events: list[tuple[int, dict]]) -> None:
+    """Reconstruct approval wait state from a restored event log."""
+    for _, event in events:
+        _capture_approval_decision(session_id, event)
 
 
 async def publish(session_id: str, event: dict) -> None:
@@ -145,6 +163,25 @@ async def input_response_wait(request_id: str, timeout: float = 300.0) -> dict |
     return None
 
 
+def approval_decision_push(session_id: str, gate_key: str, decision: dict) -> None:
+    """Store a founder approval decision for SafeRun-gated tool execution."""
+    _approval_decisions.setdefault(session_id, {})[gate_key] = decision
+
+
+async def approval_decision_wait(session_id: str, gate_key: str, timeout: float = 300.0) -> dict | None:
+    """Wait for a founder decision on a stack approval gate."""
+    import time
+    if session_id in _event_log:
+        _rebuild_approval_decisions(session_id, _event_log.get(session_id, []))
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        decision = _approval_decisions.get(session_id, {}).get(gate_key)
+        if decision:
+            return decision
+        await asyncio.sleep(0.5)
+    return None
+
+
 def steer_push(session_id: str, message: str) -> None:
     """Buffer a founder directive for the agent loop to pick up."""
     if session_id not in _steer:
@@ -171,6 +208,7 @@ def _restore_session(session_id: str) -> tuple[bool, bool]:
         return False, False
     _event_log[session_id] = events
     _event_counters[session_id] = max(eid for eid, _ in events)
+    _rebuild_approval_decisions(session_id, events)
     is_done = any(e.get("type") in ("goal_done", "goal_error") for _, e in events)
     if is_done:
         _completed.add(session_id)
@@ -180,6 +218,7 @@ def _restore_session(session_id: str) -> tuple[bool, bool]:
 # Events that establish agent state — safe to replay on fresh connect without flooding the log
 _STATE_EVENTS = frozenset({
     "goal_start", "plan_done", "goal_expanded", "detailed_plan", "company_name",
+    "stack_selected", "stack_operating_plan", "stack_approval_queue", "stack_approval_decision", "company_genome", "stack_artifact", "saferun_action", "saferun_result", "outcome_recorded",
     "agent_start", "agent_done", "agent_error", "mirror_verdict",
     "goal_done", "goal_error",
 })
