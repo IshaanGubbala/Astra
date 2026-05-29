@@ -669,38 +669,32 @@ def generate_landing_page_html(
     _rng = random.Random(_seed + 1)
     _vibe_instruction = _rng.choice(_STRUCTURES)
 
-    prompt = f"""Act as an expert principal web designer and front-end developer. Create a fully coded, comprehensive single-page responsive website using standard HTML, Tailwind CSS (via CDN), and vanilla JavaScript. Write the complete code to index.html.
+    prompt = f"""Act as an expert principal web designer and front-end developer. I need a fully coded, single-file responsive website using standard HTML, Tailwind CSS, and vanilla JavaScript. Write one index.html that is extremely long — equivalent to 3+ full pages of content in a single scrolling page. Use a persistent, premium sticky navbar with backdrop-blur-md with anchor links to each section.
 
-Business Context:
+Business/Project Context:
 Brand Name: {name}
 What we do: {headline}. {subheadline}
 Key capabilities: {props_text}
-CTA: "{cta_text}" → {cta_url}
-Design tokens: {_design_context or f"Choose a premium, modern aesthetic for {name}."}
+Aesthetic: Modern, high-end, editorial, minimalist.
+Design Tokens: {_design_context or f"Choose a premium dark-mode aesthetic for {name}."}
 
-Make the page exceptionally long, content-rich, and feature-dense with these exact sections:
+Make the page extremely long, content-rich, and feature-dense with ALL of these sections in order:
 
-1. STICKY NAV — backdrop-blur, logo left, anchor links right, CTA button
+1. HERO — Full-viewport, big bold typography, subtle looping gradient particle effect, animated "Scroll Down" indicator
+2. SOCIAL PROOF RIBBON — Infinite auto-scrolling marquee of 6-8 partner/integration logos (styled text emblems)
+3. CORE PHILOSOPHY — Split-screen: left side sticks on scroll with bold manifesto; right side scrolls with deep paragraphs and blockquotes about {name}
+4. BENTO GRID — 4-column asymmetric grid, each card with glassmorphism border (border-white/10), hover-lift, icon, title, description using the capabilities above
+5. STAT COUNTER — 4 impressive numbers, JS IntersectionObserver animates count from 0 on scroll
+6. HOW IT WORKS — 3-4 numbered steps with icons and explanations
+7. FEATURES — detailed cards for each capability above
+8. TESTIMONIALS — 3 detailed quotes, full name, job title, company
+9. PRICING — 3 tiers (Starter/Pro/Business), monthly prices, feature checklists, highlighted "most popular"
+10. TIMELINE — center-aligned, 5 major milestones with active scroll highlighting
+11. FAQ — 6-item accordion, smooth JS slide toggle, animated plus/minus icons
+12. WAITLIST CTA — full-width dark gradient, email input, functional submit with "You're on the list!" success message (no reload)
+13. MEGA-FOOTER — 4 columns: sitemap links, contact info, newsletter input, social links. © {name} 2026
 
-2. HERO — full-viewport, bold oversized typography, subtle animated gradient background, "scroll down" indicator, stat bar with 3-4 impressive numbers
-
-3. SOCIAL PROOF RIBBON — infinite auto-scrolling marquee of 6 partner/integration logos (use text emblems if no images)
-
-4. HOW IT WORKS — 3 numbered steps, each with an icon, bold title, and 2-sentence explanation
-
-5. FEATURES — asymmetric bento grid layout, each card has glassmorphism border, hover-lift, icon, title, and detailed description using the key capabilities above
-
-6. TESTIMONIALS — 3 detailed quotes, each with full name, job title, company, and avatar placeholder
-
-7. PRICING — 3 tiers (Starter/Pro/Business) with monthly prices, feature checklist, highlighted "most popular" tier
-
-8. FAQ — 6-item accordion with smooth JS slide toggle, plus/minus icon that animates on open
-
-9. WAITLIST CTA — full-width dark gradient section, compelling heading, email input + submit button with success state (JS), subtext
-
-10. FOOTER — 4 columns: sitemap links, contact info, newsletter input, social links. © {name} 2026
-
-Code requirements: Tailwind via CDN, Google Fonts, all JS inline. Functional accordion and waitlist form with success message."""
+Code requirements: Tailwind CDN, Google Fonts, all JS inline in the file."""
 
     from backend.tools._llm import generate
 
