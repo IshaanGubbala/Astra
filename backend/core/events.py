@@ -7,6 +7,7 @@ Events are also persisted to Redis so sessions survive backend restarts.
 import asyncio
 import json
 import logging
+import time
 from collections import deque
 from typing import AsyncIterator
 
@@ -130,10 +131,18 @@ def _rebuild_approval_decisions(session_id: str, events: list[tuple[int, dict]])
 
 
 async def publish(session_id: str, event: dict) -> None:
+    event.setdefault("ts_unix", time.time())
+    event.setdefault("ts_iso", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(event["ts_unix"])))
     event_id = _next_id(session_id)
     _buffer(session_id, event_id, event)
-    # Fire-and-forget Redis write (don't block the event loop)
-    asyncio.get_running_loop().run_in_executor(None, _redis_append, session_id, event_id, event)
+    # Fire-and-forget persistence (don't block the event loop)
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, _redis_append, session_id, event_id, event)
+    try:
+        from backend.run_ledger import record_run_event
+        loop.run_in_executor(None, record_run_event, session_id, event_id, event)
+    except Exception:
+        pass
     await _get_queue(session_id).put((event_id, event))
 
 
@@ -218,7 +227,7 @@ def _restore_session(session_id: str) -> tuple[bool, bool]:
 # Events that establish agent state — safe to replay on fresh connect without flooding the log
 _STATE_EVENTS = frozenset({
     "goal_start", "plan_done", "goal_expanded", "detailed_plan", "company_name",
-    "stack_selected", "stack_operating_plan", "stack_approval_queue", "stack_approval_decision", "company_genome", "stack_artifact", "saferun_action", "saferun_result", "outcome_recorded",
+    "stack_selected", "stack_operating_plan", "stack_manifest", "stack_execution_contract", "stack_execution_blueprint", "stack_lane_status", "stack_approval_queue", "approval_request", "stack_approval_decision", "company_genome", "stack_artifact", "stack_artifact_verification", "saferun_action", "saferun_result", "outcome_recorded",
     "agent_start", "agent_done", "agent_error", "mirror_verdict",
     "goal_done", "goal_error",
 })

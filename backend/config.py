@@ -50,10 +50,27 @@ class Settings(BaseSettings):
 
     # Credential store encryption key — generated once and fixed in .env
     astra_creds_key: str = ""
+    astra_require_auth: bool = False
+    astra_trust_auth_headers: bool = False
+    astra_allow_dev_auth: bool = False
+    astra_jwt_issuer: str = ""
+    astra_jwt_audience: str = ""
+    astra_jwt_jwks_url: str = ""
+    astra_jwt_secret: str = ""
+    # Comma-separated user IDs allowed to access platform-wide admin endpoints.
+    # In local dev with auth disabled, admin endpoints remain available.
+    astra_platform_admins: str = ""
+    astra_storage_backend: str = "local"
+    astra_alert_webhook_url: str = ""
+    astra_alert_min_severity: str = "warning"
 
     # Stripe Standard Connect
     stripe_secret_key: str = ""
     stripe_client_id: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_starter: str = ""
+    stripe_price_team: str = ""
+    stripe_price_scale: str = ""
     backend_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:3003"
 

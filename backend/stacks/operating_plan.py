@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.stacks.execution_blueprint import build_stack_execution_blueprint
+from backend.stacks.execution_contracts import build_stack_execution_contract
 from backend.stacks.templates import AgentStackTemplate
 
 
@@ -30,6 +32,8 @@ def build_stack_operating_plan(
     company_name: str | None = None,
 ) -> dict[str, Any]:
     """Build the productized execution contract for a selected stack."""
+    execution_contract = build_stack_execution_contract(stack)
+    execution_blueprint = build_stack_execution_blueprint(stack, goal, company_name)
     artifact_by_key = {artifact.key: artifact for artifact in stack.artifacts}
     lanes: list[dict[str, Any]] = []
     phases: dict[str, list[dict[str, str]]] = {}
@@ -152,4 +156,6 @@ def build_stack_operating_plan(
             f"{len(required_artifacts)} required artifacts are either ready or explicitly blocked.",
             "Company Brain has the stack decision, company genome, artifact ledger, and next actions.",
         ],
+        "execution_contract": execution_contract,
+        "execution_blueprint": execution_blueprint,
     }

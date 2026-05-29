@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
+import { apiFetch } from "@/lib/api";
 import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -180,7 +181,7 @@ function ConnectStripe({ founderId, email }: { founderId: string; email: string 
   const connect = async () => {
     setLoading(true); setError("");
     try {
-      const res = await fetch(`${BASE}/stripe/oauth-url/${founderId}?email=${encodeURIComponent(email)}`);
+      const res = await apiFetch(`${BASE}/stripe/oauth-url/${founderId}?email=${encodeURIComponent(email)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail ?? "Failed to get OAuth URL");
       window.location.href = data.url;
@@ -229,7 +230,7 @@ function ProductsSection({ founderId, currency }: { founderId: string; currency:
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${BASE}/stripe/products/${founderId}`);
+      const res = await apiFetch(`${BASE}/stripe/products/${founderId}`);
       if (res.ok) { const d = await res.json(); setProducts(d.products ?? []); }
     } finally { setLoading(false); }
   }, [founderId]);
@@ -240,7 +241,7 @@ function ProductsSection({ founderId, currency }: { founderId: string; currency:
     if (!form.name || !form.amount) return;
     setCreating(true);
     try {
-      const res = await fetch(`${BASE}/stripe/products/${founderId}`, {
+      const res = await apiFetch(`${BASE}/stripe/products/${founderId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: form.name, description: form.description, amount: Math.round(parseFloat(form.amount) * 100), currency, interval: form.interval }),
@@ -337,7 +338,7 @@ function AlertsFeed({ founderId }: { founderId: string }) {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${BASE}/stripe/events/${founderId}`);
+      const res = await apiFetch(`${BASE}/stripe/events/${founderId}`);
       if (res.ok) { const d = await res.json(); setEvents(d.events ?? []); setWebhookRegistered(d.events?.length > 0 || false); }
     } catch { /* silent */ }
   }, [founderId]);
@@ -347,7 +348,7 @@ function AlertsFeed({ founderId }: { founderId: string }) {
   const registerWebhook = async () => {
     setRegistering(true);
     try {
-      const res = await fetch(`${BASE}/stripe/register-webhook/${founderId}`, {
+      const res = await apiFetch(`${BASE}/stripe/register-webhook/${founderId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ founder_id: founderId, backend_url: BASE }),
@@ -454,7 +455,7 @@ export default function PaymentsPage() {
   const fetchStatus = useCallback(async () => {
     setLoadingStatus(true);
     try {
-      const res = await fetch(`${BASE}/stripe/status/${founderId}`);
+      const res = await apiFetch(`${BASE}/stripe/status/${founderId}`);
       setStatus(await res.json());
     } catch {
       setStatus({ connected: false, charges_enabled: false, payouts_enabled: false });
@@ -466,7 +467,7 @@ export default function PaymentsPage() {
   const fetchData = useCallback(async () => {
     setLoadingData(true); setDataError(null);
     try {
-      const res = await fetch(`${BASE}/stripe/data/${founderId}`);
+      const res = await apiFetch(`${BASE}/stripe/data/${founderId}`);
       if (!res.ok) { const e = await res.json(); throw new Error(e.detail ?? "Failed"); }
       setData(await res.json());
     } catch (e: unknown) {

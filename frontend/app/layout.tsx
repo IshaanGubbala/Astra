@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, JetBrains_Mono } from "next/font/google";
+import ApiAuthBridge from "@/components/ApiAuthBridge";
 import CookieNotice from "@/components/CookieNotice";
 import SiteNav from "./site-nav";
 import "./globals.css";
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head />
       <body suppressHydrationWarning>
         <ClerkProvider>
+          <ApiAuthBridge />
           <SiteNav />
           <main>{children}</main>
           <CookieNotice />

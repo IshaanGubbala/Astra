@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -60,6 +61,8 @@ def import_github(founder_id: str, limit: int = 12) -> dict[str, Any]:
         return {"ok": False, "source": "github", "error": "GitHub token not configured"}
 
     records: list[dict[str, Any]] = []
+    cursor = _connector_cursor(founder_id, "github")
+    max_seen = cursor
     try:
         repos = _safe_get(
             "https://api.github.com/user/repos",
@@ -69,6 +72,10 @@ def import_github(founder_id: str, limit: int = 12) -> dict[str, Any]:
         if not isinstance(repos, list):
             repos = []
         for repo in repos:
+            repo_updated = str(repo.get("updated_at") or "")
+            max_seen = _max_cursor(max_seen, repo_updated)
+            if cursor and repo_updated and repo_updated <= cursor:
+                continue
             full_name = repo.get("full_name") or repo.get("name") or "repo"
             description = repo.get("description") or ""
             records.append({
@@ -84,41 +91,49 @@ def import_github(founder_id: str, limit: int = 12) -> dict[str, Any]:
 
             owner, name = (full_name.split("/", 1) + [""])[:2]
             if owner and name:
-                records.extend(_github_repo_activity(headers, owner, name, full_name))
+                activity, activity_cursor = _github_repo_activity(headers, owner, name, full_name, cursor)
+                max_seen = _max_cursor(max_seen, activity_cursor)
+                records.extend(activity)
     except Exception as exc:
         logger.warning("GitHub import failed: %s", exc)
         return {"ok": False, "source": "github", "error": str(exc)}
 
     result = ingest_company_brain_records(founder_id, "github", records)
-    return {**result, "ok": True, "source": "github"}
+    return {**result, "ok": True, "source": "github", "cursor": max_seen}
 
 
-def _github_repo_activity(headers: dict[str, str], owner: str, repo: str, full_name: str) -> list[dict[str, Any]]:
+def _github_repo_activity(headers: dict[str, str], owner: str, repo: str, full_name: str, cursor: str = "") -> tuple[list[dict[str, Any]], str]:
     records: list[dict[str, Any]] = []
+    max_seen = cursor
     base = f"https://api.github.com/repos/{owner}/{repo}"
-    try:
-        readme = _safe_get(f"{base}/readme", headers)
-        if isinstance(readme, dict) and readme.get("content"):
-            raw = base64.b64decode(str(readme["content"]).replace("\n", "")).decode("utf-8", errors="replace")
-            records.append({
-                "title": f"README: {full_name}",
-                "content": raw[:8000],
-                "url": readme.get("html_url") or "",
-                "kind": "readme",
-                "canonical": True,
-                "domain": "architecture",
-                "repo": full_name,
-            })
-    except Exception:
-        pass
+    if not cursor:
+        try:
+            readme = _safe_get(f"{base}/readme", headers)
+            if isinstance(readme, dict) and readme.get("content"):
+                raw = base64.b64decode(str(readme["content"]).replace("\n", "")).decode("utf-8", errors="replace")
+                records.append({
+                    "title": f"README: {full_name}",
+                    "content": raw[:8000],
+                    "url": readme.get("html_url") or "",
+                    "kind": "readme",
+                    "canonical": True,
+                    "domain": "architecture",
+                    "repo": full_name,
+                })
+        except Exception:
+            pass
 
     for endpoint, kind in (("issues", "issue"), ("pulls", "pull_request")):
         try:
-            items = _safe_get(f"{base}/{endpoint}", headers, {"state": "all", "per_page": 10, "sort": "updated"})
+            items = _safe_get(f"{base}/{endpoint}", headers, {"state": "all", "per_page": 10, "sort": "updated", "direction": "desc"})
             if not isinstance(items, list):
                 continue
             for item in items[:10]:
                 if kind == "issue" and item.get("pull_request"):
+                    continue
+                updated_at = str(item.get("updated_at") or "")
+                max_seen = _max_cursor(max_seen, updated_at)
+                if cursor and updated_at and updated_at <= cursor:
                     continue
                 body = item.get("body") or ""
                 records.append({
@@ -131,11 +146,27 @@ def _github_repo_activity(headers: dict[str, str], owner: str, repo: str, full_n
                     "domain": "architecture" if kind == "pull_request" else "product",
                     "repo": full_name,
                     "state": item.get("state"),
-                    "updated_at": item.get("updated_at"),
+                    "updated_at": updated_at,
                 })
         except Exception:
             continue
-    return records
+    return records, max_seen
+
+
+def _connector_cursor(founder_id: str, source: str) -> str:
+    try:
+        from backend.connector_sync_ledger import get_connector_cursor
+        return get_connector_cursor(founder_id, source)
+    except Exception:
+        return ""
+
+
+def _max_cursor(current: str, candidate: str) -> str:
+    if not candidate:
+        return current or ""
+    if not current or candidate > current:
+        return candidate
+    return current
 
 
 def import_slack(founder_id: str, limit: int = 8) -> dict[str, Any]:
@@ -145,6 +176,8 @@ def import_slack(founder_id: str, limit: int = 8) -> dict[str, Any]:
         return {"ok": False, "source": "slack", "error": "Slack bot token not configured"}
     headers = {"Authorization": f"Bearer {token}"}
     records: list[dict[str, Any]] = []
+    cursor = _connector_cursor(founder_id, "slack")
+    max_seen = cursor
     try:
         channels = _safe_get(
             "https://slack.com/api/conversations.list",
@@ -156,10 +189,14 @@ def import_slack(founder_id: str, limit: int = 8) -> dict[str, Any]:
         for channel in (channels.get("channels") or [])[:limit]:
             channel_id = channel.get("id")
             channel_name = channel.get("name") or channel_id
+            history_params: dict[str, Any] = {"channel": channel_id, "limit": 20}
+            if cursor:
+                history_params["oldest"] = cursor
+                history_params["inclusive"] = False
             history = _safe_get(
                 "https://slack.com/api/conversations.history",
                 headers,
-                {"channel": channel_id, "limit": 20},
+                history_params,
             )
             if not isinstance(history, dict) or not history.get("ok"):
                 continue
@@ -167,8 +204,13 @@ def import_slack(founder_id: str, limit: int = 8) -> dict[str, Any]:
                 text = msg.get("text") or ""
                 if not text.strip():
                     continue
+                msg_ts = str(msg.get("ts") or "")
+                max_seen = _max_cursor(max_seen, msg_ts)
+                if cursor and msg_ts and msg_ts <= cursor:
+                    continue
                 thread_ts = msg.get("thread_ts") or msg.get("ts")
-                reply_text = _slack_thread_text(headers, channel_id, thread_ts, msg.get("ts"))
+                reply_text, reply_cursor = _slack_thread_text(headers, channel_id, thread_ts, msg.get("ts"), cursor)
+                max_seen = _max_cursor(max_seen, reply_cursor)
                 content = text if not reply_text else f"{text}\n\nThread replies:\n{reply_text}"
                 records.append({
                     "title": f"Slack #{channel_name} {msg.get('ts')}",
@@ -180,17 +222,19 @@ def import_slack(founder_id: str, limit: int = 8) -> dict[str, Any]:
                     "channel": channel_name,
                     "thread_ts": thread_ts,
                     "author": msg.get("user") or msg.get("bot_id") or "",
+                    "external_id": msg_ts,
+                    "updated_at": msg_ts,
                 })
     except Exception as exc:
         logger.warning("Slack import failed: %s", exc)
         return {"ok": False, "source": "slack", "error": str(exc)}
     result = ingest_company_brain_records(founder_id, "slack", records)
-    return {**result, "ok": True, "source": "slack"}
+    return {**result, "ok": True, "source": "slack", "cursor": max_seen}
 
 
-def _slack_thread_text(headers: dict[str, str], channel_id: str, thread_ts: str | None, root_ts: str | None) -> str:
+def _slack_thread_text(headers: dict[str, str], channel_id: str, thread_ts: str | None, root_ts: str | None, cursor: str = "") -> tuple[str, str]:
     if not channel_id or not thread_ts:
-        return ""
+        return "", cursor
     try:
         replies = _safe_get(
             "https://slack.com/api/conversations.replies",
@@ -198,15 +242,94 @@ def _slack_thread_text(headers: dict[str, str], channel_id: str, thread_ts: str 
             {"channel": channel_id, "ts": thread_ts, "limit": 20},
         )
     except Exception:
-        return ""
+        return "", cursor
     if not isinstance(replies, dict) or not replies.get("ok"):
-        return ""
+        return "", cursor
     lines = []
+    max_seen = cursor
     for reply in replies.get("messages", [])[1:]:
         text = reply.get("text") or ""
+        reply_ts = str(reply.get("ts") or "")
+        max_seen = _max_cursor(max_seen, reply_ts)
+        if cursor and reply_ts and reply_ts <= cursor:
+            continue
         if text.strip():
             lines.append(f"- {reply.get('user') or reply.get('bot_id') or 'unknown'}: {text}")
-    return "\n".join(lines)
+    return "\n".join(lines), max_seen
+
+
+def import_discord(founder_id: str, limit: int = 8) -> dict[str, Any]:
+    """Import recent Discord text-channel messages using a bot token."""
+    token = _token(founder_id, "discord", "bot_token", "token")
+    if not token:
+        return {"ok": False, "source": "discord", "error": "Discord bot token not configured"}
+    headers = {"Authorization": f"Bot {token}"}
+    records: list[dict[str, Any]] = []
+    cursor = _connector_cursor(founder_id, "discord")
+    max_seen = cursor
+    try:
+        guilds = _safe_get("https://discord.com/api/v10/users/@me/guilds", headers, {"limit": max(1, min(limit, 100))})
+        if not isinstance(guilds, list):
+            return {"ok": False, "source": "discord", "error": str(guilds)}
+        for guild in guilds[:limit]:
+            guild_id = guild.get("id")
+            guild_name = guild.get("name") or guild_id or "Discord server"
+            if not guild_id:
+                continue
+            channels = _safe_get(f"https://discord.com/api/v10/guilds/{guild_id}/channels", headers)
+            if not isinstance(channels, list):
+                continue
+            text_channels = [channel for channel in channels if channel.get("type") == 0]
+            for channel in text_channels[: max(1, min(limit, 10))]:
+                channel_id = channel.get("id")
+                channel_name = channel.get("name") or channel_id or "channel"
+                if not channel_id:
+                    continue
+                try:
+                    message_params: dict[str, Any] = {"limit": 20}
+                    if cursor:
+                        message_params["after"] = cursor
+                    messages = _safe_get(
+                        f"https://discord.com/api/v10/channels/{channel_id}/messages",
+                        headers,
+                        message_params,
+                    )
+                except Exception:
+                    continue
+                if not isinstance(messages, list):
+                    continue
+                for msg in messages[:20]:
+                    msg_id = str(msg.get("id") or "")
+                    max_seen = _max_cursor(max_seen, msg_id)
+                    if cursor and msg_id and msg_id <= cursor:
+                        continue
+                    text = msg.get("content") or ""
+                    attachments = msg.get("attachments") or []
+                    embeds = msg.get("embeds") or []
+                    if not text.strip() and not attachments and not embeds:
+                        continue
+                    author = msg.get("author") or {}
+                    attachment_lines = [a.get("url") for a in attachments if a.get("url")]
+                    embed_lines = [e.get("title") or e.get("description") for e in embeds if e.get("title") or e.get("description")]
+                    extra = "\n".join([*attachment_lines, *embed_lines])
+                    records.append({
+                        "title": f"Discord #{channel_name} {msg.get('id')}",
+                        "content": text if not extra else f"{text}\n\n{extra}".strip(),
+                        "kind": "message",
+                        "canonical": False,
+                        "stale_risk": "medium",
+                        "domain": "operations",
+                        "server": guild_name,
+                        "channel": channel_name,
+                        "author": author.get("username") or author.get("id") or "",
+                        "external_id": msg_id,
+                        "updated_at": msg.get("edited_timestamp") or msg.get("timestamp"),
+                    })
+    except Exception as exc:
+        logger.warning("Discord import failed: %s", exc)
+        return {"ok": False, "source": "discord", "error": str(exc)}
+    result = ingest_company_brain_records(founder_id, "discord", records)
+    return {**result, "ok": True, "source": "discord", "cursor": max_seen}
 
 
 def import_notion(founder_id: str, limit: int = 20) -> dict[str, Any]:
@@ -226,16 +349,26 @@ def import_notion(founder_id: str, limit: int = 20) -> dict[str, Any]:
         "Notion-Version": "2022-06-28",
     }
     records: list[dict[str, Any]] = []
+    cursor = _connector_cursor(founder_id, "notion")
+    max_seen = cursor
     try:
+        payload: dict[str, Any] = {
+            "page_size": max(1, min(limit, 100)),
+            "sort": {"direction": "descending", "timestamp": "last_edited_time"},
+        }
         resp = requests.post(
             "https://api.notion.com/v1/search",
             headers=headers,
-            json={"page_size": max(1, min(limit, 100))},
+            json=payload,
             timeout=DEFAULT_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
         for item in data.get("results", [])[:limit]:
+            edited_at = str(item.get("last_edited_time") or "")
+            max_seen = _max_cursor(max_seen, edited_at)
+            if cursor and edited_at and edited_at <= cursor:
+                continue
             title = _notion_title(item) or item.get("id", "Notion page")
             content = title
             if item.get("object") == "page":
@@ -249,13 +382,13 @@ def import_notion(founder_id: str, limit: int = 20) -> dict[str, Any]:
                 "stale_risk": "low",
                 "domain": "operations",
                 "external_id": item.get("id"),
-                "updated_at": item.get("last_edited_time"),
+                "updated_at": edited_at,
             })
     except Exception as exc:
         logger.warning("Notion import failed: %s", exc)
         return {"ok": False, "source": "notion", "error": str(exc)}
     result = ingest_company_brain_records(founder_id, "notion", records)
-    return {**result, "ok": True, "source": "notion"}
+    return {**result, "ok": True, "source": "notion", "cursor": max_seen}
 
 
 def _notion_title(item: dict[str, Any]) -> str:
@@ -292,19 +425,28 @@ def import_google_drive(founder_id: str, limit: int = 20) -> dict[str, Any]:
         return {"ok": False, "source": "google_drive", "error": "Google Drive access token not configured"}
     headers = {"Authorization": f"Bearer {token}"}
     records: list[dict[str, Any]] = []
+    cursor = _connector_cursor(founder_id, "google_drive")
+    max_seen = cursor
     try:
+        params: dict[str, Any] = {
+            "pageSize": max(1, min(limit, 100)),
+            "fields": "files(id,name,mimeType,webViewLink,modifiedTime,description)",
+            "orderBy": "modifiedTime desc",
+        }
+        if cursor:
+            params["q"] = f"modifiedTime > '{cursor}'"
         data = _safe_get(
             "https://www.googleapis.com/drive/v3/files",
             headers,
-            {
-                "pageSize": max(1, min(limit, 100)),
-                "fields": "files(id,name,mimeType,webViewLink,modifiedTime,description)",
-                "orderBy": "modifiedTime desc",
-            },
+            params,
         )
         if not isinstance(data, dict):
             data = {}
         for item in data.get("files", [])[:limit]:
+            modified_time = str(item.get("modifiedTime") or "")
+            max_seen = _max_cursor(max_seen, modified_time)
+            if cursor and modified_time and modified_time <= cursor:
+                continue
             mime_type = str(item.get("mimeType") or "")
             exported = _google_export_text(headers, item.get("id"), mime_type)
             records.append({
@@ -316,13 +458,13 @@ def import_google_drive(founder_id: str, limit: int = 20) -> dict[str, Any]:
                 "stale_risk": "medium",
                 "domain": "operations",
                 "external_id": item.get("id"),
-                "updated_at": item.get("modifiedTime"),
+                "updated_at": modified_time,
             })
     except Exception as exc:
         logger.warning("Google Drive import failed: %s", exc)
         return {"ok": False, "source": "google_drive", "error": str(exc)}
     result = ingest_company_brain_records(founder_id, "google_drive", records)
-    return {**result, "ok": True, "source": "google_drive"}
+    return {**result, "ok": True, "source": "google_drive", "cursor": max_seen}
 
 
 def _google_export_text(headers: dict[str, str], file_id: str | None, mime_type: str) -> str:
@@ -388,6 +530,54 @@ def import_gmail(founder_id: str, limit: int = 20) -> dict[str, Any]:
         return {"ok": False, "source": "gmail", "error": str(exc)}
     result = ingest_company_brain_records(founder_id, "gmail", records)
     return {**result, "ok": True, "source": "gmail"}
+
+
+def import_obsidian(founder_id: str, limit: int = 80) -> dict[str, Any]:
+    """Import Markdown notes from a configured local Obsidian vault path."""
+    creds = load_credentials(founder_id, "obsidian") or {}
+    vault_path = str(creds.get("vault_path") or creds.get("path") or "").strip()
+    if not vault_path:
+        return {"ok": False, "source": "obsidian", "error": "Obsidian vault_path not configured"}
+    root = Path(vault_path).expanduser()
+    if not root.exists() or not root.is_dir():
+        return {"ok": False, "source": "obsidian", "error": f"Obsidian vault path not found: {root}"}
+
+    records: list[dict[str, Any]] = []
+    try:
+        note_files = sorted(root.rglob("*.md"), key=lambda path: path.stat().st_mtime, reverse=True)[: max(1, min(limit, 300))]
+        for note_file in note_files:
+            text = note_file.read_text(errors="replace").strip()
+            if not text:
+                continue
+            rel = note_file.relative_to(root)
+            title = note_file.stem.replace("_", " ").strip() or str(rel)
+            frontmatter: dict[str, Any] = {}
+            if text.startswith("---"):
+                parts = text.split("---", 2)
+                if len(parts) == 3:
+                    text = parts[2].strip()
+                    for line in parts[1].splitlines():
+                        if ":" in line:
+                            key, value = line.split(":", 1)
+                            frontmatter[key.strip()] = value.strip().strip('"')
+            records.append({
+                "title": title,
+                "content": text[:8000],
+                "url": str(note_file),
+                "kind": frontmatter.get("kind") or "note",
+                "canonical": str(frontmatter.get("canonical", "")).lower() in {"true", "yes", "1"},
+                "stale_risk": frontmatter.get("stale_risk") or "medium",
+                "domain": frontmatter.get("domain") or "operations",
+                "external_id": str(rel),
+                "updated_at": note_file.stat().st_mtime,
+                "visibility": frontmatter.get("visibility") or "team",
+            })
+    except Exception as exc:
+        logger.warning("Obsidian import failed: %s", exc)
+        return {"ok": False, "source": "obsidian", "error": str(exc)}
+
+    result = ingest_company_brain_records(founder_id, "obsidian", records)
+    return {**result, "ok": True, "source": "obsidian"}
 
 
 def import_linear(founder_id: str, limit: int = 30) -> dict[str, Any]:
@@ -524,11 +714,13 @@ def import_confluence(founder_id: str, limit: int = 30) -> dict[str, Any]:
 IMPORTERS = {
     "github": import_github,
     "slack": import_slack,
+    "discord": import_discord,
     "notion": import_notion,
     "linear": import_linear,
     "google_drive": import_google_drive,
     "google_workspace": import_google_drive,
     "gmail": import_gmail,
+    "obsidian": import_obsidian,
     "zendesk": import_zendesk,
     "confluence": import_confluence,
 }
@@ -538,8 +730,12 @@ def import_company_brain_source(founder_id: str, source: str, limit: int = 20) -
     """Import one source into the company brain."""
     importer = IMPORTERS.get(source)
     if importer is None:
-        return {"ok": False, "source": source, "error": f"No importer implemented for {source}"}
-    return importer(founder_id, limit=limit)
+        result = {"ok": False, "source": source, "error": f"No importer implemented for {source}"}
+        _record_import_ledger(founder_id, source, result)
+        return result
+    result = importer(founder_id, limit=limit)
+    _record_import_ledger(founder_id, source, result)
+    return result
 
 
 def import_company_brain_sources(founder_id: str, sources: list[str] | None = None, limit: int = 20) -> dict[str, Any]:
@@ -553,3 +749,21 @@ def import_company_brain_sources(founder_id: str, sources: list[str] | None = No
         "imported_sources": [r["source"] for r in results if r.get("ok")],
         "failed_sources": [r["source"] for r in results if not r.get("ok")],
     }
+
+
+def _record_import_ledger(founder_id: str, source: str, result: dict[str, Any]) -> None:
+    try:
+        from backend.connector_sync_ledger import record_connector_sync
+        imported = int(result.get("ingested") or result.get("record_count") or result.get("changed_records") or 0)
+        record_connector_sync(
+            founder_id,
+            source,
+            status="ok" if result.get("ok") else "error",
+            imported=imported,
+            changed_records=int(result.get("changed_records") or 0),
+            cursor=str(result.get("cursor") or result.get("next_cursor") or ""),
+            error=str(result.get("error") or ""),
+            mode="import",
+        )
+    except Exception:
+        pass

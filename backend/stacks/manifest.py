@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.stacks.execution_contracts import build_stack_execution_contract
 from backend.stacks.operating_plan import build_stack_operating_plan
+from backend.stacks.template_quality import audit_stack_template
 from backend.stacks.templates import AgentStackTemplate
 
 
@@ -21,6 +23,8 @@ def build_stack_manifest(
 ) -> dict[str, Any]:
     """Build the full deployable department contract for a stack."""
     operating_plan = build_stack_operating_plan(stack, goal, company_name)
+    execution_contract = build_stack_execution_contract(stack)
+    template_quality = audit_stack_template(stack)
     task_by_id = {task.id: task for task in stack.tasks}
     artifact_by_key = {artifact.key: artifact for artifact in stack.artifacts}
 
@@ -151,6 +155,8 @@ def build_stack_manifest(
                 "What outputs are ready to use?",
             ],
         },
+        "execution_contract": execution_contract,
+        "template_quality": template_quality,
         "operating_plan": operating_plan,
     }
 

@@ -1,0 +1,147 @@
+"""Run-level completion audit for Agent Stack executions."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+FINAL_APPROVAL_STATES = {"approved", "skipped", "rejected", "expired"}
+
+
+def build_run_completion_audit(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    """Audit a persisted session state against its stack execution blueprint."""
+    blueprint = state.get("execution_blueprint") or {}
+    lanes = blueprint.get("lanes") or []
+    lane_status_by_id = {
+        str(item.get("lane_id") or item.get("id") or item.get("task_id") or ""): item
+        for item in state.get("lane_status", [])
+    }
+    lane_status_by_agent = {
+        str(item.get("agent") or ""): item
+        for item in state.get("lane_status", [])
+        if item.get("agent")
+    }
+    artifacts = {str(item.get("key") or "") for item in state.get("artifacts", []) if item.get("key")}
+    verifications = {
+        str(item.get("lane_id") or item.get("task_id") or item.get("agent") or ""): item
+        for item in state.get("artifact_verifications", [])
+    }
+    verifications_by_agent = {
+        str(item.get("agent") or ""): item
+        for item in state.get("artifact_verifications", [])
+        if item.get("agent")
+    }
+
+    lane_results = []
+    for lane in lanes:
+        lane_id = str(lane.get("id") or "")
+        agent = str(lane.get("agent") or "")
+        status = lane_status_by_id.get(lane_id) or lane_status_by_agent.get(agent) or {}
+        verification = verifications.get(lane_id) or verifications_by_agent.get(agent) or {}
+        required_keys = [
+            str(deliverable.get("artifact_key") or "")
+            for deliverable in lane.get("deliverables", [])
+            if deliverable.get("required", True)
+        ]
+        missing_artifacts = [key for key in required_keys if key and key not in artifacts]
+        weak_artifacts = list(verification.get("required_weak") or [])
+        verification_status = verification.get("status") or ("missing" if required_keys else "not_required")
+        lane_ok = (
+            status.get("status") == "done"
+            and not missing_artifacts
+            and not weak_artifacts
+            and verification_status in {"passed", "not_required"}
+        )
+        lane_results.append({
+            "lane_id": lane_id,
+            "agent": agent,
+            "status": status.get("status") or "missing",
+            "ok": lane_ok,
+            "required_artifacts": required_keys,
+            "missing_artifacts": missing_artifacts,
+            "weak_artifacts": weak_artifacts,
+            "verification_status": verification_status,
+        })
+
+    approvals = state.get("approvals", [])
+    approval_results = [
+        {
+            "key": item.get("key") or item.get("gate_key"),
+            "status": item.get("status") or "pending",
+            "ok": (item.get("status") or "pending") in FINAL_APPROVAL_STATES or (item.get("status") == "armed" and not item.get("triggered_by")),
+            "triggered_by": item.get("triggered_by"),
+        }
+        for item in approvals
+    ]
+
+    memory = _company_brain_handoff_check(session_id, state)
+    checks = [
+        {
+            "key": "execution_blueprint_present",
+            "ok": bool(blueprint.get("stack_id") and lanes),
+            "message": "Session has a stack execution blueprint.",
+        },
+        {
+            "key": "lanes_complete",
+            "ok": bool(lanes) and all(item["ok"] for item in lane_results),
+            "message": "Every lane is done and has passing required artifacts.",
+            "details": {"lanes": lane_results},
+        },
+        {
+            "key": "approvals_resolved",
+            "ok": all(item["ok"] for item in approval_results),
+            "message": "Triggered approval gates are resolved or left in safe non-triggered state.",
+            "details": {"approvals": approval_results},
+        },
+        {
+            "key": "company_brain_handoff",
+            "ok": memory["ok"],
+            "message": "Run handoff evidence is present in Company Brain.",
+            "details": memory,
+        },
+    ]
+    failed = [check for check in checks if not check["ok"]]
+    return {
+        "session_id": session_id,
+        "ok": not failed,
+        "status": "complete" if not failed else "incomplete",
+        "checks": checks,
+        "failed": failed,
+        "summary": "Run completion audit passed." if not failed else f"Run completion audit has {len(failed)} gap(s).",
+    }
+
+
+def _company_brain_handoff_check(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    founder_id = _founder_id(state)
+    if not founder_id:
+        return {"ok": False, "founder_id": "", "matched_records": 0, "reason": "No founder id in session state."}
+    try:
+        from backend.tools.company_brain import get_company_brain
+        brain = get_company_brain(founder_id)
+    except Exception as exc:
+        return {"ok": False, "founder_id": founder_id, "matched_records": 0, "reason": str(exc)}
+    records = [
+        record for record in brain.get("records", [])
+        if session_id in str(record.get("title", "")) or session_id in str(record.get("content", "")) or session_id == str((record.get("metadata") or {}).get("session_id") or "")
+    ]
+    return {
+        "ok": bool(records),
+        "founder_id": founder_id,
+        "matched_records": len(records),
+        "record_titles": [record.get("title") for record in records[:5]],
+    }
+
+
+def _founder_id(state: dict[str, Any]) -> str:
+    if state.get("founder_id"):
+        return str(state["founder_id"])
+    digest = state.get("digest") or {}
+    if digest.get("founder_id"):
+        return str(digest["founder_id"])
+    stack = state.get("stack") or {}
+    if stack.get("founder_id"):
+        return str(stack["founder_id"])
+    ledger = state.get("run_ledger") or {}
+    if ledger.get("founder_id"):
+        return str(ledger["founder_id"])
+    return ""

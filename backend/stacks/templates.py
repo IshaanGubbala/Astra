@@ -509,6 +509,17 @@ STACK_TEMPLATES: dict[str, AgentStackTemplate] = {
     PRODUCT_STACK.stack_id: PRODUCT_STACK,
 }
 
+# Product contract: Astra must cover "start from zero" founders plus existing
+# businesses that need deployable AI departments for core operating functions.
+PROMISED_AGENT_STACK_IDS = (
+    "idea_to_revenue",
+    "sales",
+    "marketing",
+    "founder_ops",
+    "support",
+    "product",
+)
+
 DEFAULT_STACK_ID = IDEA_TO_REVENUE_STACK.stack_id
 
 

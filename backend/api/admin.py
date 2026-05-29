@@ -9,11 +9,18 @@ from datetime import datetime, timezone
 from typing import Any
 
 import psutil
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from backend.core.events import _sessions, _completed, _event_log, _event_counters, _steer
+from backend.tenant_auth import require_platform_admin
 
-router = APIRouter(prefix="/admin")
+
+def require_admin_actor(request: Request) -> str:
+    return require_platform_admin(request)
+
+
+router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin_actor)])
 
 _START_TIME = time.time()
 
@@ -64,6 +71,21 @@ async def index():
             "/admin/env",
             "/admin/git",
             "/admin/logs",
+            "/admin/platform",
+            "/admin/objective",
+            "/admin/objective/evidence",
+            "/admin/stack-catalog-proof",
+            "/admin/deploy-evidence",
+            "/admin/production-bootstrap",
+            "/admin/production-preflight",
+            "/admin/production-requirements",
+            "/admin/launch-readiness",
+            "/admin/production-verification",
+            "/admin/production-launch",
+            "/admin/production-launch/reports/{proof_id}",
+            "/admin/production-verification/reports",
+            "/admin/alerts",
+            "/admin/smoke",
         ]
     }
 
@@ -75,7 +97,304 @@ async def index():
 @router.get("/health")
 async def health():
     _request_counts["/admin/health"] += 1
-    return {"status": "ok", "uptime": _uptime(), "ts": datetime.now(timezone.utc).isoformat()}
+    from backend.platform_status import platform_status
+    return {**platform_status(), "admin_uptime": _uptime(), "ts": datetime.now(timezone.utc).isoformat()}
+
+
+@router.get("/platform")
+async def platform():
+    """Production readiness snapshot for the Agent Stack Platform."""
+    _request_counts["/admin/platform"] += 1
+    from backend.platform_status import platform_status
+    return platform_status()
+
+
+@router.get("/objective")
+async def objective():
+    """Objective-level readiness audit for the Agent Stack Platform promise."""
+    _request_counts["/admin/objective"] += 1
+    from backend.objective_readiness import build_objective_readiness
+    return build_objective_readiness()
+
+
+@router.get("/objective/evidence")
+async def objective_evidence(
+    founder_id: str = "",
+    stack_id: str = "idea_to_revenue",
+    base_url: str = "",
+):
+    """Requirement-by-requirement evidence matrix for the Agent Stack Platform promise."""
+    _request_counts["/admin/objective/evidence"] += 1
+    from backend.objective_readiness import build_objective_evidence_matrix
+    return build_objective_evidence_matrix(founder_id=founder_id, stack_id=stack_id, base_url=base_url)
+
+
+@router.get("/stack-catalog-proof")
+async def stack_catalog_proof():
+    """Catalog-level proof that every promised Agent Stack compiles for execution."""
+    _request_counts["/admin/stack-catalog-proof"] += 1
+    from backend.stack_catalog_proof import build_stack_catalog_proof
+    return build_stack_catalog_proof()
+
+
+@router.get("/deploy-evidence")
+async def deploy_evidence(
+    founder_id: str = "",
+    stack_id: str = "idea_to_revenue",
+    live_connectors: bool = False,
+    base_url: str = "",
+    strict: bool = True,
+):
+    """Show exact missing production deploy proof for the selected stack."""
+    _request_counts["/admin/deploy-evidence"] += 1
+    from backend.deploy_evidence import build_deploy_evidence
+    return build_deploy_evidence(
+        founder_id=founder_id,
+        stack_id=stack_id,
+        live_connectors=live_connectors,
+        base_url=base_url,
+        strict=strict,
+    )
+
+
+@router.get("/production-requirements")
+async def production_requirements(
+    founder_id: str = "",
+    stack_id: str = "idea_to_revenue",
+    base_url: str = "",
+):
+    """Show production env, connector, and final-gate requirements."""
+    _request_counts["/admin/production-requirements"] += 1
+    from backend.production_requirements import build_production_requirements
+    return build_production_requirements(founder_id=founder_id, stack_id=stack_id, base_url=base_url)
+
+
+@router.get("/production-bootstrap")
+async def production_bootstrap(
+    founder_id: str,
+    stack_id: str = "idea_to_revenue",
+    base_url: str = "",
+    expected_backend_ip: str = "",
+):
+    """Show exact production bootstrap steps before final launch proof."""
+    _request_counts["/admin/production-bootstrap"] += 1
+    from backend.production_bootstrap import build_production_bootstrap
+    return build_production_bootstrap(
+        founder_id=founder_id,
+        stack_id=stack_id,
+        base_url=base_url,
+        expected_backend_ip=expected_backend_ip,
+    )
+
+
+@router.get("/production-preflight")
+async def production_preflight(
+    base_url: str,
+    expected_backend_ip: str = "",
+):
+    """Verify DNS and public HTTP surfaces before final launch proof."""
+    _request_counts["/admin/production-preflight"] += 1
+    from backend.production_preflight import build_production_preflight
+    return build_production_preflight(base_url=base_url, expected_backend_ip=expected_backend_ip)
+
+
+@router.get("/launch-readiness")
+async def launch_readiness(
+    founder_id: str = "",
+    stack_id: str = "idea_to_revenue",
+    base_url: str = "",
+    report_id: str = "latest",
+):
+    """Single pass/fail launch audit across requirements, objective proof, report, manifest, and bundle."""
+    _request_counts["/admin/launch-readiness"] += 1
+    from backend.launch_readiness import build_launch_readiness
+    return build_launch_readiness(founder_id=founder_id, stack_id=stack_id, base_url=base_url, report_id=report_id)
+
+
+@router.get("/alerts")
+async def alerts(limit: int = 50, status: str = ""):
+    """Durable production alert ledger."""
+    _request_counts["/admin/alerts"] += 1
+    from backend.alerts import list_alerts
+    return list_alerts(limit=limit, status=status)
+
+
+@router.post("/alerts/check")
+async def alert_check(deliver: bool = True):
+    """Evaluate platform state and deliver configured operations alerts."""
+    _request_counts["/admin/alerts/check"] += 1
+    from backend.alerts import run_alert_check
+    return run_alert_check(deliver=deliver)
+
+
+@router.get("/smoke")
+async def smoke(
+    founder_id: str = "",
+    stack_id: str = "idea_to_revenue",
+    live_connectors: bool = False,
+    base_url: str = "",
+    strict: bool = False,
+    save: bool = True,
+):
+    """Run the production smoke verifier from the admin surface."""
+    _request_counts["/admin/smoke"] += 1
+    from backend.production_smoke import run_production_smoke
+    return run_production_smoke(
+        founder_id=founder_id,
+        stack_id=stack_id,
+        live_connectors=live_connectors,
+        base_url=base_url,
+        strict=strict,
+        save=save,
+    )
+
+
+@router.get("/smoke/reports")
+async def smoke_reports(limit: int = 20):
+    """List persisted production smoke reports."""
+    _request_counts["/admin/smoke/reports"] += 1
+    from backend.production_smoke import list_smoke_reports
+    return list_smoke_reports(limit=limit)
+
+
+@router.post("/production-verification")
+async def production_verification(
+    founder_id: str,
+    base_url: str,
+    stack_id: str = "idea_to_revenue",
+    live_connectors: bool = True,
+    save: bool = True,
+):
+    """Run the final production launch gate and persist operator reports."""
+    _request_counts["/admin/production-verification"] += 1
+    from backend.production_verify import run_production_verification
+    return run_production_verification(
+        founder_id=founder_id,
+        stack_id=stack_id,
+        base_url=base_url,
+        live_connectors=live_connectors,
+        save=save,
+    )
+
+
+@router.post("/production-launch")
+async def production_launch(
+    founder_id: str,
+    base_url: str,
+    stack_id: str = "idea_to_revenue",
+    live_connectors: bool = True,
+    seed_env_connectors: bool = False,
+):
+    """Run the complete final production launch proof sequence."""
+    _request_counts["/admin/production-launch"] += 1
+    from backend.production_launch import run_final_launch_proof
+    return run_final_launch_proof(
+        founder_id=founder_id,
+        stack_id=stack_id,
+        base_url=base_url,
+        live_connectors=live_connectors,
+        seed_env_connectors=seed_env_connectors,
+    )
+
+
+@router.get("/production-launch/reports/{proof_id}")
+async def production_launch_report(proof_id: str):
+    """Fetch one persisted aggregate final production launch proof."""
+    _request_counts["/admin/production-launch/reports/detail"] += 1
+    from backend.production_launch import get_final_launch_proof
+    proof = get_final_launch_proof(proof_id)
+    if not proof.get("found"):
+        raise HTTPException(status_code=404, detail=proof.get("error") or "Final launch proof not found.")
+    return proof
+
+
+@router.get("/production-launch/reports/{proof_id}/manifest")
+async def production_launch_report_manifest(proof_id: str):
+    """Fetch one persisted aggregate final production launch proof checksum manifest."""
+    _request_counts["/admin/production-launch/reports/manifest"] += 1
+    from backend.production_launch import get_final_launch_proof_manifest
+    manifest = get_final_launch_proof_manifest(proof_id)
+    if not manifest.get("found"):
+        raise HTTPException(status_code=404, detail=manifest.get("error") or "Final launch proof checksum manifest not found.")
+    return manifest
+
+
+@router.get("/production-launch/reports/{proof_id}/manifest/verify")
+async def production_launch_report_manifest_verify(proof_id: str):
+    """Verify one aggregate final production launch proof checksum manifest."""
+    _request_counts["/admin/production-launch/reports/manifest/verify"] += 1
+    from backend.production_launch import verify_final_launch_proof_manifest
+    result = verify_final_launch_proof_manifest(proof_id)
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "Final launch proof checksum manifest not found.")
+    return result
+
+
+@router.get("/production-verification/reports")
+async def production_verification_reports(limit: int = 20):
+    """List persisted final production verification reports."""
+    _request_counts["/admin/production-verification/reports"] += 1
+    from backend.production_verify import list_production_verification_reports
+    return list_production_verification_reports(limit=limit)
+
+
+@router.get("/production-verification/reports/{report_id}")
+async def production_verification_report(report_id: str):
+    """Fetch one persisted final production verification report."""
+    _request_counts["/admin/production-verification/reports/detail"] += 1
+    from backend.production_verify import get_production_verification_report
+    report = get_production_verification_report(report_id)
+    if not report.get("found"):
+        raise HTTPException(status_code=404, detail=report.get("error") or "Production verification report not found.")
+    return report
+
+
+@router.get("/production-verification/reports/{report_id}/markdown", response_class=PlainTextResponse)
+async def production_verification_report_markdown(report_id: str):
+    """Fetch one persisted final production verification report as Markdown."""
+    _request_counts["/admin/production-verification/reports/markdown"] += 1
+    from backend.production_verify import get_production_verification_markdown
+    report = get_production_verification_markdown(report_id)
+    if not report.get("found"):
+        raise HTTPException(status_code=404, detail=report.get("error") or "Production verification Markdown report not found.")
+    return PlainTextResponse(str(report.get("markdown") or ""), media_type="text/markdown")
+
+
+@router.get("/production-verification/reports/{report_id}/manifest")
+async def production_verification_report_manifest(report_id: str):
+    """Fetch one persisted production verification checksum manifest."""
+    _request_counts["/admin/production-verification/reports/manifest"] += 1
+    from backend.production_verify import get_production_verification_manifest
+    report = get_production_verification_manifest(report_id)
+    if not report.get("found"):
+        raise HTTPException(status_code=404, detail=report.get("error") or "Production verification checksum manifest not found.")
+    return report
+
+
+@router.get("/production-verification/reports/{report_id}/manifest/verify")
+async def production_verification_report_manifest_verify(report_id: str):
+    """Verify persisted production evidence files against their checksum manifest."""
+    _request_counts["/admin/production-verification/reports/manifest/verify"] += 1
+    from backend.production_verify import verify_production_verification_manifest
+    report = verify_production_verification_manifest(report_id)
+    if not report.get("found"):
+        raise HTTPException(status_code=404, detail=report.get("error") or "Production verification checksum manifest not found.")
+    return report
+
+
+@router.get("/production-verification/reports/{report_id}/bundle")
+async def production_verification_report_bundle(report_id: str):
+    """Export the production verification report, Markdown proof, and checksums as one ZIP."""
+    _request_counts["/admin/production-verification/reports/bundle"] += 1
+    from backend.production_verify import export_production_verification_bundle
+    bundle = export_production_verification_bundle(report_id)
+    if not bundle.get("found"):
+        raise HTTPException(status_code=404, detail=bundle.get("error") or "Production verification bundle not found.")
+    return FileResponse(
+        str(bundle["path"]),
+        media_type="application/zip",
+        filename=str(bundle["filename"]),
+    )
 
 
 @router.get("/overview")
@@ -416,6 +735,28 @@ async def sessions_overview():
         "completed": len(rows) - active,
         "sessions": rows,
     }
+
+
+@router.get("/runs")
+async def runs_ledger(limit: int = 50, founder_id: str = "", status: str = ""):
+    """Restart-safe run ledger summary."""
+    _request_counts["/admin/runs"] += 1
+    from backend.run_ledger import ledger_metrics, list_runs
+    return {
+        "metrics": ledger_metrics(),
+        "runs": list_runs(limit=limit, founder_id=founder_id, status=status),
+    }
+
+
+@router.get("/runs/{session_id}")
+async def run_ledger_detail(session_id: str):
+    """One restart-safe run ledger record."""
+    _request_counts["/admin/runs/detail"] += 1
+    from backend.run_ledger import get_run
+    run = get_run(session_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+    return run
 
 
 @router.get("/sessions/{session_id}/events")

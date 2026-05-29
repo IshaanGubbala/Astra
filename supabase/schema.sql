@@ -79,3 +79,18 @@ create table founder_credentials (
 );
 
 create index on founder_credentials(founder_id);
+
+-- Generic durable document mirror for local-first platform state.
+-- Backend storage_adapter.py writes accounts, run ledgers, workflow snapshots,
+-- Company Brain stores, and approval ledgers here when ASTRA_STORAGE_BACKEND is
+-- set to `supabase` or `dual`.
+create table if not exists astra_documents (
+  collection text not null,
+  key        text not null,
+  payload    jsonb not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (collection, key)
+);
+
+create index if not exists astra_documents_collection_updated_idx
+  on astra_documents(collection, updated_at desc);

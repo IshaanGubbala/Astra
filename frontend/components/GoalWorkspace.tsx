@@ -5,8 +5,8 @@ import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { SignInButton, useUser } from "@clerk/nextjs";
-import { streamGoal, continueSession, submitGoal, getStacks, recommendStack, getStackReadiness, getConnectorCoverage, getStackManifest, getSessionDigest, getSubteamReport, getSessionWorkboard, getSessionState, askSession, decideStackApproval, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder } from "@/lib/api";
-import type { AgentDepartmentManifest, AgentStackTemplate, ConnectorCoverage, SessionAnswer, SessionDigest, SessionStateSnapshot, SessionWorkboard, StackOperatingPlan, StackReadiness, StackRecommendation, SubteamReport } from "@/lib/api";
+import { apiFetch, streamGoal, continueSession, submitGoal, getStacks, recommendStack, getStackReadiness, getConnectorCoverage, getConnectorSetup, getStackManifest, getSessionDigest, getSubteamReport, getSessionWorkboard, getSessionState, askSession, decideStackApproval, AGENT_LABELS, AGENT_ORDER, TOOL_DESCRIPTIONS, sortAgentNamesByOrder } from "@/lib/api";
+import type { AgentDepartmentManifest, AgentStackTemplate, ConnectorCoverage, ConnectorSetupPlan, SessionAnswer, SessionDigest, SessionStateSnapshot, SessionWorkboard, StackOperatingPlan, StackReadiness, StackRecommendation, SubteamReport } from "@/lib/api";
 import { saveSession, getSessionSnapshot, subscribeSessions, deleteSession, clearAllSessions } from "@/lib/history";
 import type { SessionRecord } from "@/lib/history";
 import LiquidGlass from "@/components/LiquidGlass";
@@ -1077,7 +1077,7 @@ function AgentChat({ agentKey, founderId, sessionId, company, goal }: { agentKey
     setMsgs(m => [...m, { role: "user", text: q }]);
     setLoading(true);
     try {
-      const res = await fetch(`${BASE}/chat/${agentKey}`, {
+      const res = await apiFetch(`${BASE}/chat/${agentKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target_agent: agentKey, question: q, founder_id: founderId, session_id: sessionId, company_name: company || undefined, goal: goal || undefined }),
@@ -1221,7 +1221,7 @@ function AgentDetail({
       setObsidianError(null);
       setObsidianNote(null);
     });
-    fetch(`${BASE}/vault/${encodeURIComponent(founderId)}/note?session_id=${encodeURIComponent(sessionId)}&agent=${encodeURIComponent(state.agent)}`, {
+    apiFetch(`${BASE}/vault/${encodeURIComponent(founderId)}/note?session_id=${encodeURIComponent(sessionId)}&agent=${encodeURIComponent(state.agent)}`, {
       signal: ctrl.signal,
     })
       .then(async (res) => {
@@ -1466,7 +1466,7 @@ function AgentInputModal({ sessionId, request, onDone }: {
     if (missing.length > 0) { setError(`Required: ${missing.map(f => f.label).join(", ")}`); return; }
     setSubmitting(true); setError("");
     try {
-      const res = await fetch(`${BASE}/input/${sessionId}/${request.request_id}`, {
+      const res = await apiFetch(`${BASE}/input/${sessionId}/${request.request_id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: values }),
@@ -1865,7 +1865,7 @@ function SteerPanel({ sessionId, isRunning }: { sessionId: string; isRunning: bo
   if (!isRunning) return null;
   const send = async () => {
     if (!msg.trim()) return;
-    await fetch(`${BASE}/steer/${sessionId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: msg }) });
+    await apiFetch(`${BASE}/steer/${sessionId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: msg }) });
     setSent(true); setMsg(""); setTimeout(() => setSent(false), 2000);
   };
   return (
@@ -1889,7 +1889,7 @@ function AskPanel({ sessionId, founderId }: { sessionId: string; founderId: stri
   const ask = async () => {
     if (!msg.trim()) return;
     setLoading(true); setReply("");
-    const r = await fetch(`${BASE}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, founder_id: founderId, question: msg }) });
+    const r = await apiFetch(`${BASE}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, founder_id: founderId, question: msg }) });
     const d = await r.json(); setReply(d.answer ?? d.response ?? JSON.stringify(d)); setLoading(false);
   };
   return (
@@ -2637,6 +2637,7 @@ export function GoalWorkspace({
   const [stackManifest, setStackManifest] = useState<AgentDepartmentManifest | null>(null);
   const [stackReadiness, setStackReadiness] = useState<StackReadiness | null>(null);
   const [connectorCoverage, setConnectorCoverage] = useState<ConnectorCoverage | null>(null);
+  const [connectorSetup, setConnectorSetup] = useState<ConnectorSetupPlan | null>(null);
   const [sessionDigest, setSessionDigest] = useState<SessionDigest | null>(null);
   const [subteamReport, setSubteamReport] = useState<SubteamReport | null>(null);
   const [sessionWorkboard, setSessionWorkboard] = useState<SessionWorkboard | null>(null);
@@ -2706,11 +2707,13 @@ export function GoalWorkspace({
     Promise.allSettled([
       getStackReadiness(founderId, selectedStack.stack_id),
       getConnectorCoverage(founderId, selectedStack.stack_id),
+      getConnectorSetup(founderId, selectedStack.stack_id),
       getStackManifest(selectedStack.stack_id, instruction, company || autoCompanyName),
-    ]).then(([readinessResult, coverageResult, manifestResult]) => {
+    ]).then(([readinessResult, coverageResult, setupResult, manifestResult]) => {
       if (cancelled) return;
       setStackReadiness(readinessResult.status === "fulfilled" ? readinessResult.value : null);
       setConnectorCoverage(coverageResult.status === "fulfilled" ? coverageResult.value : null);
+      setConnectorSetup(setupResult.status === "fulfilled" ? setupResult.value : null);
       if (manifestResult.status === "fulfilled") {
         setStackManifest(manifestResult.value);
         if (!stackOperatingPlan) setStackOperatingPlan(manifestResult.value.operating_plan);
@@ -2736,6 +2739,7 @@ export function GoalWorkspace({
             if (!selectedStack && stateResult.value.stack) setSelectedStack(stateResult.value.stack);
             if (!stackOperatingPlan && stateResult.value.operating_plan) setStackOperatingPlan(stateResult.value.operating_plan);
             if (!stackManifest && stateResult.value.manifest) setStackManifest(stateResult.value.manifest);
+            if (stateResult.value.approvals?.length) setApprovalQueue(stateResult.value.approvals as unknown as ApprovalQueueItemState[]);
           }
         });
     };
@@ -3463,30 +3467,50 @@ export function GoalWorkspace({
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                     <span className="site-label">Connectors</span>
                     <span style={{ fontSize: 11, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                      {connectorCoverage ? `${connectorCoverage.coverage_score}% covered` : stackReadiness ? `${stackReadiness.connected_required}/${stackReadiness.required_total} ready` : `${stackConnectorRequirements.filter(connector => connector.required).length} required`}
+                      {connectorSetup ? `${connectorSetup.missing_required} missing · ${connectorSetup.connected_needs_sync} sync` : connectorCoverage ? `${connectorCoverage.coverage_score}% covered` : stackReadiness ? `${stackReadiness.connected_required}/${stackReadiness.required_total} ready` : `${stackConnectorRequirements.filter(connector => connector.required).length} required`}
                     </span>
                   </div>
-                  {stackConnectorRequirements.slice(0, 5).map(connector => (
-                    <div key={connector.key} style={{ padding: "10px 12px", borderRadius: 16, background: (connectorCoverage?.connectors.find(item => item.key === connector.key)?.coverage_status === "ready") ? "rgba(61,158,95,0.07)" : connector.required ? "rgba(245,158,11,0.06)" : "rgba(255,255,255,0.025)", border: `1px solid ${(connectorCoverage?.connectors.find(item => item.key === connector.key)?.coverage_status === "ready") ? "rgba(61,158,95,0.18)" : connector.required ? "rgba(245,158,11,0.16)" : "rgba(176,180,186,0.10)"}`, display: "grid", gap: 3 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                        <span style={{ fontSize: 12, color: "var(--fg)" }}>{connector.label}</span>
-                        <span style={{ fontSize: 10, color: (connectorCoverage?.connectors.find(item => item.key === connector.key)?.coverage_status === "ready") ? "#3D9E5F" : connector.required ? "#D97706" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                          {(connectorCoverage?.connectors.find(item => item.key === connector.key)?.coverage_status ?? (stackReadiness?.connectors.find(item => item.key === connector.key)?.connected ? "connected" : connector.required ? "required" : connector.category)).replaceAll("_", " ")}
-                        </span>
+                  {stackConnectorRequirements.slice(0, 5).map(connector => {
+                    const setup = connectorSetup?.connectors.find(item => item.key === connector.key);
+                    const coverage = connectorCoverage?.connectors.find(item => item.key === connector.key);
+                    const ready = setup?.setup_status === "ready" || coverage?.coverage_status === "ready";
+                    const needsSync = setup?.setup_status === "connected_needs_sync";
+                    const status = setup?.setup_status ?? coverage?.coverage_status ?? (stackReadiness?.connectors.find(item => item.key === connector.key)?.connected ? "connected" : connector.required ? "required" : connector.category);
+                    return (
+                      <div key={connector.key} style={{ padding: "10px 12px", borderRadius: 16, background: ready ? "rgba(61,158,95,0.07)" : connector.required ? "rgba(245,158,11,0.06)" : "rgba(255,255,255,0.025)", border: `1px solid ${ready ? "rgba(61,158,95,0.18)" : connector.required ? "rgba(245,158,11,0.16)" : "rgba(176,180,186,0.10)"}`, display: "grid", gap: 5 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ fontSize: 12, color: "var(--fg)" }}>{connector.label}</span>
+                          <span style={{ fontSize: 10, color: ready ? "#3D9E5F" : needsSync ? "#2F74FF" : connector.required ? "#D97706" : "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                            {status.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>{connector.purpose}</span>
+                        {setup ? (
+                          <div style={{ display: "grid", gap: 2, fontSize: 10, color: "var(--fg-mute)", lineHeight: 1.35 }}>
+                            <span>Credentials: {setup.missing_fields.length ? setup.missing_fields.join(", ") : "complete"}</span>
+                            <span>Memory: {setup.sync.brain_record_count} records · webhook {setup.webhook.supported ? (setup.webhook.secret_configured ? "secured" : "needs secret") : "not required"}</span>
+                            {setup.validation && (
+                              <span>
+                                Validation: {setup.validation.status.replaceAll("_", " ")} · provider {setup.validation.provider.status.replaceAll("_", " ")}
+                              </span>
+                            )}
+                          </div>
+                        ) : coverage && (
+                          <span style={{ fontSize: 10, color: "var(--fg-mute)", lineHeight: 1.35 }}>
+                            Brain: {coverage.brain_record_count} records
+                          </span>
+                        )}
                       </div>
-                      <span style={{ fontSize: 11, color: "var(--fg-dim)", lineHeight: 1.45 }}>{connector.purpose}</span>
-                      {connectorCoverage?.connectors.find(item => item.key === connector.key) && (
-                        <span style={{ fontSize: 10, color: "var(--fg-mute)", lineHeight: 1.35 }}>
-                          Brain: {connectorCoverage.connectors.find(item => item.key === connector.key)?.brain_record_count ?? 0} records
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                  {connectorCoverage?.next_actions?.[0] && (
+                    );
+                  })}
+                  {(connectorSetup?.next_actions?.[0] || connectorCoverage?.next_actions?.[0]) && (
                     <div style={{ padding: "10px 12px", borderRadius: 16, background: "rgba(37,99,235,0.055)", border: "1px solid rgba(37,99,235,0.14)", color: "var(--fg-dim)", fontSize: 11, lineHeight: 1.45 }}>
-                      {connectorCoverage.next_actions[0]}
+                      {connectorSetup?.next_actions?.[0] ?? connectorCoverage?.next_actions?.[0]}
                     </div>
                   )}
+                  <Link href="/integrations" className="site-btn site-btn-ghost" style={{ minHeight: 34, width: "fit-content", padding: "0 14px", fontSize: 12 }}>
+                    Configure connectors -&gt;
+                  </Link>
                 </div>
               )}
               {stackArtifacts.length ? stackArtifacts.slice(0, 10).map((artifact) => {

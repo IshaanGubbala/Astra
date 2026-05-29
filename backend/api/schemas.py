@@ -14,6 +14,13 @@ class StackRecommendRequest(BaseModel):
     company_stage: Optional[str] = None
 
 
+class StackPackageRequest(BaseModel):
+    instruction: str
+    founder_id: Optional[str] = ""
+    company_stage: Optional[str] = None
+    company_name: Optional[str] = None
+
+
 class ApproveRequest(BaseModel):
     task_id: str
     approval_token: str
@@ -29,8 +36,9 @@ class RejectRequest(BaseModel):
 class StackApprovalDecisionRequest(BaseModel):
     session_id: str
     gate_key: str
-    decision: str  # "approved" | "skipped"
+    decision: str  # "approved" | "skipped" | "rejected"
     founder_id: Optional[str] = None
+    request_id: Optional[str] = None
     note: Optional[str] = None
 
 
@@ -93,6 +101,62 @@ class BrainRecordRequest(BaseModel):
     url: Optional[str] = ""
     canonical: bool = False
     stale_risk: str = "medium"
+    owner_id: Optional[str] = None
+    visibility: str = "team"
+    allowed_roles: Optional[list[str]] = None
+    metadata: Optional[dict] = None
+
+
+class BrainRecordRevisionRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    canonical: Optional[bool] = None
+    stale_risk: Optional[str] = None
+    editor_id: Optional[str] = None
+
+
+class BrainAccessRequest(BaseModel):
+    roles: Optional[dict[str, str]] = None
+    role_permissions: Optional[dict[str, list[str]]] = None
+
+
+class OrgMemberRequest(BaseModel):
+    actor_id: str
+    user_id: str
+    role: str = "viewer"
+    status: str = "active"
+
+
+class OrgSubscriptionRequest(BaseModel):
+    actor_id: str
+    plan: Optional[str] = None
+    status: Optional[str] = None
+    stripe_customer_id: Optional[str] = None
+    stripe_subscription_id: Optional[str] = None
+    current_period_end: Optional[str] = None
+
+
+class OrgControlsRequest(BaseModel):
+    actor_id: str
+    controls: dict
+
+
+class OrgUsageRequest(BaseModel):
+    actor_id: str = "system"
+    runs: int = 0
+    connector_syncs: int = 0
+    approval_decisions: int = 0
+
+
+class BillingCheckoutRequest(BaseModel):
+    plan: str
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+    customer_email: Optional[str] = None
+
+
+class BillingPortalRequest(BaseModel):
+    return_url: Optional[str] = None
 
 
 class BrainIngestRequest(BaseModel):

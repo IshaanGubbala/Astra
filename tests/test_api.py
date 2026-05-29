@@ -39,3 +39,20 @@ def _mock_supabase_with_goal():
         {"id": "g_abc123", "status": "in_progress", "instruction": "draft NDA"}
     ]
     return mock
+
+
+@pytest.mark.asyncio
+async def test_stack_package_endpoint_compiles_goal_to_deployable_stack():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/stacks/package", json={
+            "instruction": "Launch a waitlist SaaS with ICP research, pricing, landing page, and investor plan.",
+            "company_stage": "idea",
+            "company_name": "Astra",
+        })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stack_id"] == "idea_to_revenue"
+    assert body["manifest"]["workflow"]["nodes"]
+    assert body["execution_blueprint"]["execution_mode"] == "agent_department"
+    assert body["proof"]["has_connector_plan"] is True

@@ -379,18 +379,24 @@ class Orchestrator:
         from backend.core.events import publish
         await publish(session_id, {"type": "goal_start", "goal": goal, "founder_id": founder_id})
 
-        from backend.stacks import build_approval_queue, build_stack_manifest, build_stack_operating_plan, get_stack_template
+        from backend.stacks import build_approval_queue, build_stack_execution_blueprint, build_stack_execution_contract, build_stack_manifest, build_stack_operating_plan, get_stack_template, task_execution_guidance
         stack_template = get_stack_template((constraints or {}).get("stack_id"))
         approval_queue = build_approval_queue(stack_template)
         operating_plan = build_stack_operating_plan(stack_template, goal)
         stack_manifest = build_stack_manifest(stack_template, goal)
+        stack_execution_contract = build_stack_execution_contract(stack_template)
+        stack_execution_blueprint = build_stack_execution_blueprint(stack_template, goal)
         shared["stack_template"] = stack_template.to_public_dict()
         shared["approval_queue"] = approval_queue
         shared["stack_operating_plan"] = operating_plan
         shared["stack_manifest"] = stack_manifest
+        shared["stack_execution_contract"] = stack_execution_contract
+        shared["stack_execution_blueprint"] = stack_execution_blueprint
         stack_context = (
             f"{stack_template.name}: {stack_template.primary_outcome}\n"
             f"Target user: {stack_template.target_user}\n"
+            f"North star: {stack_execution_contract.get('north_star', '')}\n"
+            f"Quality gates: " + "; ".join(stack_execution_contract.get("quality_gates", [])[:4]) + "\n"
             f"Expected artifacts: "
             + ", ".join(a.title for a in stack_template.artifacts)
             + "\nConnector requirements: "
@@ -412,9 +418,28 @@ class Orchestrator:
             "manifest": stack_manifest,
         })
         await publish(session_id, {
+            "type": "stack_execution_contract",
+            "execution_contract": stack_execution_contract,
+        })
+        await publish(session_id, {
+            "type": "stack_execution_blueprint",
+            "execution_blueprint": stack_execution_blueprint,
+        })
+        await publish(session_id, {
             "type": "stack_approval_queue",
             "approval_queue": approval_queue,
         })
+        for lane in stack_execution_blueprint.get("lanes", []):
+            await publish(session_id, {
+                "type": "stack_lane_status",
+                "lane_id": lane.get("id"),
+                "agent": lane.get("agent"),
+                "status": "waiting",
+                "phase": lane.get("phase"),
+                "title": lane.get("title"),
+                "expected_artifacts": lane.get("deliverables", []),
+                "next_actor": "agent",
+            })
 
         # Proprietary engine: pre-run context (graph + fingerprints + observer alerts)
         proprietary_engine = None
@@ -443,11 +468,26 @@ class Orchestrator:
         shared["company_name"] = company_name
         operating_plan = build_stack_operating_plan(stack_template, goal, company_name)
         stack_manifest = build_stack_manifest(stack_template, goal, company_name)
+        stack_execution_blueprint = build_stack_execution_blueprint(stack_template, goal, company_name)
         shared["stack_operating_plan"] = operating_plan
         shared["stack_manifest"] = stack_manifest
+        shared["stack_execution_blueprint"] = stack_execution_blueprint
         await publish(session_id, {"type": "company_name", "name": company_name})
         await publish(session_id, {"type": "stack_operating_plan", "operating_plan": operating_plan})
         await publish(session_id, {"type": "stack_manifest", "manifest": stack_manifest})
+        await publish(session_id, {"type": "stack_execution_contract", "execution_contract": build_stack_execution_contract(stack_template)})
+        await publish(session_id, {"type": "stack_execution_blueprint", "execution_blueprint": stack_execution_blueprint})
+        for lane in stack_execution_blueprint.get("lanes", []):
+            await publish(session_id, {
+                "type": "stack_lane_status",
+                "lane_id": lane.get("id"),
+                "agent": lane.get("agent"),
+                "status": "waiting",
+                "phase": lane.get("phase"),
+                "title": lane.get("title"),
+                "expected_artifacts": lane.get("deliverables", []),
+                "next_actor": "agent",
+            })
         try:
             import json as _json
             await self._persist_brain_record(
@@ -524,6 +564,11 @@ class Orchestrator:
             task for task in stack_template.build_tasks(goal)
             if task["agent"] in self.specialists
         ]
+        task_template_by_id = {task.id: task for task in stack_template.tasks}
+        for task in initial_tasks:
+            template_task = task_template_by_id.get(task.get("id", ""))
+            if template_task:
+                task["instruction"] = f"{task['instruction']}\n\n{task_execution_guidance(stack_template, template_task)}"
         if not initial_tasks:
             initial_tasks = await self._initial_plan(goal)
         if not initial_tasks:
@@ -571,15 +616,33 @@ class Orchestrator:
         # Step 2: execute tasks in dependency order
         completed: dict[str, dict] = {}
         tasks = initial_tasks  # will be replaced after research
+        stack_lane_by_agent = {
+            lane.get("agent"): lane
+            for lane in (shared.get("stack_execution_blueprint") or {}).get("lanes", [])
+            if lane.get("agent")
+        }
 
         async def _run_task(task: dict) -> None:
             tid = task["id"]
             agent_name = task["agent"]
             agent = self.specialists.get(agent_name)
+            stack_lane = stack_lane_by_agent.get(agent_name, {})
+            lane_id = stack_lane.get("id") or task.get("id")
             if agent is None:
                 logger.error("No specialist named %s", agent_name)
                 completed[tid] = {"error": f"unknown agent {agent_name}"}
                 await publish(session_id, {"type": "agent_error", "agent": agent_name, "task_id": tid, "error": f"unknown agent {agent_name}"})
+                await publish(session_id, {
+                    "type": "stack_lane_status",
+                    "lane_id": lane_id,
+                    "agent": agent_name,
+                    "task_id": tid,
+                    "status": "blocked",
+                    "phase": stack_lane.get("phase"),
+                    "title": stack_lane.get("title") or task.get("stack_task_title") or agent_name,
+                    "blockers": [f"unknown agent {agent_name}"],
+                    "next_actor": "founder",
+                })
                 return
 
             dep_results = {dep: completed.get(dep, {}) for dep in task.get("depends_on", [])}
@@ -608,6 +671,20 @@ class Orchestrator:
                 proprietary_engine.on_agent_start(agent_name)
 
             await publish(session_id, {"type": "agent_start", "agent": agent_name, "task_id": tid, "instruction": task["instruction"]})
+            await publish(session_id, {
+                "type": "stack_lane_status",
+                "lane_id": lane_id,
+                "agent": agent_name,
+                "task_id": tid,
+                "status": "running",
+                "phase": stack_lane.get("phase"),
+                "title": stack_lane.get("title") or task.get("stack_task_title") or agent_name,
+                "expected_artifacts": stack_lane.get("deliverables") or [
+                    {"artifact_key": key, "title": key, "required": True}
+                    for key in task.get("expected_artifacts", [])
+                ],
+                "next_actor": "agent",
+            })
             result = await agent.run(ctx)
 
             # Web quality gate: retry with stricter instructions when fallback template is detected.
@@ -690,8 +767,52 @@ class Orchestrator:
             completed[tid] = result
             shared[f"result_{tid}"] = result
             shared[f"result_{agent_name}"] = result  # also keyed by agent name for downstream context
+            try:
+                from backend.stacks import verify_task_artifacts
+                artifact_verification = verify_task_artifacts(
+                    task,
+                    result,
+                    shared.get("stack_execution_blueprint"),
+                )
+            except Exception as _verify_exc:
+                logger.warning("Artifact verification failed for %s: %s", agent_name, _verify_exc)
+                artifact_verification = {
+                    "task_id": tid,
+                    "lane_id": lane_id,
+                    "agent": agent_name,
+                    "status": "needs_review",
+                    "summary": f"Artifact verification failed: {_verify_exc}",
+                    "artifacts": [],
+                }
             await self._publish_stack_artifacts(session_id, task, result, stack_template)
+            await publish(session_id, {
+                "type": "stack_artifact_verification",
+                "verification": artifact_verification,
+            })
             await self._publish_outcomes(session_id, task, result)
+            lane_status_value = artifact_verification.get("status", "passed")
+            lane_status_event = {
+                "passed": "done",
+                "needs_review": "ready_for_review",
+                "blocked": "blocked",
+            }.get(lane_status_value, "ready_for_review")
+            await publish(session_id, {
+                "type": "stack_lane_status",
+                "lane_id": lane_id,
+                "agent": agent_name,
+                "task_id": tid,
+                "status": "blocked" if isinstance(result, dict) and result.get("web_quality_error") else lane_status_event,
+                "phase": stack_lane.get("phase"),
+                "title": stack_lane.get("title") or task.get("stack_task_title") or agent_name,
+                "summary": result.get("summary", "") if isinstance(result, dict) else str(result)[:220],
+                "ready_artifacts": task.get("expected_artifacts", []),
+                "next_actor": "founder_review",
+                "artifact_verification": artifact_verification,
+                "blockers": (
+                    [result.get("web_quality_error")] if isinstance(result, dict) and result.get("web_quality_error")
+                    else artifact_verification.get("required_missing", [])
+                ),
+            })
             logger.info("Task %s (%s) done", tid, agent_name)
 
         # Phase A: run all 3 research agents in parallel
@@ -807,7 +928,6 @@ class Orchestrator:
             from backend.session_digest import build_session_digest
             from backend.workflow_state import save_session_state
             import json as _json
-            save_session_state(session_id, _event_log.get(session_id, []))
             digest = build_session_digest(session_id, _event_log.get(session_id, []))
             await self._persist_brain_record(
                 founder_id=founder_id,
@@ -817,6 +937,7 @@ class Orchestrator:
                 canonical=False,
                 stale_risk="low",
             )
+            save_session_state(session_id, _event_log.get(session_id, []))
         except Exception as _digest_err:
             logger.warning("Run digest brain record failed: %s", _digest_err)
 

@@ -22,6 +22,7 @@ _CONNECTOR_SERVICE_ALIASES: dict[str, tuple[str, ...]] = {
     "google_sheets": ("google_sheets", "google_drive", "google", "composio"),
     "google_calendar": ("google_calendar", "google", "composio"),
     "slack": ("slack", "composio"),
+    "discord": ("discord",),
     "notion": ("notion", "composio"),
     "linear": ("linear", "jira", "composio"),
     "crm": ("hubspot", "salesforce", "pipedrive", "crm", "composio"),

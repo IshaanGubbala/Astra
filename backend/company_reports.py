@@ -68,14 +68,39 @@ def build_company_subteam_report(founder_id: str, team: str = "engineering", day
     by_source: dict[str, int] = {}
     sessions: set[str] = set()
     highlights: list[dict[str, Any]] = []
+    status_counts: dict[str, int] = {}
+    completed_work: list[dict[str, Any]] = []
+    active_work: list[dict[str, Any]] = []
+    blockers: list[dict[str, Any]] = []
+    expected_next_work: list[dict[str, Any]] = []
     for record in records[:20]:
+        metadata = record.get("metadata") or {}
         kind = str(record.get("kind") or "note")
         source = str(record.get("source") or "unknown")
+        status = str(metadata.get("status") or record.get("status") or "active")
         by_kind[kind] = by_kind.get(kind, 0) + 1
         by_source[source] = by_source.get(source, 0) + 1
-        session_id = (record.get("metadata") or {}).get("session_id")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        session_id = metadata.get("session_id")
         if session_id:
             sessions.add(str(session_id))
+        work_item = {
+            "record_id": record.get("id"),
+            "title": metadata.get("task_title") or record.get("title"),
+            "agent": metadata.get("agent") or "",
+            "session_id": session_id or "",
+            "status": status,
+            "summary": _clip(metadata.get("summary") or record.get("snippet") or record.get("content"), 220),
+            "next_action": _clip(metadata.get("next_action") or metadata.get("expected_next_action"), 180),
+        }
+        if status in {"running", "in_progress", "queued", "assigned", "blocked"}:
+            active_work.append(work_item)
+        elif status in {"done", "completed", "shipped"} or kind in {"artifact", "run_digest", "implementation_note"}:
+            completed_work.append(work_item)
+        if status == "blocked" or metadata.get("blocker"):
+            blockers.append({**work_item, "blocker": _clip(metadata.get("blocker") or record.get("content"), 180)})
+        if work_item["next_action"]:
+            expected_next_work.append(work_item)
         highlights.append({
             "id": record.get("id"),
             "title": record.get("title"),
@@ -90,6 +115,8 @@ def build_company_subteam_report(founder_id: str, team: str = "engineering", day
     if not records:
         next_actions.append(f"No {team} records found in Company Brain for the last {bounded_days} days; sync connectors or run a stack first.")
     else:
+        if expected_next_work:
+            next_actions.append(f"Next expected {team} work: {expected_next_work[0]['next_action']}")
         next_actions.append(f"Review {len(highlights)} recent {team} records and promote authoritative outputs to canonical memory.")
         if any(item["kind"] == "operating_plan" for item in highlights):
             next_actions.append("Compare the current operating plan against completed records.")
@@ -105,10 +132,16 @@ def build_company_subteam_report(founder_id: str, team: str = "engineering", day
         "session_count": len(sessions),
         "by_kind": by_kind,
         "by_source": by_source,
+        "status_counts": status_counts,
+        "completed_work": completed_work[:10],
+        "active_work": active_work[:10],
+        "blockers": blockers[:10],
+        "expected_next_work": expected_next_work[:10],
         "highlights": highlights,
         "summary": (
             f"{team.title()} has {len(records)} company-brain records in the last {bounded_days} days "
-            f"across {len(sessions)} sessions."
+            f"across {len(sessions)} sessions: {len(completed_work)} completed, "
+            f"{len(active_work)} active, {len(blockers)} blocked."
         ),
         "next_actions": next_actions[:5],
     }

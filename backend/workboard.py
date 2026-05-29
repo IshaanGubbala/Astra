@@ -20,6 +20,10 @@ def build_session_workboard(session_id: str, events: list[tuple[int, dict]]) -> 
         (event.get("operating_plan") for event in reversed(event_dicts) if event.get("type") == "stack_operating_plan"),
         None,
     ) or {}
+    execution_blueprint = next(
+        (event.get("execution_blueprint") for event in reversed(event_dicts) if event.get("type") == "stack_execution_blueprint"),
+        None,
+    ) or (operating_plan.get("execution_blueprint") or {})
     stack = next((event.get("stack") for event in event_dicts if event.get("type") == "stack_selected"), None) or {}
     latest_plan = next(
         (event.get("tasks") for event in reversed(event_dicts) if event.get("type") == "plan_done"),
@@ -31,6 +35,13 @@ def build_session_workboard(session_id: str, events: list[tuple[int, dict]]) -> 
         for lane in operating_plan.get("lanes", [])
         if lane.get("agent")
     }
+    blueprint_lane_by_agent: dict[str, dict[str, Any]] = {
+        lane.get("agent", ""): lane
+        for lane in execution_blueprint.get("lanes", [])
+        if lane.get("agent")
+    }
+    for agent, lane in blueprint_lane_by_agent.items():
+        lane_by_agent.setdefault(agent, lane)
     task_by_agent: dict[str, dict[str, Any]] = {
         task.get("agent", ""): task
         for task in latest_plan
@@ -43,6 +54,8 @@ def build_session_workboard(session_id: str, events: list[tuple[int, dict]]) -> 
     outcomes_by_agent: dict[str, list[dict[str, Any]]] = {}
     approvals_by_gate: dict[str, dict[str, Any]] = {}
     saferun_by_agent: dict[str, list[dict[str, Any]]] = {}
+    lane_status_by_agent: dict[str, dict[str, Any]] = {}
+    verification_by_agent: dict[str, dict[str, Any]] = {}
 
     for event in event_dicts:
         event_type = event.get("type")
@@ -60,6 +73,10 @@ def build_session_workboard(session_id: str, events: list[tuple[int, dict]]) -> 
         elif event_type == "stack_artifact" and event.get("artifact"):
             artifact = event["artifact"]
             artifacts_by_agent.setdefault(artifact.get("owner_agent", ""), []).append(artifact)
+        elif event_type == "stack_artifact_verification" and event.get("verification"):
+            verification = event["verification"]
+            if verification.get("agent"):
+                verification_by_agent[verification["agent"]] = verification
         elif event_type == "outcome_recorded" and event.get("outcome"):
             outcome = event["outcome"]
             outcomes_by_agent.setdefault(outcome.get("agent", ""), []).append(outcome)
@@ -85,13 +102,18 @@ def build_session_workboard(session_id: str, events: list[tuple[int, dict]]) -> 
                     "status": "triggered",
                     "triggered_by": action.get("id"),
                 }
+        elif event_type == "stack_lane_status" and agent:
+            lane_status_by_agent[agent] = {**lane_status_by_agent.get(agent, {}), **event}
 
     items: list[dict[str, Any]] = []
     for agent in all_agents:
         lane = lane_by_agent.get(agent, {})
+        blueprint_lane = blueprint_lane_by_agent.get(agent, {})
         task = task_by_agent.get(agent, {})
         current = state.get(agent, {})
-        status = current.get("status") or "queued"
+        lane_status = lane_status_by_agent.get(agent, {})
+        verification = verification_by_agent.get(agent) or lane_status.get("artifact_verification") or {}
+        status = lane_status.get("status") or current.get("status") or "queued"
         blockers: list[str] = []
         pending_approvals = [
             approval for approval in approvals_by_gate.values()
@@ -104,6 +126,10 @@ def build_session_workboard(session_id: str, events: list[tuple[int, dict]]) -> 
                 blockers.append(f"Approval needed: {approval.get('title') or gate}")
         if status == "error":
             blockers.append(_clip(current.get("summary") or "Agent lane failed."))
+        if status == "blocked":
+            blockers.extend(_clip(blocker) for blocker in lane_status.get("blockers", []) if blocker)
+        if verification.get("status") == "blocked":
+            blockers.extend(f"Missing artifact: {key}" for key in verification.get("required_missing", []))
 
         if blockers:
             next_actor = "founder"
@@ -122,11 +148,16 @@ def build_session_workboard(session_id: str, events: list[tuple[int, dict]]) -> 
             "status": status,
             "next_actor": next_actor,
             "depends_on": lane.get("depends_on") or task.get("depends_on") or [],
-            "expected_artifacts": lane.get("artifacts") or [],
+            "phase": lane_status.get("phase") or blueprint_lane.get("phase") or lane.get("phase", ""),
+            "steps": blueprint_lane.get("steps", []),
+            "approval_triggers": blueprint_lane.get("approval_triggers", []),
+            "connector_dependencies": blueprint_lane.get("connector_dependencies", []),
+            "expected_artifacts": lane.get("artifacts") or blueprint_lane.get("deliverables") or [],
             "ready_artifacts": artifacts_by_agent.get(agent, [])[-6:],
+            "artifact_verification": verification,
             "outcomes": outcomes_by_agent.get(agent, [])[-6:],
             "blockers": blockers,
-            "summary": _clip(current.get("summary")),
+            "summary": _clip(lane_status.get("summary") or current.get("summary")),
         })
 
     counts = {
@@ -144,6 +175,12 @@ def build_session_workboard(session_id: str, events: list[tuple[int, dict]]) -> 
         "outcome": operating_plan.get("outcome") or stack.get("primary_outcome", ""),
         "counts": counts,
         "items": items,
+        "execution_blueprint": {
+            "stack_id": execution_blueprint.get("stack_id"),
+            "blueprint_version": execution_blueprint.get("blueprint_version"),
+            "calendar": execution_blueprint.get("calendar", []),
+            "completion_audit": execution_blueprint.get("completion_audit", []),
+        },
         "pending_approvals": [approval for approval in approvals_by_gate.values() if approval.get("status") == "triggered"],
         "summary": (
             f"{counts['done']} done, {counts['running']} running, {counts['queued']} queued, "

@@ -68,8 +68,8 @@ def build_connector_coverage(founder_id: str, stack_id: str | None = None) -> di
             "coverage_status": (
                 "ready" if connector.get("connected") and brain_covered else
                 "connected_no_memory" if connector.get("connected") else
-                "memory_only" if brain_covered else
                 "missing_required" if connector.get("required") else
+                "memory_only" if brain_covered else
                 "optional_missing"
             ),
         })

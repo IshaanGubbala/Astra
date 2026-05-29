@@ -16,6 +16,7 @@ from typing import Any
 
 
 SOURCE_CATALOG: dict[str, dict[str, str]] = {
+    "discord": {"label": "Discord", "kind": "messages"},
     "slack": {"label": "Slack", "kind": "messages"},
     "github": {"label": "GitHub", "kind": "code"},
     "linear": {"label": "Linear", "kind": "work"},
@@ -42,6 +43,13 @@ CONNECTOR_REQUIREMENTS: dict[str, dict[str, Any]] = {
         "oauth_apps": [],
         "setup_url": "https://api.slack.com/apps",
         "setup_hint": "Save a Slack bot token with conversations:read and channels:read scopes.",
+        "importer": True,
+    },
+    "discord": {
+        "credential_fields": ["bot_token"],
+        "oauth_apps": [],
+        "setup_url": "https://discord.com/developers/applications",
+        "setup_hint": "Save a Discord bot token with server/channel read permissions.",
         "importer": True,
     },
     "linear": {
@@ -109,7 +117,7 @@ CONNECTOR_REQUIREMENTS: dict[str, dict[str, Any]] = {
     },
 }
 
-DEFAULT_SOURCES = ["github", "notion", "linear", "gmail", "google_drive", "slack", "obsidian"]
+DEFAULT_SOURCES = ["github", "notion", "linear", "gmail", "google_drive", "slack", "discord", "obsidian"]
 
 STOP_WORDS = {
     "that", "with", "from", "this", "have", "will", "into", "your", "their",
@@ -140,7 +148,12 @@ def list_company_brain_founders() -> list[str]:
             founders.append(str(data.get("founder_id") or path.stem))
         except Exception:
             founders.append(path.stem)
-    return founders
+    try:
+        from backend.storage_adapter import list_document_keys
+        founders.extend(list_document_keys("company_brains"))
+    except Exception:
+        pass
+    return sorted(dict.fromkeys(founders))
 
 
 def _now() -> str:
@@ -214,11 +227,18 @@ def _empty_brain(founder_id: str) -> dict[str, Any]:
 def _load(founder_id: str) -> dict[str, Any]:
     path = _brain_path(founder_id)
     if not path.exists():
-        return _empty_brain(founder_id)
-    try:
-        data = json.loads(path.read_text())
-    except Exception:
-        data = _empty_brain(founder_id)
+        try:
+            from backend.storage_adapter import load_document
+            data = load_document("company_brains", founder_id)
+        except Exception:
+            data = None
+        if not isinstance(data, dict):
+            return _empty_brain(founder_id)
+    else:
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            data = _empty_brain(founder_id)
     data.setdefault("founder_id", founder_id)
     data.setdefault("sources", _empty_brain(founder_id)["sources"])
     data.setdefault("records", [])
@@ -259,6 +279,11 @@ def _save(founder_id: str, data: dict[str, Any]) -> dict[str, Any]:
     data["updated_at"] = _now()
     path = _brain_path(founder_id)
     path.write_text(json.dumps(data, indent=2, sort_keys=True))
+    try:
+        from backend.storage_adapter import mirror_document
+        mirror_document("company_brains", founder_id, data)
+    except Exception:
+        pass
     return data
 
 
@@ -516,7 +541,7 @@ def _normalize_source_record(source: str, raw: dict[str, Any]) -> dict[str, Any]
     canonical = bool(raw.get("canonical", False))
     stale_risk = str(raw.get("stale_risk") or ("low" if canonical else "medium"))
     metadata = dict(raw.get("metadata") or {})
-    for key in ("external_id", "author", "owner", "repo", "channel", "thread_ts", "state", "updated_at", "domain", "status"):
+    for key in ("external_id", "author", "owner", "repo", "server", "channel", "thread_ts", "state", "updated_at", "domain", "status", "owner_id", "visibility", "allowed_roles", "version", "previous_version_id"):
         if key in raw and key not in metadata:
             metadata[key] = raw[key]
     if not content:
@@ -530,6 +555,11 @@ def _normalize_source_record(source: str, raw: dict[str, Any]) -> dict[str, Any]
         canonical=canonical,
         stale_risk=stale_risk,
         metadata=metadata,
+        owner_id=str(raw.get("owner_id") or metadata.get("owner_id") or ""),
+        visibility=str(raw.get("visibility") or metadata.get("visibility") or "team"),
+        allowed_roles=list(raw.get("allowed_roles") or metadata.get("allowed_roles") or ["owner", "admin", "operator", "viewer"]),
+        version=int(raw.get("version") or metadata.get("version") or 1),
+        previous_version_id=raw.get("previous_version_id") or metadata.get("previous_version_id"),
     )
 
 
@@ -665,7 +695,12 @@ def configure_company_brain_sync(
 def get_company_brain_sync_status(founder_id: str) -> dict[str, Any]:
     """Return persisted continuous-sync settings and recent run history."""
     data = _load(founder_id)
-    return {"ok": True, "sync": data.get("sync", {})}
+    try:
+        from backend.connector_sync_ledger import get_connector_sync_status
+        connector_sync = get_connector_sync_status(founder_id)
+    except Exception:
+        connector_sync = {"founder_id": founder_id, "sources": {}}
+    return {"ok": True, "sync": data.get("sync", {}), "connector_sync": connector_sync}
 
 
 def run_company_brain_sync(founder_id: str, force: bool = False) -> dict[str, Any]:
@@ -796,9 +831,14 @@ def add_company_brain_record(
     url: str = "",
     canonical: bool = False,
     stale_risk: str = "medium",
+    owner_id: str | None = None,
+    visibility: str = "team",
+    allowed_roles: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Add a normalized manual/source record to the company brain."""
     data = _load(founder_id)
+    meta = {"manual": True, "owner_id": owner_id or founder_id, **(metadata or {})}
     rec = _record(
         source=source,
         title=title,
@@ -807,7 +847,10 @@ def add_company_brain_record(
         url=url,
         canonical=canonical,
         stale_risk=stale_risk,
-        metadata={"manual": True},
+        metadata=meta,
+        owner_id=owner_id or founder_id,
+        visibility=visibility,
+        allowed_roles=allowed_roles,
     )
     _upsert_records(data, [rec])
     if source not in data["sources"]:
@@ -828,10 +871,65 @@ def add_company_brain_record(
     return {"ok": True, "record": rec}
 
 
-def get_company_brain(founder_id: str) -> dict[str, Any]:
+def revise_company_brain_record(
+    founder_id: str,
+    record_id: str,
+    title: str | None = None,
+    content: str | None = None,
+    canonical: bool | None = None,
+    stale_risk: str | None = None,
+    editor_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a new version of a brain record and deprecate the prior version."""
+    data = _load(founder_id)
+    role = _viewer_role(data, editor_id or founder_id)
+    if role != "owner" and "write" not in _role_permissions(data, role):
+        return {"ok": False, "error": "Editor does not have write permission."}
+
+    old = next((record for record in data.get("records", []) if record.get("id") == record_id or record.get("version_id") == record_id), None)
+    if not old:
+        return {"ok": False, "error": f"Unknown record {record_id}"}
+
+    previous_version = old.get("version_id") or old.get("id")
+    old["status"] = "deprecated"
+    old.setdefault("metadata", {})["deprecated_by"] = editor_id or founder_id
+    old.setdefault("metadata", {})["deprecated_at"] = _now()
+    new_version = int(old.get("version") or 1) + 1
+    rec = _record(
+        source=old.get("source", "manual"),
+        title=title if title is not None else old.get("title", ""),
+        content=content if content is not None else old.get("content", ""),
+        kind=old.get("kind") or "note",
+        url=old.get("url") or "",
+        canonical=old.get("canonical") if canonical is None else canonical,
+        stale_risk=stale_risk or old.get("stale_risk") or "medium",
+        metadata={
+            **(old.get("metadata") or {}),
+            "revised_by": editor_id or founder_id,
+            "previous_record_id": old.get("id"),
+            "supersedes": [previous_version],
+        },
+        owner_id=old.get("owner_id") or founder_id,
+        visibility=old.get("visibility") or "team",
+        allowed_roles=list(old.get("allowed_roles") or ["owner", "admin", "operator", "viewer"]),
+        version=new_version,
+        previous_version_id=previous_version,
+    )
+    rec["supersedes"] = list(dict.fromkeys([*(old.get("supersedes") or []), previous_version]))
+    _upsert_records(data, [rec])
+    maintenance = _run_maintenance(data)
+    _merge_proposals(data, maintenance["proposals"])
+    _rebuild_relationships(data)
+    _refresh_counts(data)
+    _save(founder_id, data)
+    return {"ok": True, "record": rec, "previous_record": old}
+
+
+def get_company_brain(founder_id: str, viewer_id: str | None = None) -> dict[str, Any]:
     """Return the full normalized company brain graph."""
     data = _load(founder_id)
     _refresh_counts(data)
+    data = {**data, "records": _filter_readable_records(data, viewer_id)}
     return data
 
 
@@ -923,12 +1021,12 @@ def resolve_company_brain_proposal(founder_id: str, proposal_id: str, status: st
     return {"ok": False, "error": f"Unknown proposal {proposal_id}"}
 
 
-def search_company_brain(founder_id: str, query: str, limit: int = 8) -> dict[str, Any]:
+def search_company_brain(founder_id: str, query: str, limit: int = 8, viewer_id: str | None = None) -> dict[str, Any]:
     """Search the company brain for human and agent context retrieval."""
     data = _load(founder_id)
     terms = [t for t in re.findall(r"[a-zA-Z0-9_-]+", query.lower()) if len(t) > 2]
     scored: list[tuple[float, dict[str, Any]]] = []
-    for rec in data.get("records", []):
+    for rec in _filter_readable_records(data, viewer_id):
         if rec.get("status") == "deprecated":
             continue
         hay = f"{rec.get('title', '')} {rec.get('content', '')} {rec.get('source', '')}".lower()
@@ -965,11 +1063,12 @@ def format_company_brain_context(records: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def company_brain_agent_context(founder_id: str, query: str, limit: int = 8) -> dict[str, Any]:
+def company_brain_agent_context(founder_id: str, query: str, limit: int = 8, viewer_id: str | None = None) -> dict[str, Any]:
     """Return compact graph context for IDEs, MCP bridges, and external agents."""
     data = _load(founder_id)
-    search = search_company_brain(founder_id, query, limit=limit)
+    search = search_company_brain(founder_id, query, limit=limit, viewer_id=viewer_id)
     matched_ids = {record["id"] for record in search["results"]}
+    readable_records = _filter_readable_records(data, viewer_id)
     relationships = [
         rel for rel in data.get("relationships", [])
         if rel.get("from") in matched_ids or rel.get("to") in matched_ids
@@ -987,7 +1086,7 @@ def company_brain_agent_context(founder_id: str, query: str, limit: int = 8) -> 
             "url": rec.get("url"),
             "content": rec.get("content", "")[:700],
         }
-        for rec in data.get("records", [])
+        for rec in readable_records
         if rec.get("canonical") and rec.get("status", "active") == "active"
     ][:12]
     return {
@@ -1004,9 +1103,9 @@ def company_brain_agent_context(founder_id: str, query: str, limit: int = 8) -> 
     }
 
 
-def company_brain_context(founder_id: str, query: str, limit: int = 6) -> str:
+def company_brain_context(founder_id: str, query: str, limit: int = 6, viewer_id: str | None = None) -> str:
     """Compact helper for orchestrator context injection."""
-    return search_company_brain(founder_id, query, limit=limit)["formatted"]
+    return search_company_brain(founder_id, query, limit=limit, viewer_id=viewer_id)["formatted"]
 
 
 def ask_company_brain(founder_id: str, question: str, limit: int = 8) -> dict[str, Any]:
@@ -1037,10 +1136,29 @@ def ask_company_brain(founder_id: str, question: str, limit: int = 8) -> dict[st
             f"{item.get('title')} ({item.get('source')}): {item.get('snippet')}"
             for item in report.get("highlights", [])[:6]
         ]
+        completed = [
+            f"completed: {item.get('title')}"
+            for item in report.get("completed_work", [])[:3]
+        ]
+        active = [
+            f"{item.get('status')}: {item.get('title')}"
+            for item in report.get("active_work", [])[:3]
+        ]
+        expected = [
+            f"next: {item.get('next_action')}"
+            for item in report.get("expected_next_work", [])[:3]
+            if item.get("next_action")
+        ]
         return {
             "ok": True,
             "question": question,
-            "answer": report["summary"] + (" " + " ".join(report["next_actions"][:2]) if report.get("next_actions") else ""),
+            "answer": " ".join([
+                report["summary"],
+                *completed,
+                *active,
+                *expected,
+                *report.get("next_actions", [])[:2],
+            ]).strip(),
             "confidence": 0.84 if report.get("record_count") else 0.35,
             "citations": [
                 {

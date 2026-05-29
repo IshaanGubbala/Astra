@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import router
 from backend.api.admin import router as admin_router
@@ -27,6 +27,7 @@ async def startup_background_jobs():
     from backend.tools.company_brain_scheduler import start_company_brain_scheduler
     start_company_brain_scheduler(interval_seconds=60)
     asyncio.create_task(_resume_interrupted_sessions())
+    asyncio.create_task(_platform_alert_loop())
 
 
 async def _resume_interrupted_sessions() -> None:
@@ -90,6 +91,20 @@ async def _resume_interrupted_sessions() -> None:
         logger.warning("Session resume startup failed: %s", e)
 
 
+async def _platform_alert_loop() -> None:
+    """Periodically persist and deliver operations alerts."""
+    await asyncio.sleep(10)
+    while True:
+        try:
+            from backend.alerts import run_alert_check
+            await asyncio.to_thread(run_alert_check)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Platform alert check failed: %s", exc)
+        await asyncio.sleep(300)
+
+
 @app.on_event("shutdown")
 async def shutdown_background_jobs():
     from backend.tools.company_brain_scheduler import stop_company_brain_scheduler
@@ -98,4 +113,20 @@ async def shutdown_background_jobs():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from backend.platform_status import platform_status
+    return platform_status()
+
+
+@app.get("/ready")
+async def ready(response: Response):
+    from backend.platform_status import readiness_status
+    result = readiness_status()
+    if not result["ready"]:
+        response.status_code = 503
+    return result
+
+
+@app.get("/metrics")
+async def metrics():
+    from backend.platform_status import prometheus_metrics
+    return Response(prometheus_metrics(), media_type="text/plain; version=0.0.4")

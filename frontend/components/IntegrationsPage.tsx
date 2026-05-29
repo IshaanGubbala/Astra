@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import { saveServiceCredential, getComposioOAuthUrls, getSetupStatus, SetupStatus } from "@/lib/api";
+import { apiFetch, saveServiceCredential, getComposioOAuthUrls, getSetupStatus, SetupStatus } from "@/lib/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -404,7 +404,7 @@ function ServiceCard({
     setConnecting(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE}/github/oauth-url/${founderId}`);
+      const res = await apiFetch(`${BASE}/github/oauth-url/${founderId}`);
       const data = await res.json();
       if (!res.ok) {
         setError(data.detail ?? `Error ${res.status}`);
@@ -542,7 +542,7 @@ function StripeCard({ founderId, email }: { founderId: string; email: string }) 
   const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
-    fetch(`${BASE}/stripe/status/${founderId}`)
+    apiFetch(`${BASE}/stripe/status/${founderId}`)
       .then(r => r.json())
       .then(setStripeStatus)
       .catch(() => setStripeStatus({ connected: false }))
@@ -554,14 +554,14 @@ function StripeCard({ founderId, email }: { founderId: string; email: string }) 
     const params = new URLSearchParams(window.location.search);
     if (params.get("stripe_connected") === "1") {
       window.history.replaceState({}, "", window.location.pathname);
-      fetch(`${BASE}/stripe/status/${founderId}`).then(r => r.json()).then(setStripeStatus);
+      apiFetch(`${BASE}/stripe/status/${founderId}`).then(r => r.json()).then(setStripeStatus);
     }
   }, [founderId]);
 
   const connect = async () => {
     setConnecting(true);
     try {
-      const res = await fetch(`${BASE}/stripe/oauth-url/${founderId}?email=${encodeURIComponent(email)}`);
+      const res = await apiFetch(`${BASE}/stripe/oauth-url/${founderId}?email=${encodeURIComponent(email)}`);
       const data = await res.json();
       if (data.url) window.location.href = data.url;
     } finally {
@@ -755,13 +755,13 @@ function ComposioAppCard({
         clearInterval(pollRef.current!);
         setPopupOpen(false);
         // Final check after popup closes
-        fetch(`${BASE}/setup/composio/connected/${founderId}`)
+        apiFetch(`${BASE}/setup/composio/connected/${founderId}`)
           .then(r => r.json())
           .then(data => { if (data.apps?.[app.key]) setIsConnected(true); })
           .catch(() => {});
         return;
       }
-      fetch(`${BASE}/setup/composio/connected/${founderId}`)
+      apiFetch(`${BASE}/setup/composio/connected/${founderId}`)
         .then(r => r.json())
         .then(data => {
           if (data.apps?.[app.key]) {
@@ -821,7 +821,7 @@ function ComposioAppGrid({ founderId, composioUrls }: { founderId: string; compo
   const [connected, setConnected] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    fetch(`${BASE}/setup/composio/connected/${founderId}`)
+    apiFetch(`${BASE}/setup/composio/connected/${founderId}`)
       .then(r => r.json())
       .then(data => setConnected(data.apps ?? {}))
       .catch(() => {});
@@ -907,7 +907,7 @@ export default function SetupPage() {
     setAutoProvisioning(true);
     setAutoResult(null);
     try {
-      const r = await fetch(`${BASE}/setup`, {
+      const r = await apiFetch(`${BASE}/setup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ founder_id: founderId, email: autoEmail, password: autoPassword }),

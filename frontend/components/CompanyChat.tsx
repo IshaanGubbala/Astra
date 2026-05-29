@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import LiquidGlass from "@/components/LiquidGlass";
-import { AGENT_LABELS, askCompanyBrain } from "@/lib/api";
+import { AGENT_LABELS, apiFetch, askCompanyBrain } from "@/lib/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -127,7 +127,7 @@ export default function CompanyChat({
     setBusy(true);
 
     try {
-      const res = await fetch(`${BASE}/goal/continue`, {
+      const res = await apiFetch(`${BASE}/goal/continue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ founder_id: founderId, prior_session_id: priorSessionId, instruction: text }),

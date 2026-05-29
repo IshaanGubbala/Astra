@@ -1,5 +1,35 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+type ApiAuthProvider = () => Promise<{ token?: string | null; userId?: string | null } | null>;
+
+let apiAuthProvider: ApiAuthProvider | null = null;
+
+export function setApiAuthProvider(provider: ApiAuthProvider | null) {
+  apiAuthProvider = provider;
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  if (!apiAuthProvider) return {};
+  try {
+    const auth = await apiAuthProvider();
+    const headers: Record<string, string> = {};
+    if (auth?.token) headers.Authorization = `Bearer ${auth.token}`;
+    if (auth?.userId) headers["x-astra-user-id"] = auth.userId;
+    return headers;
+  } catch {
+    return {};
+  }
+}
+
+export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const existing = new Headers(init.headers);
+  const auth = await authHeaders();
+  for (const [key, value] of Object.entries(auth)) {
+    if (!existing.has(key)) existing.set(key, value);
+  }
+  return fetch(input, { ...init, headers: existing });
+}
+
 export interface Task {
   id: string;
   goal_id: string;
@@ -114,6 +144,85 @@ export interface ConnectorCoverage {
   }>;
 }
 
+export interface ConnectorSetupPlan {
+  founder_id: string;
+  stack_id: string;
+  stack_name: string;
+  backend_url: string;
+  ready: boolean;
+  required_total: number;
+  missing_required: number;
+  connected_needs_sync: number;
+  summary: string;
+  next_actions: string[];
+  connectors: Array<{
+    key: string;
+    label: string;
+    category: string;
+    purpose: string;
+    required: boolean;
+    connected: boolean;
+    credential_service: string;
+    credential_aliases: string[];
+    fields: Array<{ key: string; label: string; secret: boolean; required: boolean }>;
+    missing_fields: string[];
+    webhook: {
+      supported: boolean;
+      url: string;
+      secret_configured: boolean;
+      auth: string;
+    };
+    sync: {
+      brain_covered: boolean;
+      brain_record_count: number;
+      coverage_status: string;
+    };
+    validation?: ConnectorValidationItem;
+    setup_status: string;
+    connect_endpoint: string;
+    import_endpoint: string;
+  }>;
+}
+
+export interface ConnectorValidationItem {
+  key: string;
+  label?: string;
+  category?: string;
+  purpose?: string;
+  required: boolean;
+  credential_service: string;
+  credential_aliases: string[];
+  credential_status: "missing" | "valid_shape" | string;
+  missing_fields: string[];
+  webhook: {
+    supported: boolean;
+    status: "not_supported" | "secured" | "missing_secret" | string;
+    secret_configured: boolean;
+  };
+  provider: {
+    status: "not_checked" | "ok" | "error" | "unsupported" | string;
+    ok: boolean;
+    detail?: string;
+    http_status?: number;
+    [key: string]: unknown;
+  };
+  status: "missing_credentials" | "invalid_credentials" | "provider_error" | "validated" | "locally_valid" | string;
+}
+
+export interface ConnectorValidationReport {
+  founder_id: string;
+  stack_id: string;
+  stack_name: string;
+  live: boolean;
+  ready: boolean;
+  required_total: number;
+  validated_required: number;
+  blocked_required: number;
+  connectors: ConnectorValidationItem[];
+  next_actions: string[];
+  summary: string;
+}
+
 export interface StackOperatingPlan {
   stack_id: string;
   stack_name: string;
@@ -158,6 +267,27 @@ export interface StackOperatingPlan {
   }>;
   cadence: Record<string, string>;
   completion_definition: string[];
+  execution_contract?: StackExecutionContract;
+}
+
+export interface StackExecutionContract {
+  stack_id: string;
+  stack_name: string;
+  north_star: string;
+  milestones: Array<{ day: number; title: string; evidence: string }>;
+  kpis: Array<{ key: string; label: string; target: string }>;
+  quality_gates: string[];
+  cadence: Record<string, string>;
+  handoff_rules: string[];
+  lane_contracts: Array<{
+    task_id: string;
+    agent: string;
+    title: string;
+    owns: string[];
+    depends_on: string[];
+    completion_evidence: string;
+    handoff_to: string[];
+  }>;
 }
 
 export interface AgentDepartmentManifest {
@@ -197,6 +327,16 @@ export interface AgentDepartmentManifest {
   memory_policy: {
     canonical_records: string[];
     retrieval_promises: string[];
+  };
+  execution_contract: StackExecutionContract;
+  template_quality?: {
+    stack_id: string;
+    stack_name: string;
+    score: number;
+    ready: boolean;
+    checks: Array<{ key: string; ok: boolean; detail: string }>;
+    gaps: Array<{ key: string; ok: boolean; detail: string }>;
+    summary: string;
   };
   operating_plan: StackOperatingPlan;
 }
@@ -296,9 +436,15 @@ export interface SessionStateSnapshot {
   stack?: AgentStackTemplate | null;
   operating_plan?: StackOperatingPlan | null;
   manifest?: AgentDepartmentManifest | null;
+  execution_contract?: StackExecutionContract | null;
   company_genome?: Record<string, unknown> | null;
   digest?: SessionDigest | null;
   workboard?: SessionWorkboard | null;
+  approval_workflow?: {
+    session_id: string;
+    updated_at?: string;
+    requests: Array<Record<string, unknown>>;
+  };
   approvals: Array<Record<string, unknown>>;
   artifacts: Array<Record<string, unknown>>;
   outcomes: Array<Record<string, unknown>>;
@@ -340,6 +486,9 @@ export interface BrainSource {
 
 export interface BrainRecord {
   id: string;
+  version_id?: string;
+  version?: number;
+  previous_version_id?: string | null;
   source: string;
   kind: string;
   title: string;
@@ -351,6 +500,9 @@ export interface BrainRecord {
   status?: string;
   domain?: string;
   supersedes?: string[];
+  owner_id?: string;
+  visibility?: "private" | "team" | "public";
+  allowed_roles?: string[];
   updated_at: string;
   metadata?: Record<string, unknown>;
   score?: number;
@@ -402,6 +554,309 @@ export interface BrainSchedulerState {
   last_error: string;
 }
 
+export interface PlatformStatus {
+  status: "healthy" | "degraded";
+  ready: boolean;
+  started_at: number;
+  now: number;
+  uptime_seconds: number;
+  checks: Record<string, {
+    ok: boolean;
+    status?: string;
+    detail?: string;
+    [key: string]: unknown;
+  }>;
+  state: {
+    sessions_active: number;
+    sessions_completed: number;
+    events_buffered: number;
+    workflow_snapshots: number;
+    approval_ledgers: number;
+    company_brains: number;
+  };
+  release: {
+    pid: number;
+    cwd: string;
+  };
+}
+
+export interface DeployEvidenceCheck {
+  key: string;
+  ok: boolean;
+  message: string;
+  details?: Record<string, unknown>;
+  missing?: string[];
+}
+
+export interface DeployEvidenceReport {
+  ok: boolean;
+  strict: boolean;
+  founder_id: string;
+  stack_id: string;
+  live_connectors: boolean;
+  checks: DeployEvidenceCheck[];
+  failed: DeployEvidenceCheck[];
+  missing: string[];
+  summary: string;
+}
+
+export interface ProductionVerificationReport {
+  id: string;
+  ok: boolean;
+  created_at: string;
+  founder_id: string;
+  stack_id: string;
+  base_url: string;
+  live_connectors: boolean;
+  summary: string;
+  missing: string[];
+  next_actions: string[];
+  verification_command: string;
+  deploy_evidence: DeployEvidenceReport;
+  smoke: {
+    ok: boolean;
+    summary: string;
+    failed_count?: number;
+    checks?: Array<Record<string, unknown>>;
+  };
+  paths?: {
+    json?: string;
+    markdown?: string;
+    manifest?: string;
+    latest_json?: string;
+    latest_markdown?: string;
+    latest_manifest?: string;
+  };
+}
+
+export interface ProductionVerificationReports {
+  reports: ProductionVerificationReport[];
+  report_count: number;
+  latest: ProductionVerificationReport | null;
+  latest_ok: boolean;
+}
+
+export interface ProductionVerificationManifestCheck {
+  key: string;
+  ok: boolean;
+  path: string;
+  error?: string;
+  expected_sha256?: string;
+  actual_sha256?: string;
+  expected_bytes?: number;
+  actual_bytes?: number;
+}
+
+export interface ProductionVerificationManifestVerification {
+  ok: boolean;
+  found: boolean;
+  verified: boolean;
+  report_id: string;
+  manifest?: Record<string, unknown>;
+  checks: ProductionVerificationManifestCheck[];
+  failed: ProductionVerificationManifestCheck[];
+  summary: string;
+}
+
+export interface ProductionRequirements {
+  ok: boolean;
+  founder_id: string;
+  stack_id: string;
+  stack_name: string;
+  base_url: string;
+  environment: Array<{
+    key: string;
+    description: string;
+    required: boolean;
+    configured: boolean;
+    current: string;
+  }>;
+  connectors: Array<{
+    key: string;
+    label: string;
+    category: string;
+    purpose: string;
+    required: boolean;
+    credential_fields: Array<{ key: string; required: boolean }>;
+    live_validation_required: boolean;
+  }>;
+  required_connector_keys: string[];
+  objective_evidence: ObjectiveEvidenceMatrix;
+  final_gate: {
+    command: string;
+    admin_endpoint: string;
+    requires_live_connectors: boolean;
+    writes: string[];
+    verify_manifest_endpoint?: string;
+    bundle_endpoint?: string;
+  };
+  missing: string[];
+  summary: string;
+}
+
+export interface ObjectiveEvidenceMatrix {
+  ok: boolean;
+  code_contract_ready: boolean;
+  production_proven: boolean;
+  founder_id: string;
+  stack_id: string;
+  base_url: string;
+  requirements: Array<{
+    key: string;
+    requirement: string;
+    evidence: string[];
+    checks: string[];
+    code_ok: boolean;
+    needs_live_proof: boolean;
+    production_verified: boolean;
+    status: "production_verified" | "needs_live_proof" | "code_ready" | "missing_code_evidence" | string;
+  }>;
+  failed_code: Array<Record<string, unknown>>;
+  live_proof: {
+    ok: boolean;
+    report_found?: boolean;
+    report_ok?: boolean;
+    live_connectors?: boolean;
+    manifest_verified?: boolean;
+    report_id?: string;
+    error?: string;
+  };
+  live_missing: Array<{
+    key: string;
+    requirement: string;
+    status: string;
+  }>;
+  summary: string;
+}
+
+export interface LaunchReadiness {
+  ok: boolean;
+  founder_id: string;
+  stack_id: string;
+  base_url: string;
+  report_id: string;
+  checks: Array<{
+    key: string;
+    ok: boolean;
+    message: string;
+    details?: Record<string, unknown>;
+  }>;
+  failed: Array<{
+    key: string;
+    ok: boolean;
+    message: string;
+    details?: Record<string, unknown>;
+  }>;
+  summary: string;
+}
+
+export interface ProductionLaunchResult {
+  ok: boolean;
+  founder_id: string;
+  stack_id: string;
+  base_url: string;
+  report_id: string;
+  verification: ProductionVerificationReport;
+  manifest: ProductionVerificationManifestVerification;
+  bundle: {
+    ok: boolean;
+    found: boolean;
+    report_id: string;
+    path?: string;
+    filename?: string;
+    bytes?: number;
+    sha256?: string;
+    manifest_verified?: boolean;
+    summary: string;
+  };
+  launch_readiness: LaunchReadiness;
+  summary: string;
+}
+
+export interface ProductionLaunchProofResponse {
+  ok: boolean;
+  found: boolean;
+  proof?: ProductionLaunchResult & {
+    id: string;
+    created_at: string;
+    paths?: {
+      json?: string;
+      latest_json?: string;
+    };
+  };
+  proof_id?: string;
+  error?: string;
+}
+
+export interface OrganizationAccount {
+  org_id: string;
+  name: string;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+  members: Record<string, { user_id: string; role: string; status: string; joined_at?: string; updated_at?: string }>;
+  subscription: {
+    plan: string;
+    status: string;
+    stripe_customer_id: string;
+    stripe_subscription_id: string;
+    current_period_end: string | null;
+  };
+  usage: {
+    period: string;
+    runs: number;
+    connector_syncs: number;
+    approval_decisions: number;
+  };
+  admin_controls: {
+    require_approval_for_public_actions: boolean;
+    require_approval_for_billing_actions: boolean;
+    allow_agent_external_writes: boolean;
+    allowed_connectors: string[];
+  };
+  entitlements: {
+    plan_id: string;
+    name: string;
+    monthly_runs: number;
+    team_seats: number;
+    connector_syncs_per_day: number;
+    approval_workflows: boolean;
+    company_brain: boolean;
+    remaining_runs: number;
+    remaining_connector_syncs: number;
+    remaining_team_seats: number;
+  };
+  audit_log: Array<{ at: string; actor_id: string; action: string; payload: Record<string, unknown> }>;
+}
+
+export interface BillingConfigStatus {
+  stripe_configured: boolean;
+  portal_available: boolean;
+  checkout_available: boolean;
+  missing_price_ids: string[];
+  plans: Record<string, {
+    name: string;
+    monthly_runs: number;
+    team_seats: number;
+    connector_syncs_per_day: number;
+    approval_workflows: boolean;
+    company_brain: boolean;
+    price_configured: boolean;
+    self_serve: boolean;
+  }>;
+}
+
+export interface BillingSessionResult {
+  ok: boolean;
+  kind?: "checkout" | "portal";
+  plan?: string;
+  url?: string;
+  session_id?: string;
+  customer_id?: string;
+  setup_required?: boolean;
+  error?: string;
+}
+
 export interface BrainAnswerCitation {
   index: number;
   record_id: string;
@@ -421,6 +876,11 @@ export interface CompanyBrain {
   proposals: BrainProposal[];
   maintenance: BrainMaintenance;
   sync: BrainSyncState;
+  access_control?: {
+    owner_id: string;
+    roles: Record<string, string>;
+    role_permissions: Record<string, string[]>;
+  };
 }
 
 export interface CompanySubteamReport {
@@ -451,7 +911,7 @@ export async function submitGoal(
   constraints: Record<string, unknown> = {},
   stackId = "idea_to_revenue"
 ): Promise<{ session_id: string; status: string }> {
-  const res = await fetch(`${BASE}/goal`, {
+  const res = await apiFetch(`${BASE}/goal`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ founder_id: founderId, instruction, constraints, stack_id: stackId }),
@@ -461,14 +921,14 @@ export async function submitGoal(
 }
 
 export async function getStacks(): Promise<AgentStackTemplate[]> {
-  const res = await fetch(`${BASE}/stacks`);
+  const res = await apiFetch(`${BASE}/stacks`);
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
   return data.stacks ?? [];
 }
 
 export async function recommendStack(instruction: string, companyStage?: string): Promise<StackRecommendation> {
-  const res = await fetch(`${BASE}/stacks/recommend`, {
+  const res = await apiFetch(`${BASE}/stacks/recommend`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instruction, company_stage: companyStage }),
@@ -478,13 +938,26 @@ export async function recommendStack(instruction: string, companyStage?: string)
 }
 
 export async function getStackReadiness(founderId: string, stackId: string): Promise<StackReadiness> {
-  const res = await fetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/readiness/${encodeURIComponent(founderId)}`);
+  const res = await apiFetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/readiness/${encodeURIComponent(founderId)}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function getConnectorCoverage(founderId: string, stackId: string): Promise<ConnectorCoverage> {
-  const res = await fetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/connector-coverage/${encodeURIComponent(founderId)}`);
+  const res = await apiFetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/connector-coverage/${encodeURIComponent(founderId)}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getConnectorSetup(founderId: string, stackId: string): Promise<ConnectorSetupPlan> {
+  const res = await apiFetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/connector-setup/${encodeURIComponent(founderId)}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getConnectorValidation(founderId: string, stackId: string, live = false): Promise<ConnectorValidationReport> {
+  const suffix = live ? "?live=true" : "";
+  const res = await apiFetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/connector-validation/${encodeURIComponent(founderId)}${suffix}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -494,7 +967,7 @@ export async function getStackOperatingPlan(stackId: string, goal = "", companyN
   if (goal) params.set("goal", goal);
   if (companyName) params.set("company_name", companyName);
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  const res = await fetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/operating-plan${suffix}`);
+  const res = await apiFetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/operating-plan${suffix}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -504,7 +977,7 @@ export async function getStackManifest(stackId: string, goal = "", companyName =
   if (goal) params.set("goal", goal);
   if (companyName) params.set("company_name", companyName);
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  const res = await fetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/manifest${suffix}`);
+  const res = await apiFetch(`${BASE}/stacks/${encodeURIComponent(stackId)}/manifest${suffix}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -514,31 +987,31 @@ export function streamGoal(sessionId: string): EventSource {
 }
 
 export async function getSessionDigest(sessionId: string): Promise<SessionDigest> {
-  const res = await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/digest`);
+  const res = await apiFetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/digest`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function getSubteamReport(sessionId: string, team = "engineering"): Promise<SubteamReport> {
-  const res = await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/subteam-report?team=${encodeURIComponent(team)}`);
+  const res = await apiFetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/subteam-report?team=${encodeURIComponent(team)}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function getSessionWorkboard(sessionId: string): Promise<SessionWorkboard> {
-  const res = await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/workboard`);
+  const res = await apiFetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/workboard`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function getSessionState(sessionId: string): Promise<SessionStateSnapshot> {
-  const res = await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/state`);
+  const res = await apiFetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/state`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function askSession(sessionId: string, question: string, founderId?: string): Promise<SessionAnswer> {
-  const res = await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/ask`, {
+  const res = await apiFetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, founder_id: founderId }),
@@ -553,7 +1026,7 @@ export async function continueSession(
   instruction: string,
   agents?: string[]
 ): Promise<{ session_id: string; status: string; prior_session_id: string }> {
-  const res = await fetch(`${BASE}/goal/continue`, {
+  const res = await apiFetch(`${BASE}/goal/continue`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ founder_id: founderId, prior_session_id: priorSessionId, instruction, agents }),
@@ -563,13 +1036,13 @@ export async function continueSession(
 }
 
 export async function getGoalStatus(goalId: string): Promise<GoalStatus> {
-  const res = await fetch(`${BASE}/status/${goalId}`);
+  const res = await apiFetch(`${BASE}/status/${goalId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function approveTask(taskId: string): Promise<void> {
-  const res = await fetch(`${BASE}/approve`, {
+  const res = await apiFetch(`${BASE}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ task_id: taskId, approval_token: "founder" }),
@@ -578,7 +1051,7 @@ export async function approveTask(taskId: string): Promise<void> {
 }
 
 export async function rejectTask(taskId: string, reason: string): Promise<void> {
-  const res = await fetch(`${BASE}/reject`, {
+  const res = await apiFetch(`${BASE}/reject`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ task_id: taskId, reason }),
@@ -593,7 +1066,7 @@ export async function decideStackApproval(
   founderId?: string,
   note?: string
 ): Promise<void> {
-  const res = await fetch(`${BASE}/stack/approval`, {
+  const res = await apiFetch(`${BASE}/stack/approval`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId, gate_key: gateKey, decision, founder_id: founderId, note }),
@@ -606,7 +1079,7 @@ export async function setupAccounts(
   email: string,
   password: string
 ): Promise<SetupResult> {
-  const res = await fetch(`${BASE}/setup`, {
+  const res = await apiFetch(`${BASE}/setup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ founder_id: founderId, email, password }),
@@ -616,7 +1089,7 @@ export async function setupAccounts(
 }
 
 export async function getSetupStatus(founderId: string): Promise<SetupStatus> {
-  const res = await fetch(`${BASE}/setup/${founderId}`);
+  const res = await apiFetch(`${BASE}/setup/${founderId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -626,7 +1099,7 @@ export async function saveServiceCredential(
   service: string,
   credentials: Record<string, string>
 ): Promise<void> {
-  const res = await fetch(`${BASE}/setup/service`, {
+  const res = await apiFetch(`${BASE}/setup/service`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ founder_id: founderId, service, credentials }),
@@ -637,14 +1110,17 @@ export async function saveServiceCredential(
 export async function getComposioOAuthUrls(
   founderId: string
 ): Promise<Record<string, string>> {
-  const res = await fetch(`${BASE}/setup/composio/connect/${founderId}`);
+  const res = await apiFetch(`${BASE}/setup/composio/connect/${founderId}`);
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
   return data.oauth_urls ?? {};
 }
 
-export async function getCompanyBrain(founderId: string): Promise<CompanyBrain> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}`);
+export async function getCompanyBrain(founderId: string, viewerId = ""): Promise<CompanyBrain> {
+  const params = new URLSearchParams();
+  if (viewerId) params.set("viewer_id", viewerId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}${suffix}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -653,7 +1129,7 @@ export async function syncCompanyBrain(
   founderId: string,
   sources?: string[]
 ): Promise<{ ok: boolean; record_count: number; relationship_count: number; changed_records: number; sources: BrainSource[] }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sources }),
@@ -667,7 +1143,7 @@ export async function importCompanyBrainSources(
   sources?: string[],
   limit = 20
 ): Promise<{ ok: boolean; founder_id: string; results: Array<{ ok: boolean; source: string; error?: string; ingested?: number; changed_records?: number }>; imported_sources: string[]; failed_sources: string[] }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/import`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/import`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sources, limit }),
@@ -679,10 +1155,12 @@ export async function importCompanyBrainSources(
 export async function getCompanyBrainAgentContext(
   founderId: string,
   query: string,
-  limit = 8
+  limit = 8,
+  viewerId = ""
 ): Promise<{ ok: boolean; context: string; records: BrainRecord[]; relationships: BrainRelationship[]; canonical_sources: BrainRecord[]; open_proposals: BrainProposal[]; sync: BrainSyncState }> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/agent-context?${params}`);
+  if (viewerId) params.set("viewer_id", viewerId);
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/agent-context?${params}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -692,7 +1170,7 @@ export async function askCompanyBrain(
   question: string,
   limit = 8
 ): Promise<{ ok: boolean; question: string; answer: string; confidence: number; citations: BrainAnswerCitation[]; evidence: string[]; context: string }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/ask`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, limit }),
@@ -703,7 +1181,7 @@ export async function askCompanyBrain(
 
 export async function getCompanySubteamReport(founderId: string, team = "engineering", days = 7): Promise<CompanySubteamReport> {
   const params = new URLSearchParams({ team, days: String(days) });
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/subteam-report?${params}`);
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/subteam-report?${params}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -712,7 +1190,7 @@ export async function configureCompanyBrainSync(
   founderId: string,
   config: { enabled: boolean; sources?: string[]; interval_minutes?: number }
 ): Promise<{ ok: boolean; sync: BrainSyncState }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync/config`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync/config`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
@@ -725,7 +1203,7 @@ export async function runCompanyBrainSync(
   founderId: string,
   sources?: string[]
 ): Promise<{ ok: boolean; skipped: boolean; sync: BrainSyncState }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync/run`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/sync/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sources }),
@@ -735,7 +1213,7 @@ export async function runCompanyBrainSync(
 }
 
 export async function getCompanyBrainSchedulerStatus(): Promise<{ ok: boolean; scheduler: BrainSchedulerState }> {
-  const res = await fetch(`${BASE}/brain/scheduler/status`);
+  const res = await apiFetch(`${BASE}/brain/scheduler/status`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -743,22 +1221,51 @@ export async function getCompanyBrainSchedulerStatus(): Promise<{ ok: boolean; s
 export async function searchCompanyBrain(
   founderId: string,
   query: string,
-  limit = 8
+  limit = 8,
+  viewerId = ""
 ): Promise<{ query: string; count: number; results: BrainRecord[]; formatted: string }> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/search?${params}`);
+  if (viewerId) params.set("viewer_id", viewerId);
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/search?${params}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function addCompanyBrainRecord(
   founderId: string,
-  record: { source: string; title: string; content: string; kind?: string; url?: string; canonical?: boolean; stale_risk?: string }
+  record: { source: string; title: string; content: string; kind?: string; url?: string; canonical?: boolean; stale_risk?: string; owner_id?: string; visibility?: string; allowed_roles?: string[] }
 ): Promise<{ ok: boolean; record: BrainRecord }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/records`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/records`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(record),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function reviseCompanyBrainRecord(
+  founderId: string,
+  recordId: string,
+  revision: { title?: string; content?: string; canonical?: boolean; stale_risk?: string; editor_id?: string }
+): Promise<{ ok: boolean; record?: BrainRecord; previous_record?: BrainRecord; error?: string }> {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/records/${encodeURIComponent(recordId)}/revise`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(revision),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function configureCompanyBrainAccess(
+  founderId: string,
+  body: { roles?: Record<string, string>; role_permissions?: Record<string, string[]> }
+): Promise<{ ok: boolean; access_control: NonNullable<CompanyBrain["access_control"]> }> {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/access`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -769,7 +1276,7 @@ export async function ingestCompanyBrainRecords(
   source: string,
   records: Array<Record<string, unknown>>
 ): Promise<{ ok: boolean; source: string; ingested: number; changed_records: number; record_count: number; proposal_count: number }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/ingest`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/ingest`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ source, records }),
@@ -781,7 +1288,7 @@ export async function ingestCompanyBrainRecords(
 export async function maintainCompanyBrain(
   founderId: string
 ): Promise<{ ok: boolean; maintenance: BrainMaintenance; proposals: BrainProposal[] }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/maintain`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/maintain`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
@@ -794,10 +1301,197 @@ export async function updateBrainProposal(
   proposalId: string,
   status: "open" | "resolved" | "dismissed"
 ): Promise<{ ok: boolean; proposal?: BrainProposal; error?: string }> {
-  const res = await fetch(`${BASE}/brain/${encodeURIComponent(founderId)}/proposals/${encodeURIComponent(proposalId)}`, {
+  const res = await apiFetch(`${BASE}/brain/${encodeURIComponent(founderId)}/proposals/${encodeURIComponent(proposalId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getPlatformStatus(): Promise<PlatformStatus> {
+  const res = await apiFetch(`${BASE}/admin/platform`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getDeployEvidence(
+  founderId: string,
+  stackId = "idea_to_revenue",
+  baseUrl = "",
+  liveConnectors = false,
+  strict = true
+): Promise<DeployEvidenceReport> {
+  const params = new URLSearchParams({
+    founder_id: founderId,
+    stack_id: stackId,
+    live_connectors: String(liveConnectors),
+    strict: String(strict),
+  });
+  if (baseUrl) params.set("base_url", baseUrl);
+  const res = await apiFetch(`${BASE}/admin/deploy-evidence?${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getProductionRequirements(
+  founderId: string,
+  stackId = "idea_to_revenue",
+  baseUrl = ""
+): Promise<ProductionRequirements> {
+  const params = new URLSearchParams({ founder_id: founderId, stack_id: stackId });
+  if (baseUrl) params.set("base_url", baseUrl);
+  const res = await apiFetch(`${BASE}/admin/production-requirements?${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getLaunchReadiness(
+  founderId: string,
+  stackId = "idea_to_revenue",
+  baseUrl = "",
+  reportId = "latest"
+): Promise<LaunchReadiness> {
+  const params = new URLSearchParams({ founder_id: founderId, stack_id: stackId, report_id: reportId });
+  if (baseUrl) params.set("base_url", baseUrl);
+  const res = await apiFetch(`${BASE}/admin/launch-readiness?${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function runProductionVerification(
+  body: { founder_id: string; base_url: string; stack_id?: string; live_connectors?: boolean; save?: boolean }
+): Promise<ProductionVerificationReport> {
+  const params = new URLSearchParams({
+    founder_id: body.founder_id,
+    base_url: body.base_url,
+    stack_id: body.stack_id ?? "idea_to_revenue",
+    live_connectors: String(body.live_connectors ?? true),
+    save: String(body.save ?? true),
+  });
+  const res = await apiFetch(`${BASE}/admin/production-verification?${params}`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function runProductionLaunch(
+  body: { founder_id: string; base_url: string; stack_id?: string; live_connectors?: boolean }
+): Promise<ProductionLaunchResult> {
+  const params = new URLSearchParams({
+    founder_id: body.founder_id,
+    base_url: body.base_url,
+    stack_id: body.stack_id ?? "idea_to_revenue",
+    live_connectors: String(body.live_connectors ?? true),
+  });
+  const res = await apiFetch(`${BASE}/admin/production-launch?${params}`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getProductionLaunchProof(proofId = "latest"): Promise<ProductionLaunchProofResponse> {
+  const res = await apiFetch(`${BASE}/admin/production-launch/reports/${encodeURIComponent(proofId)}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getProductionVerificationReports(limit = 5): Promise<ProductionVerificationReports> {
+  const res = await apiFetch(`${BASE}/admin/production-verification/reports?limit=${encodeURIComponent(String(limit))}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export function productionVerificationMarkdownUrl(reportId = "latest"): string {
+  return `${BASE}/admin/production-verification/reports/${encodeURIComponent(reportId)}/markdown`;
+}
+
+export function productionVerificationBundleUrl(reportId = "latest"): string {
+  return `${BASE}/admin/production-verification/reports/${encodeURIComponent(reportId)}/bundle`;
+}
+
+export async function verifyProductionVerificationManifest(reportId = "latest"): Promise<ProductionVerificationManifestVerification> {
+  const res = await apiFetch(`${BASE}/admin/production-verification/reports/${encodeURIComponent(reportId)}/manifest/verify`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getOrganization(orgId: string, founderId = ""): Promise<OrganizationAccount> {
+  const params = new URLSearchParams();
+  if (founderId) params.set("founder_id", founderId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const res = await apiFetch(`${BASE}/orgs/${encodeURIComponent(orgId)}${suffix}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateOrganizationMember(
+  orgId: string,
+  body: { actor_id: string; user_id: string; role?: string; status?: string }
+): Promise<OrganizationAccount> {
+  const res = await apiFetch(`${BASE}/orgs/${encodeURIComponent(orgId)}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateOrganizationSubscription(
+  orgId: string,
+  body: { actor_id: string; plan?: string; status?: string; stripe_customer_id?: string; stripe_subscription_id?: string; current_period_end?: string }
+): Promise<OrganizationAccount> {
+  const res = await apiFetch(`${BASE}/orgs/${encodeURIComponent(orgId)}/subscription`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateOrganizationControls(
+  orgId: string,
+  body: { actor_id: string; controls: Partial<OrganizationAccount["admin_controls"]> }
+): Promise<OrganizationAccount> {
+  const res = await apiFetch(`${BASE}/orgs/${encodeURIComponent(orgId)}/controls`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getOrganizationBilling(
+  orgId: string
+): Promise<{ org: OrganizationAccount; billing: BillingConfigStatus }> {
+  const res = await apiFetch(`${BASE}/orgs/${encodeURIComponent(orgId)}/billing`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createOrganizationCheckout(
+  orgId: string,
+  body: { plan: string; success_url?: string; cancel_url?: string; customer_email?: string }
+): Promise<BillingSessionResult> {
+  const res = await apiFetch(`${BASE}/orgs/${encodeURIComponent(orgId)}/billing/checkout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createOrganizationBillingPortal(
+  orgId: string,
+  body: { return_url?: string } = {}
+): Promise<BillingSessionResult> {
+  const res = await apiFetch(`${BASE}/orgs/${encodeURIComponent(orgId)}/billing/portal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

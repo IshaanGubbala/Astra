@@ -12,19 +12,28 @@ logger = logging.getLogger(__name__)
 from backend.api.schemas import (
     AskRequest,
     ApproveRequest,
+    BillingCheckoutRequest,
+    BillingPortalRequest,
     BrainRecordRequest,
     BrainIngestRequest,
     BrainAskRequest,
+    BrainAccessRequest,
     BrainProposalRequest,
+    BrainRecordRevisionRequest,
     BrainSyncConfigRequest,
     BrainSyncRequest,
     ContinueRequest,
     GoalRequest,
+    OrgControlsRequest,
+    OrgMemberRequest,
+    OrgSubscriptionRequest,
+    OrgUsageRequest,
     RejectRequest,
     SetupRequest,
     SaveCredentialRequest,
     SessionAskRequest,
     StackApprovalDecisionRequest,
+    StackPackageRequest,
     StackRecommendRequest,
     SteerRequest,
     StripeEINUpgradeRequest,
@@ -60,8 +69,42 @@ from fastapi.responses import StreamingResponse
 from backend.db.client import get_supabase, update_task_status
 from backend.core.factory import get_orchestrator
 from backend.core.events import stream_events, publish
+from backend.tenant_auth import actor_or_body, require_founder_access, require_org_access
 
 router = APIRouter()
+
+
+async def _load_session_events(session_id: str) -> list[tuple[int, dict]]:
+    from backend.core.events import _event_log, _restore_session
+
+    if session_id not in _event_log:
+        await asyncio.to_thread(_restore_session, session_id)
+    return _event_log.get(session_id, [])
+
+
+async def _session_founder_id(session_id: str) -> str:
+    events = await _load_session_events(session_id)
+    for _, event in events:
+        founder_id = event.get("founder_id")
+        if founder_id:
+            return str(founder_id)
+    try:
+        from backend.workflow_state import load_session_state
+        snapshot = await asyncio.to_thread(load_session_state, session_id)
+        digest = (snapshot or {}).get("digest") or {}
+        founder_id = digest.get("founder_id") or (snapshot or {}).get("founder_id")
+        if founder_id:
+            return str(founder_id)
+    except Exception:
+        pass
+    return ""
+
+
+async def _require_session_access(request: Request, session_id: str, min_role: str = "viewer") -> str:
+    founder_id = await _session_founder_id(session_id)
+    if founder_id:
+        return require_founder_access(request, founder_id, min_role=min_role)
+    return actor_or_body(request)
 
 
 @router.get("/stacks")
@@ -78,11 +121,39 @@ async def recommend_stack_route(body: StackRecommendRequest):
     return recommend_stack(body.instruction, body.company_stage).to_public_dict()
 
 
+@router.post("/stacks/package")
+async def stack_package_route(body: StackPackageRequest, request: Request):
+    if body.founder_id:
+        require_founder_access(request, body.founder_id, min_role="viewer")
+    from backend.stacks import build_goal_stack_package
+
+    return build_goal_stack_package(
+        instruction=body.instruction,
+        founder_id=body.founder_id or "",
+        company_stage=body.company_stage,
+        company_name=body.company_name,
+    )
+
+
 @router.get("/stacks/{stack_id}/operating-plan")
 async def stack_operating_plan_route(stack_id: str, goal: str = "", company_name: str = ""):
     from backend.stacks import build_stack_operating_plan, get_stack_template
 
     return build_stack_operating_plan(get_stack_template(stack_id), goal, company_name)
+
+
+@router.get("/stacks/{stack_id}/execution-blueprint")
+async def stack_execution_blueprint_route(stack_id: str, goal: str = "", company_name: str = ""):
+    from backend.stacks import build_stack_execution_blueprint, get_stack_template
+
+    return build_stack_execution_blueprint(get_stack_template(stack_id), goal, company_name)
+
+
+@router.get("/stacks/{stack_id}/quality")
+async def stack_quality_route(stack_id: str):
+    from backend.stacks import audit_stack_template, get_stack_template
+
+    return audit_stack_template(get_stack_template(stack_id))
 
 
 @router.get("/stacks/{stack_id}/manifest")
@@ -93,24 +164,53 @@ async def stack_manifest_route(stack_id: str, goal: str = "", company_name: str 
 
 
 @router.get("/stacks/{stack_id}/readiness/{founder_id}")
-async def stack_readiness_route(stack_id: str, founder_id: str):
+async def stack_readiness_route(stack_id: str, founder_id: str, request: Request):
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.stacks import stack_readiness
 
     return stack_readiness(founder_id, stack_id)
 
 
 @router.get("/stacks/{stack_id}/connector-coverage/{founder_id}")
-async def stack_connector_coverage_route(stack_id: str, founder_id: str):
+async def stack_connector_coverage_route(stack_id: str, founder_id: str, request: Request):
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.connector_coverage import build_connector_coverage
 
     return build_connector_coverage(founder_id, stack_id)
 
 
+@router.get("/stacks/{stack_id}/connector-setup/{founder_id}")
+async def stack_connector_setup_route(stack_id: str, founder_id: str, request: Request):
+    require_founder_access(request, founder_id, min_role="viewer")
+    from backend.connector_setup import build_connector_setup_plan
+
+    return build_connector_setup_plan(founder_id, stack_id)
+
+
+@router.get("/stacks/{stack_id}/connector-validation/{founder_id}")
+async def stack_connector_validation_route(stack_id: str, founder_id: str, request: Request, live: bool = False):
+    require_founder_access(request, founder_id, min_role="viewer")
+    from backend.connector_validation import validate_stack_connectors
+
+    return validate_stack_connectors(founder_id, stack_id, live=live)
+
+
 @router.post("/goal")
-async def submit_goal(body: GoalRequest):
+async def submit_goal(body: GoalRequest, request: Request):
+    actor_id = require_founder_access(request, body.founder_id, min_role="operator")
     import uuid as _uuid
     session_id = _uuid.uuid4().hex[:12]
     orch = get_orchestrator()
+    try:
+        from backend.accounts import get_or_create_org, record_usage
+        org = get_or_create_org(body.founder_id)
+        if org.get("entitlements", {}).get("remaining_runs", 0) <= 0:
+            raise HTTPException(status_code=402, detail="Monthly run limit reached for this workspace.")
+        record_usage(org["org_id"], actor_id=actor_id, runs=1)
+    except HTTPException:
+        raise
+    except Exception as usage_exc:
+        logger.warning("Usage accounting skipped: %s", usage_exc)
     constraints = dict(body.constraints or {})
     if body.stack_id:
         constraints["stack_id"] = body.stack_id
@@ -153,52 +253,57 @@ async def stream_goal(session_id: str, request: Request):
 
 
 @router.get("/sessions/{session_id}/digest")
-async def session_digest(session_id: str):
-    from backend.core.events import _event_log, _restore_session
+async def session_digest(session_id: str, request: Request):
     from backend.session_digest import build_session_digest
 
-    if session_id not in _event_log:
-        await asyncio.to_thread(_restore_session, session_id)
-    events = _event_log.get(session_id, [])
+    await _require_session_access(request, session_id, min_role="viewer")
+    events = await _load_session_events(session_id)
     if not events:
         raise HTTPException(status_code=404, detail="session event log not found")
     return build_session_digest(session_id, events)
 
 
 @router.get("/sessions/{session_id}/subteam-report")
-async def session_subteam_report(session_id: str, team: str = "engineering"):
-    from backend.core.events import _event_log, _restore_session
+async def session_subteam_report(session_id: str, request: Request, team: str = "engineering"):
     from backend.session_digest import build_subteam_report
 
-    if session_id not in _event_log:
-        await asyncio.to_thread(_restore_session, session_id)
-    events = _event_log.get(session_id, [])
+    await _require_session_access(request, session_id, min_role="viewer")
+    events = await _load_session_events(session_id)
     if not events:
         raise HTTPException(status_code=404, detail="session event log not found")
     return build_subteam_report(session_id, events, team)
 
 
 @router.get("/sessions/{session_id}/workboard")
-async def session_workboard(session_id: str):
-    from backend.core.events import _event_log, _restore_session
+async def session_workboard(session_id: str, request: Request):
     from backend.workboard import build_session_workboard
 
-    if session_id not in _event_log:
-        await asyncio.to_thread(_restore_session, session_id)
-    events = _event_log.get(session_id, [])
+    await _require_session_access(request, session_id, min_role="viewer")
+    events = await _load_session_events(session_id)
     if not events:
         raise HTTPException(status_code=404, detail="session event log not found")
     return build_session_workboard(session_id, events)
 
 
-@router.get("/sessions/{session_id}/state")
-async def session_state(session_id: str):
-    from backend.core.events import _event_log, _restore_session
+@router.get("/sessions/{session_id}/completion-audit")
+async def session_completion_audit(session_id: str, request: Request):
+    from backend.run_completion_audit import build_run_completion_audit
     from backend.workflow_state import build_session_state, load_session_state
 
-    if session_id not in _event_log:
-        await asyncio.to_thread(_restore_session, session_id)
-    events = _event_log.get(session_id, [])
+    await _require_session_access(request, session_id, min_role="viewer")
+    events = await _load_session_events(session_id)
+    state = build_session_state(session_id, events) if events else await asyncio.to_thread(load_session_state, session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="session state not found")
+    return build_run_completion_audit(session_id, state)
+
+
+@router.get("/sessions/{session_id}/state")
+async def session_state(session_id: str, request: Request):
+    from backend.workflow_state import build_session_state, load_session_state
+
+    await _require_session_access(request, session_id, min_role="viewer")
+    events = await _load_session_events(session_id)
     if events:
         return build_session_state(session_id, events)
     snapshot = await asyncio.to_thread(load_session_state, session_id)
@@ -208,13 +313,11 @@ async def session_state(session_id: str):
 
 
 @router.post("/sessions/{session_id}/ask")
-async def ask_session(session_id: str, body: SessionAskRequest):
-    from backend.core.events import _event_log, _restore_session
+async def ask_session(session_id: str, body: SessionAskRequest, request: Request):
     from backend.session_digest import answer_session_question
 
-    if session_id not in _event_log:
-        await asyncio.to_thread(_restore_session, session_id)
-    events = _event_log.get(session_id, [])
+    await _require_session_access(request, session_id, min_role="viewer")
+    events = await _load_session_events(session_id)
     if not events:
         raise HTTPException(status_code=404, detail="session event log not found")
     return answer_session_question(session_id, events, body.question)
@@ -233,26 +336,145 @@ async def reject_task(body: RejectRequest):
 
 
 @router.post("/stack/approval")
-async def decide_stack_approval(body: StackApprovalDecisionRequest):
+async def decide_stack_approval(body: StackApprovalDecisionRequest, request: Request):
+    actor_id = require_founder_access(request, body.founder_id, min_role="admin") if body.founder_id else actor_or_body(request)
     decision = body.decision.lower().strip()
-    if decision not in {"approved", "skipped"}:
-        raise HTTPException(status_code=400, detail="decision must be 'approved' or 'skipped'")
+    if decision not in {"approved", "skipped", "rejected"}:
+        raise HTTPException(status_code=400, detail="decision must be 'approved', 'skipped', or 'rejected'")
+    from backend.approval_workflows import decide_approval_request
     from backend.core.events import approval_decision_push
+    workflow = decide_approval_request(
+        body.session_id,
+        body.gate_key,
+        decision,
+        request_id=body.request_id,
+        actor_id=actor_id,
+        actor_role="owner",
+        note=body.note,
+    )
+    if not workflow.get("ok"):
+        raise HTTPException(status_code=400, detail=workflow.get("error") or "approval decision failed")
+    if body.founder_id:
+        try:
+            from backend.accounts import record_usage
+            record_usage(body.founder_id, actor_id=actor_id, approval_decisions=1)
+        except Exception as usage_exc:
+            logger.warning("Approval usage accounting skipped: %s", usage_exc)
     event = {
         "type": "stack_approval_decision",
         "gate_key": body.gate_key,
         "decision": decision,
-        "founder_id": body.founder_id,
+        "founder_id": body.founder_id or actor_id,
         "note": body.note,
+        "workflow": workflow,
     }
     approval_decision_push(body.session_id, body.gate_key, event)
     await publish(body.session_id, event)
     return {"ok": True, "session_id": body.session_id, "gate_key": body.gate_key, "decision": decision}
 
 
+@router.get("/orgs")
+async def orgs(request: Request):
+    actor_id = actor_or_body(request)
+    from backend.accounts import list_orgs, list_orgs_for_user
+    return {"orgs": list_orgs() if actor_id == "local_dev" else list_orgs_for_user(actor_id)}
+
+
+@router.get("/orgs/{org_id}")
+async def get_org(org_id: str, request: Request, founder_id: str = ""):
+    require_org_access(request, org_id, min_role="viewer")
+    from backend.accounts import get_or_create_org
+    return get_or_create_org(founder_id or org_id, org_id)
+
+
+@router.post("/orgs/{org_id}/members")
+async def org_member(org_id: str, body: OrgMemberRequest, request: Request):
+    actor_id = require_org_access(request, org_id, min_role="admin")
+    from backend.accounts import upsert_member
+    return upsert_member(org_id, actor_id=actor_id, user_id=body.user_id, role=body.role, status=body.status)
+
+
+@router.post("/orgs/{org_id}/subscription")
+async def org_subscription(org_id: str, body: OrgSubscriptionRequest, request: Request):
+    actor_id = require_org_access(request, org_id, min_role="owner")
+    from backend.accounts import update_subscription
+    return update_subscription(
+        org_id,
+        actor_id=actor_id,
+        plan=body.plan,
+        status=body.status,
+        stripe_customer_id=body.stripe_customer_id,
+        stripe_subscription_id=body.stripe_subscription_id,
+        current_period_end=body.current_period_end,
+    )
+
+
+@router.post("/orgs/{org_id}/controls")
+async def org_controls(org_id: str, body: OrgControlsRequest, request: Request):
+    actor_id = require_org_access(request, org_id, min_role="admin")
+    from backend.accounts import update_admin_controls
+    return update_admin_controls(org_id, actor_id=actor_id, controls=body.controls)
+
+
+@router.post("/orgs/{org_id}/usage")
+async def org_usage(org_id: str, body: OrgUsageRequest, request: Request):
+    actor_id = require_org_access(request, org_id, min_role="admin")
+    from backend.accounts import record_usage
+    return record_usage(
+        org_id,
+        actor_id=actor_id,
+        runs=body.runs,
+        connector_syncs=body.connector_syncs,
+        approval_decisions=body.approval_decisions,
+    )
+
+
+@router.get("/orgs/{org_id}/billing")
+async def org_billing_status(org_id: str, request: Request):
+    require_org_access(request, org_id, min_role="viewer")
+    from backend.billing import billing_config_status
+    from backend.accounts import get_or_create_org
+    return {"org": get_or_create_org(org_id, org_id), "billing": billing_config_status()}
+
+
+@router.post("/orgs/{org_id}/billing/checkout")
+async def org_billing_checkout(org_id: str, body: BillingCheckoutRequest, request: Request):
+    actor_id = require_org_access(request, org_id, min_role="owner")
+    from backend.billing import create_checkout_session
+    try:
+        return create_checkout_session(
+            org_id,
+            actor_id=actor_id,
+            plan=body.plan,
+            success_url=body.success_url or "",
+            cancel_url=body.cancel_url or "",
+            customer_email=body.customer_email or "",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/orgs/{org_id}/billing/portal")
+async def org_billing_portal(org_id: str, body: BillingPortalRequest, request: Request):
+    actor_id = require_org_access(request, org_id, min_role="owner")
+    from backend.billing import create_customer_portal_session
+    try:
+        return create_customer_portal_session(org_id, actor_id=actor_id, return_url=body.return_url or "")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/sessions/{session_id}/approvals")
+async def session_approval_workflow(session_id: str, request: Request):
+    await _require_session_access(request, session_id, min_role="viewer")
+    from backend.approval_workflows import get_approval_workflow
+    return get_approval_workflow(session_id)
+
+
 @router.post("/goal/continue")
-async def continue_goal(body: ContinueRequest):
+async def continue_goal(body: ContinueRequest, request: Request):
     """Run follow-up tasks on an existing company session with full vault context."""
+    require_founder_access(request, body.founder_id, min_role="operator")
     import uuid as _uuid
     session_id = _uuid.uuid4().hex[:12]
     orch = get_orchestrator()
@@ -274,7 +496,8 @@ async def continue_goal(body: ContinueRequest):
 
 
 @router.post("/ask")
-async def ask_agent(body: AskRequest):
+async def ask_agent(body: AskRequest, request: Request):
+    require_founder_access(request, body.founder_id, min_role="viewer")
     from backend.core.agent import AgentContext
 
     orch = get_orchestrator()
@@ -307,7 +530,7 @@ _AGENT_CHAT_ROLES: dict[str, str] = {
 
 
 @router.post("/chat/{agent_key}")
-async def chat_agent(agent_key: str, body: AskRequest):
+async def chat_agent(agent_key: str, body: AskRequest, request: Request):
     """
     Lightweight single-turn chat with a specific agent.
     Injects company brain snippets, Obsidian vault notes, and session
@@ -317,6 +540,7 @@ async def chat_agent(agent_key: str, body: AskRequest):
     import openai as _openai
     from backend.config import settings
 
+    require_founder_access(request, body.founder_id, min_role="viewer")
     orch = get_orchestrator()
     base_key = _re.sub(r"_\d+$", "", agent_key)
     agent = orch.specialists.get(agent_key) or orch.specialists.get(base_key)
@@ -410,9 +634,10 @@ async def chat_agent(agent_key: str, body: AskRequest):
 
 
 @router.post("/steer")
-async def steer_session(body: SteerRequest):
+async def steer_session(body: SteerRequest, request: Request):
     """Inject a founder directive into a running session."""
     from backend.core.events import publish, steer_push
+    await _require_session_access(request, body.session_id, min_role="operator")
     steer_push(body.session_id, body.message)
     await publish(body.session_id, {
         "type": "founder_steer",
@@ -422,9 +647,10 @@ async def steer_session(body: SteerRequest):
 
 
 @router.post("/steer/{session_id}")
-async def steer_session_path(session_id: str, body: dict):
+async def steer_session_path(session_id: str, body: dict, request: Request):
     """Path-param variant — frontend sends POST /steer/{session_id} with {message} body."""
     from backend.core.events import publish, steer_push
+    await _require_session_access(request, session_id, min_role="operator")
     message = body.get("message", "")
     steer_push(session_id, message)
     await publish(session_id, {
@@ -435,11 +661,12 @@ async def steer_session_path(session_id: str, body: dict):
 
 
 @router.post("/setup")
-async def setup_accounts(body: SetupRequest):
+async def setup_accounts(body: SetupRequest, request: Request):
     """
     Provision GitHub, Vercel, SendGrid accounts from email+password.
     Returns status per service + OAuth URLs for Instagram/TikTok/Meta.
     """
+    require_founder_access(request, body.founder_id, min_role="admin")
     from backend.provisioning.account_provisioner import provision_all
     result = await provision_all(
         founder_id=body.founder_id,
@@ -451,8 +678,9 @@ async def setup_accounts(body: SetupRequest):
 
 
 @router.post("/setup/service")
-async def save_service_credential(body: SaveCredentialRequest):
+async def save_service_credential(body: SaveCredentialRequest, request: Request):
     """Save a manually entered credential (GitHub PAT, SendGrid key, Vercel token)."""
+    require_founder_access(request, body.founder_id, min_role="admin")
     from backend.tools.composio_tools import _reset_toolset
     store_credentials(body.founder_id, body.service, body.credentials)
     if body.service == "composio" and body.credentials.get("api_key"):
@@ -468,44 +696,56 @@ async def save_service_credential(body: SaveCredentialRequest):
 
 
 @router.get("/brain/{founder_id}")
-async def get_brain(founder_id: str):
+async def get_brain(founder_id: str, request: Request, viewer_id: str = ""):
     """Return the founder's normalized company brain graph."""
+    actor_id = require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.company_brain import get_company_brain
-    return get_company_brain(founder_id)
+    return get_company_brain(founder_id, viewer_id or actor_id)
 
 
 @router.post("/brain/{founder_id}/sync")
-async def sync_brain(founder_id: str, body: BrainSyncRequest):
+async def sync_brain(founder_id: str, body: BrainSyncRequest, request: Request):
     """Sync connected sources and local agent vault notes into the company brain."""
+    actor_id = require_founder_access(request, founder_id, min_role="operator")
     import asyncio
     from backend.tools.company_brain import sync_company_brain
-    return await asyncio.to_thread(sync_company_brain, founder_id, body.sources)
+    result = await asyncio.to_thread(sync_company_brain, founder_id, body.sources)
+    try:
+        from backend.accounts import record_usage
+        record_usage(founder_id, actor_id=actor_id, connector_syncs=len(body.sources or []))
+    except Exception as usage_exc:
+        logger.warning("Connector sync usage accounting skipped: %s", usage_exc)
+    return result
 
 
 @router.get("/brain/{founder_id}/search")
-async def search_brain(founder_id: str, q: str, limit: int = 8):
+async def search_brain(founder_id: str, request: Request, q: str, limit: int = 8, viewer_id: str = ""):
     """Search company brain records for human UI and agent context."""
+    actor_id = require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.company_brain import search_company_brain
-    return search_company_brain(founder_id, q, limit)
+    return search_company_brain(founder_id, q, limit, viewer_id or actor_id)
 
 
 @router.get("/brain/{founder_id}/agent-context")
-async def brain_agent_context(founder_id: str, q: str, limit: int = 8):
+async def brain_agent_context(founder_id: str, request: Request, q: str, limit: int = 8, viewer_id: str = ""):
     """Compact graph context for IDE/MCP/external agents."""
+    actor_id = require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.company_brain import company_brain_agent_context
-    return company_brain_agent_context(founder_id, q, limit)
+    return company_brain_agent_context(founder_id, q, limit, viewer_id or actor_id)
 
 
 @router.post("/brain/{founder_id}/ask")
-async def ask_brain(founder_id: str, body: BrainAskRequest):
+async def ask_brain(founder_id: str, body: BrainAskRequest, request: Request):
     """Return a cited answer synthesized from matched company-brain records."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.company_brain import ask_company_brain
     return ask_company_brain(founder_id, body.question, body.limit)
 
 
 @router.get("/brain/{founder_id}/subteam-report")
-async def brain_subteam_report(founder_id: str, team: str = "engineering", days: int = 7):
+async def brain_subteam_report(founder_id: str, request: Request, team: str = "engineering", days: int = 7):
     """Report subteam activity from persisted Company Brain memory."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.company_reports import build_company_subteam_report, persist_company_subteam_report
     report = build_company_subteam_report(founder_id, team, days)
     await asyncio.to_thread(persist_company_subteam_report, report)
@@ -513,8 +753,9 @@ async def brain_subteam_report(founder_id: str, team: str = "engineering", days:
 
 
 @router.post("/brain/{founder_id}/records")
-async def add_brain_record(founder_id: str, body: BrainRecordRequest):
+async def add_brain_record(founder_id: str, body: BrainRecordRequest, request: Request):
     """Add a manual or app-sourced record to the company brain."""
+    actor_id = require_founder_access(request, founder_id, min_role="operator")
     from backend.tools.company_brain import add_company_brain_record
     return add_company_brain_record(
         founder_id=founder_id,
@@ -525,45 +766,124 @@ async def add_brain_record(founder_id: str, body: BrainRecordRequest):
         url=body.url or "",
         canonical=body.canonical,
         stale_risk=body.stale_risk,
+        owner_id=body.owner_id or actor_id,
+        visibility=body.visibility,
+        allowed_roles=body.allowed_roles,
+        metadata=body.metadata,
+    )
+
+
+@router.post("/brain/{founder_id}/records/{record_id}/revise")
+async def revise_brain_record(founder_id: str, record_id: str, body: BrainRecordRevisionRequest, request: Request):
+    """Create a new version of a Company Brain record and deprecate the prior version."""
+    actor_id = require_founder_access(request, founder_id, min_role="operator")
+    from backend.tools.company_brain import revise_company_brain_record
+    return revise_company_brain_record(
+        founder_id=founder_id,
+        record_id=record_id,
+        title=body.title,
+        content=body.content,
+        canonical=body.canonical,
+        stale_risk=body.stale_risk,
+        editor_id=body.editor_id or actor_id,
+    )
+
+
+@router.post("/brain/{founder_id}/access")
+async def configure_brain_access(founder_id: str, body: BrainAccessRequest, request: Request):
+    """Configure Company Brain team roles and permission grants."""
+    require_founder_access(request, founder_id, min_role="admin")
+    from backend.tools.company_brain import configure_company_brain_access
+    return configure_company_brain_access(
+        founder_id=founder_id,
+        roles=body.roles,
+        role_permissions=body.role_permissions,
     )
 
 
 @router.post("/brain/{founder_id}/ingest")
-async def ingest_brain_records(founder_id: str, body: BrainIngestRequest):
+async def ingest_brain_records(founder_id: str, body: BrainIngestRequest, request: Request):
     """Bulk-ingest normalized records from connector/webhook payloads."""
+    actor_id = require_founder_access(request, founder_id, min_role="operator")
     import asyncio
     from backend.tools.company_brain import ingest_company_brain_records
-    return await asyncio.to_thread(
+    result = await asyncio.to_thread(
         ingest_company_brain_records,
         founder_id,
         body.source,
         body.records,
     )
+    try:
+        from backend.connector_sync_ledger import record_connector_sync
+        record_connector_sync(
+            founder_id,
+            body.source,
+            status="ok" if result.get("ok") else "error",
+            imported=int(result.get("ingested") or 0),
+            changed_records=int(result.get("changed_records") or 0),
+            error=str(result.get("error") or ""),
+            mode="ingest",
+        )
+    except Exception as ledger_exc:
+        logger.warning("Connector ingest ledger accounting skipped: %s", ledger_exc)
+    try:
+        from backend.accounts import record_usage
+        record_usage(founder_id, actor_id=actor_id, connector_syncs=1)
+    except Exception as usage_exc:
+        logger.warning("Connector ingest usage accounting skipped: %s", usage_exc)
+    return result
+
+
+@router.post("/brain/{founder_id}/webhooks/{source}")
+async def connector_brain_webhook(founder_id: str, source: str, request: Request):
+    """Receive provider webhooks and ingest normalized updates into Company Brain."""
+    from backend.connector_webhooks import ingest_connector_webhook, parse_verified_connector_webhook
+
+    payload, verification = await parse_verified_connector_webhook(request, founder_id, source)
+    if payload.get("type") == "url_verification" and payload.get("challenge") is not None:
+        return {"ok": True, "source": source, "challenge": payload["challenge"], "verification": verification}
+    event_id = request.headers.get("x-astra-event-id") or request.headers.get("x-github-delivery") or request.headers.get("x-slack-request-timestamp") or ""
+    result = await asyncio.to_thread(ingest_connector_webhook, founder_id, source, payload, event_id)
+    try:
+        from backend.accounts import record_usage
+        record_usage(founder_id, actor_id=f"{source}_webhook", connector_syncs=1)
+    except Exception as usage_exc:
+        logger.warning("Connector webhook usage accounting skipped: %s", usage_exc)
+    return {**result, "verification": verification}
 
 
 @router.post("/brain/{founder_id}/import")
-async def import_brain_sources(founder_id: str, body: BrainSyncRequest):
+async def import_brain_sources(founder_id: str, body: BrainSyncRequest, request: Request):
     """Import actual records from connected providers into the company brain."""
+    actor_id = require_founder_access(request, founder_id, min_role="operator")
     import asyncio
     from backend.tools.company_brain_connectors import import_company_brain_sources
-    return await asyncio.to_thread(
+    result = await asyncio.to_thread(
         import_company_brain_sources,
         founder_id,
         body.sources,
         body.limit,
     )
+    try:
+        from backend.accounts import record_usage
+        record_usage(founder_id, actor_id=actor_id, connector_syncs=len(result.get("imported_sources", [])))
+    except Exception as usage_exc:
+        logger.warning("Connector import usage accounting skipped: %s", usage_exc)
+    return result
 
 
 @router.get("/brain/{founder_id}/sync/status")
-async def brain_sync_status(founder_id: str):
+async def brain_sync_status(founder_id: str, request: Request):
     """Return continuous sync settings and recent run history."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.company_brain import get_company_brain_sync_status
     return get_company_brain_sync_status(founder_id)
 
 
 @router.post("/brain/{founder_id}/sync/config")
-async def configure_brain_sync(founder_id: str, body: BrainSyncConfigRequest):
+async def configure_brain_sync(founder_id: str, body: BrainSyncConfigRequest, request: Request):
     """Configure continuous sync for connected providers."""
+    require_founder_access(request, founder_id, min_role="admin")
     from backend.tools.company_brain import configure_company_brain_sync
     return configure_company_brain_sync(
         founder_id=founder_id,
@@ -574,41 +894,53 @@ async def configure_brain_sync(founder_id: str, body: BrainSyncConfigRequest):
 
 
 @router.post("/brain/{founder_id}/sync/run")
-async def run_brain_sync(founder_id: str, body: BrainSyncRequest):
+async def run_brain_sync(founder_id: str, body: BrainSyncRequest, request: Request):
     """Run continuous-sync import now, regardless of schedule."""
+    actor_id = require_founder_access(request, founder_id, min_role="operator")
     import asyncio
     from backend.tools.company_brain import configure_company_brain_sync, run_company_brain_sync
     if body.sources:
         configure_company_brain_sync(founder_id, enabled=True, sources=body.sources, interval_minutes=60)
-    return await asyncio.to_thread(run_company_brain_sync, founder_id, True)
+    result = await asyncio.to_thread(run_company_brain_sync, founder_id, True)
+    try:
+        from backend.accounts import record_usage
+        imported = (((result.get("import") or {}).get("imported_sources")) or [])
+        record_usage(founder_id, actor_id=actor_id, connector_syncs=len(imported))
+    except Exception as usage_exc:
+        logger.warning("Continuous sync usage accounting skipped: %s", usage_exc)
+    return result
 
 
 @router.get("/brain/scheduler/status")
-async def brain_scheduler_status():
+async def brain_scheduler_status(request: Request):
     """Return process-local company-brain scheduler status."""
+    actor_or_body(request)
     from backend.tools.company_brain_scheduler import get_company_brain_scheduler_status
     return get_company_brain_scheduler_status()
 
 
 @router.post("/brain/scheduler/run-due")
-async def run_due_brain_syncs():
+async def run_due_brain_syncs(request: Request):
     """Run all currently due company-brain sync jobs."""
+    actor_or_body(request)
     import asyncio
     from backend.tools.company_brain import run_due_company_brain_syncs
     return await asyncio.to_thread(run_due_company_brain_syncs)
 
 
 @router.post("/brain/{founder_id}/maintain")
-async def maintain_brain(founder_id: str):
+async def maintain_brain(founder_id: str, request: Request):
     """Run drift, canonical-gap, and contradiction detection."""
+    require_founder_access(request, founder_id, min_role="operator")
     import asyncio
     from backend.tools.company_brain import maintain_company_brain
     return await asyncio.to_thread(maintain_company_brain, founder_id)
 
 
 @router.post("/brain/{founder_id}/proposals/{proposal_id}")
-async def update_brain_proposal(founder_id: str, proposal_id: str, body: BrainProposalRequest):
+async def update_brain_proposal(founder_id: str, proposal_id: str, body: BrainProposalRequest, request: Request):
     """Update a maintenance proposal status."""
+    require_founder_access(request, founder_id, min_role="operator")
     from backend.tools.company_brain import resolve_company_brain_proposal
     return resolve_company_brain_proposal(founder_id, proposal_id, body.status)
 
@@ -616,11 +948,12 @@ async def update_brain_proposal(founder_id: str, proposal_id: str, body: BrainPr
 # ── Stripe Standard Connect ───────────────────────────────────────────────────
 
 @router.get("/stripe/oauth-url/{founder_id}")
-async def stripe_oauth_url(founder_id: str, email: str = "", frontend_base: str = "http://localhost:3003"):
+async def stripe_oauth_url(founder_id: str, request: Request, email: str = "", frontend_base: str = "http://localhost:3003"):
     """
     Return the Stripe OAuth URL to send the founder to connect/create their Stripe account.
     The redirect_uri points back to this backend's /stripe/callback endpoint.
     """
+    require_founder_access(request, founder_id, min_role="admin")
     from backend.tools.stripe_tools import get_oauth_url_with_email
     from backend.config import settings
     redirect_uri = f"{settings.backend_url}/stripe/callback"
@@ -679,8 +1012,9 @@ async def stripe_callback(code: str = "", state: str = "", error: str = "", fron
 
 
 @router.get("/stripe/status/{founder_id}")
-async def stripe_status(founder_id: str):
+async def stripe_status(founder_id: str, request: Request):
     """Check if the founder has connected Stripe and whether their account is active."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.stripe_tools import get_account_status
     from backend.provisioning.credentials_store import load_credentials
 
@@ -697,8 +1031,9 @@ async def stripe_status(founder_id: str):
 
 
 @router.get("/stripe/data/{founder_id}")
-async def stripe_data(founder_id: str):
+async def stripe_data(founder_id: str, request: Request):
     """Return live balance, charges, payouts, and revenue metrics from the founder's Stripe account."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.stripe_tools import get_stripe_data
     from backend.provisioning.credentials_store import load_credentials
 
@@ -713,12 +1048,13 @@ async def stripe_data(founder_id: str):
 
 
 @router.post("/stripe/upgrade-ein/{founder_id}")
-async def stripe_upgrade_ein(founder_id: str, body: StripeEINUpgradeRequest):
+async def stripe_upgrade_ein(founder_id: str, body: StripeEINUpgradeRequest, request: Request):
     """
     Record that the founder has upgraded their Stripe account to their LLC/EIN.
     With Standard Connect the founder updates Stripe directly — this marks it complete in Astra.
     TODO: Auto-trigger this after NWRA LLC filing + IRS EIN confirmation.
     """
+    require_founder_access(request, founder_id, min_role="admin")
     from backend.tools.stripe_tools import record_ein_upgrade
     from backend.provisioning.credentials_store import load_credentials, store_credentials
 
@@ -739,8 +1075,9 @@ async def stripe_upgrade_ein(founder_id: str, body: StripeEINUpgradeRequest):
 # ── GitHub OAuth ──────────────────────────────────────────────────────────────
 
 @router.get("/github/oauth-url/{founder_id}")
-async def github_oauth_url(founder_id: str):
+async def github_oauth_url(founder_id: str, request: Request):
     """Return the GitHub OAuth authorization URL."""
+    require_founder_access(request, founder_id, min_role="admin")
     from backend.config import settings
     from urllib.parse import urlencode
     if not settings.github_client_id:
@@ -805,36 +1142,40 @@ async def github_callback(code: str = "", state: str = "", error: str = ""):
 
 
 @router.get("/setup/{founder_id}")
-async def get_setup_status(founder_id: str):
+async def get_setup_status(founder_id: str, request: Request):
     """Returns which services are connected for this founder."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.provisioning.account_provisioner import get_founder_setup_status
     return await get_founder_setup_status(founder_id)
 
 
 @router.post("/setup/auto-connect/{founder_id}")
-async def auto_connect_integrations(founder_id: str):
+async def auto_connect_integrations(founder_id: str, request: Request):
     """
     Apply all available platform credentials for this founder and return
     deterministic per-service auto-connect status.
     """
+    require_founder_access(request, founder_id, min_role="admin")
     from backend.provisioning.integration_automation import auto_connect_status
     return auto_connect_status(founder_id, apply=True)
 
 
 @router.get("/setup/auto-connect/{founder_id}")
-async def get_auto_connect_status(founder_id: str):
+async def get_auto_connect_status(founder_id: str, request: Request):
     """Preview per-service automation status without applying changes."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.provisioning.integration_automation import auto_connect_status
     return auto_connect_status(founder_id, apply=False)
 
 
 @router.get("/setup/composio/connect/{founder_id}")
-async def composio_connect(founder_id: str, apps: str = "github,gmail,linkedin,googlecalendar,notion,linear"):
+async def composio_connect(founder_id: str, request: Request, apps: str = "github,gmail,linkedin,googlecalendar,notion,linear"):
     """
     Returns Composio OAuth URLs for the requested apps.
     Founder clicks each URL to authenticate — Composio stores tokens mapped to founder_id.
     apps: comma-separated list, defaults to all supported apps.
     """
+    require_founder_access(request, founder_id, min_role="admin")
     import asyncio
     from backend.tools.composio_tools import connect_founder_tools
     app_list = [a.strip() for a in apps.split(",") if a.strip()]
@@ -843,8 +1184,9 @@ async def composio_connect(founder_id: str, apps: str = "github,gmail,linkedin,g
 
 
 @router.get("/vault/{founder_id}")
-async def get_vault_sessions(founder_id: str):
+async def get_vault_sessions(founder_id: str, request: Request):
     """List all sessions for a founder with per-agent note summaries."""
+    require_founder_access(request, founder_id, min_role="viewer")
     import asyncio
     from backend.tools.obsidian_logger import _sessions_root
     from pathlib import Path
@@ -899,8 +1241,9 @@ async def get_vault_sessions(founder_id: str):
 
 
 @router.get("/vault/{founder_id}/note")
-async def get_vault_note(founder_id: str, session_id: str, agent: str):
+async def get_vault_note(founder_id: str, request: Request, session_id: str, agent: str):
     """Return full markdown content of one agent note."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.obsidian_logger import _note_path
     path = _note_path(agent, session_id, founder_id)
     if not path.exists():
@@ -982,6 +1325,25 @@ async def clerk_webhook(request: Request):
     return {"ok": True, "user_id": user_id, "provisioning": "started"}
 
 
+@router.post("/webhooks/stripe")
+async def platform_stripe_webhook(request: Request):
+    """Stripe webhook for Astra workspace subscriptions and entitlements."""
+    from backend.config import settings
+    from backend.billing import apply_platform_billing_event, verify_stripe_signature
+
+    body = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    if settings.stripe_webhook_secret and not verify_stripe_signature(body, signature, settings.stripe_webhook_secret):
+        raise HTTPException(status_code=401, detail="Invalid Stripe signature")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    result = apply_platform_billing_event(payload)
+    logger.info("platform stripe webhook: %s handled=%s", payload.get("type"), result.get("handled"))
+    return result
+
+
 @router.get("/files/{filename}")
 async def serve_file(filename: str):
     """Serve generated files (PDFs, TXTs) from /tmp/astra_docs."""
@@ -1019,8 +1381,9 @@ async def get_status(goal_id: str):
 # ── Stripe Products ───────────────────────────────────────────────────────────
 
 @router.post("/stripe/products/{founder_id}")
-async def create_product(founder_id: str, body: StripeProductRequest):
+async def create_product(founder_id: str, body: StripeProductRequest, request: Request):
     """Create a Stripe product + price + payment link for the founder."""
+    require_founder_access(request, founder_id, min_role="admin")
     from backend.tools.stripe_tools import create_product_with_payment_link
     from backend.provisioning.credentials_store import load_credentials
 
@@ -1042,8 +1405,9 @@ async def create_product(founder_id: str, body: StripeProductRequest):
 
 
 @router.get("/stripe/products/{founder_id}")
-async def list_products(founder_id: str):
+async def list_products(founder_id: str, request: Request):
     """List all Stripe products with prices and payment links."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.stripe_tools import list_stripe_products
     from backend.provisioning.credentials_store import load_credentials
 
@@ -1060,8 +1424,9 @@ async def list_products(founder_id: str):
 # ── Stripe Webhooks ───────────────────────────────────────────────────────────
 
 @router.post("/stripe/register-webhook/{founder_id}")
-async def register_webhook(founder_id: str, body: StripeWebhookRegisterRequest):
+async def register_webhook(founder_id: str, body: StripeWebhookRegisterRequest, request: Request):
     """Register a Stripe webhook endpoint for the founder's account."""
+    require_founder_access(request, founder_id, min_role="admin")
     from backend.tools.stripe_tools import register_stripe_webhook
     from backend.provisioning.credentials_store import load_credentials, store_credentials
     from backend.config import settings
@@ -1094,8 +1459,13 @@ async def stripe_webhook(founder_id: str, request: Request):
     """
     from backend.tools.stripe_tools import store_webhook_event
     from backend.provisioning.credentials_store import load_credentials
+    from backend.billing import verify_stripe_signature
 
     body = await request.body()
+    creds = load_credentials(founder_id, "stripe") or {}
+    webhook_secret = creds.get("webhook_secret") or ""
+    if webhook_secret and not verify_stripe_signature(body, request.headers.get("stripe-signature", ""), webhook_secret):
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature.")
     payload = json.loads(body)
 
     event_type = payload.get("type", "")
@@ -1112,6 +1482,18 @@ async def stripe_webhook(founder_id: str, request: Request):
     }
 
     store_webhook_event(founder_id, event)
+    try:
+        from backend.connector_sync_ledger import record_connector_webhook
+        record_connector_webhook(
+            founder_id,
+            "stripe",
+            event_id=event.get("id", ""),
+            event_type=event_type,
+            changed_records=1,
+            cursor=str(payload.get("created") or event.get("id") or ""),
+        )
+    except Exception as ledger_exc:
+        logger.warning("Stripe webhook connector ledger skipped: %s", ledger_exc)
     logger.info("Stripe webhook %s for founder %s: %s", event_type, founder_id, alert)
     return {"received": True}
 
@@ -1147,8 +1529,9 @@ def _build_alert(event_type: str, data: dict) -> str:
 
 
 @router.get("/stripe/events/{founder_id}")
-async def stripe_events(founder_id: str, limit: int = 20):
+async def stripe_events(founder_id: str, request: Request, limit: int = 20):
     """Return recent Stripe webhook events/alerts for the founder."""
+    require_founder_access(request, founder_id, min_role="viewer")
     from backend.tools.stripe_tools import get_webhook_events
     return {"events": get_webhook_events(founder_id, limit)}
 
@@ -1156,12 +1539,13 @@ async def stripe_events(founder_id: str, limit: int = 20):
 # ── Agent input request ───────────────────────────────────────────────────────
 
 @router.post("/input/{session_id}/{request_id}")
-async def submit_input(session_id: str, request_id: str, body: InputResponse):
+async def submit_input(session_id: str, request_id: str, body: InputResponse, request: Request):
     """
     Founder submits their response to an agent input request (e.g. personal info for LLC filing).
     The waiting agent picks this up and continues.
     """
     from backend.core.events import input_response_push, publish
+    await _require_session_access(request, session_id, min_role="operator")
     input_response_push(request_id, body.data)
     await publish(session_id, {"type": "agent_input_received", "request_id": request_id})
     return {"ok": True, "request_id": request_id}
@@ -1358,8 +1742,9 @@ async def connect_sendgrid_stream(websocket: WebSocket, founder_id: str):
 
 
 @router.get("/setup/composio/connected/{founder_id}")
-async def composio_connected(founder_id: str):
+async def composio_connected(founder_id: str, request: Request):
     """Return per-app Composio connection status for the founder."""
+    require_founder_access(request, founder_id, min_role="viewer")
     import asyncio
     from backend.tools.integration_connect import get_composio_app_status
     status = await asyncio.to_thread(get_composio_app_status, founder_id)

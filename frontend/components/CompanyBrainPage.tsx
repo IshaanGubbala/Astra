@@ -28,6 +28,7 @@ import LiquidGlass from "@/components/LiquidGlass";
 const DEFAULT_QUERY = "decisions product roadmap code customers";
 
 const SOURCE_ORDER = [
+  "discord",
   "slack",
   "github",
   "linear",
@@ -208,7 +209,7 @@ export default function CompanyBrainPage() {
   const { user, isLoaded } = useUser();
   const founderId = user?.id ?? "founder_001";
   const [brain, setBrain] = useState<CompanyBrain | null>(null);
-  const [selectedSources, setSelectedSources] = useState<string[]>(["github", "notion", "linear", "gmail", "google_drive", "slack"]);
+  const [selectedSources, setSelectedSources] = useState<string[]>(["github", "notion", "linear", "gmail", "google_drive", "slack", "discord"]);
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [askQuestion, setAskQuestion] = useState("What should the team prioritize this week?");
   const [askAnswer, setAskAnswer] = useState<string | null>(null);
