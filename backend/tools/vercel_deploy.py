@@ -652,42 +652,34 @@ def generate_landing_page_html(
             f"  layout={layout}"
         )
 
-    _VIBES = [
-        "editorial — think a high-end print magazine laid out for the web",
-        "brutalist — raw, heavy borders, oversized type, intentional ugliness as beauty",
-        "luxury — ultra-minimal, massive negative space, whisper-quiet color, premium feel",
-        "kinetic — motion-forward, everything slides/fades on scroll, almost feels alive",
-        "data-driven — dashboard-like, numbers and stats are the hero, clinical precision",
-        "narrative — scrollytelling, the page tells a story section by section",
-        "playful — bold shapes, overlapping elements, fun micro-interactions",
-        "retro-futuristic — scanlines, terminal fonts, neon-on-dark, sci-fi aesthetic",
-        "organic — soft blobs, flowing curves, nature-inspired, anti-grid",
-        "poster — the entire hero is one giant typographic statement, almost no imagery",
+    # Each entry is a structural description that forces a different DOM arrangement.
+    # Vibes are useless — models ignore them. These describe concrete section structures.
+    _STRUCTURES = [
+        "Two-column sticky layout: left column is fixed with logo, one-line pitch, and CTA button. Right column scrolls with all content (value props as large numbered items, each with a short paragraph). No hero section.",
+        "Full-screen scroll-snap slides: each value prop gets its own full-viewport slide with a giant number (01, 02…) and one sentence. The first slide is just the headline. Last slide has the CTA form.",
+        "Long-form manifesto page: no sections or cards. Continuous prose that weaves the value props into flowing paragraphs with large pull-quotes. CTA is inline mid-page and again at bottom.",
+        "Asymmetric split hero: left 60% is a massive headline that takes 3+ lines, right 40% is a narrow column with subheadline + value props as a tight bullet list + CTA. Below: one wide full-bleed stats bar.",
+        "Horizontal feature strips: after a minimal one-line hero, each value prop is a full-width alternating strip (text left/image right, then text right/image left). Very tall page.",
+        "Bento grid homepage: the entire page is a CSS grid of differently-sized cards. Headline card spans full width. Each value prop is a different-sized card. CTA is the largest card.",
+        "Timeline layout: vertical center line with value props alternating left and right. Hero is just a small badge + headline at the top. CTA floats at the bottom.",
+        "Terminal/typewriter hero: the headline types itself out in a code-style terminal block. Value props listed as command outputs. CTA is a prompt: '> get started'.",
+        "Oversized type poster: the product name and headline are displayed at 200px+ font size, wrapping across the full page. Value props in tiny footnote-style text below. Minimal everything else.",
+        "Card magazine grid: 3-column unequal grid, cards have different heights. Hero card spans 2 columns. Value prop cards each have a different background color. Footer card has the CTA.",
     ]
     _rng = random.Random(_seed + 1)
-    _vibe_instruction = _rng.choice(_VIBES)
+    _vibe_instruction = _rng.choice(_STRUCTURES)
 
-    prompt = f"""Create a landing page for {name}.
+    prompt = f"""Create a fancy, visually stunning HTML and CSS landing page for {name}.
 
-PRODUCT
-{headline}
-{subheadline}
+{headline}. {subheadline}
 
-Value props:
-{props_text}
+What it does: {props_text}
 
-CTA: "{cta_text}" linking to {cta_url}
+CTA: "{cta_text}" → {cta_url}
 
-Design context (apply colors/vibe if provided):
-{_design_context or "Choose whatever looks incredible for this product."}
+Brand context: {_design_context or f"Design something incredible for {name}."}
 
-Design direction: {_vibe_instruction}
-
-DO NOT use the generic SaaS landing page structure (hero → feature cards grid → CTA section → footer). That layout is banned. Let the design direction above dictate the page structure organically. Copyright footer: © {name} 2026.
-
-Typography requirement: the `<head>` MUST include exactly this Google Fonts link (copy verbatim):
-{_gfonts_link}
-Use {_heading_font} for ALL headings. Body font: your choice (not Inter, not Poppins, not Roboto)."""
+Make it look world-class. Be creative with the layout — surprise us. © {name} 2026."""
 
     from backend.tools._llm import generate
 
