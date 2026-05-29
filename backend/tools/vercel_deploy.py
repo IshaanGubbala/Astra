@@ -578,7 +578,32 @@ def generate_landing_page_html(
     # When no design agent context, inject a deterministic-random aesthetic seed
     # so each product gets a unique look instead of the same LLM default
     _design_context = business_context or ""
-    if not any(kw in _design_context.lower() for kw in ("hex", "#", "font", "color", "palette", "vibe")):
+
+    # Strip banned fonts from design context — the LLM follows explicit font names
+    # even when told not to, so we must remove them before they hit the prompt.
+    # Also strip entire "Fonts: ..." clauses to prevent residue like "Fonts: '' for body".
+    _design_context = re.sub(r"(?i)Fonts?:[^.]*\.", "", _design_context)
+    _BANNED_FONTS = ["Inter", "Poppins", "Roboto", "system-ui", "Arial", "Helvetica"]
+    for _font in _BANNED_FONTS:
+        _design_context = re.sub(rf"(?i)\b{re.escape(_font)}\b[,.]?", "", _design_context)
+    _design_context = re.sub(r",\s*,", ",", _design_context)
+    _design_context = re.sub(r"'\s*'", "", _design_context)
+    _design_context = " ".join(_design_context.split())  # collapse whitespace
+
+    # Always inject a distinctive heading font (deterministic per product name).
+    # Design context may have brand colors but we stripped its font spec — supply one.
+    _HEADINGS = [
+        "'Fraunces', serif", "'Syne', sans-serif", "'Playfair Display', serif",
+        "'DM Serif Display', serif", "'Bebas Neue', sans-serif",
+        "'Cormorant Garamond', serif", "'Space Grotesk', sans-serif",
+        "'Libre Baskerville', serif", "'Unbounded', sans-serif",
+        "'Instrument Serif', serif", "'Chivo', sans-serif",
+    ]
+    _seed = int(hashlib.md5(name.encode()).hexdigest(), 16)
+    _heading_font = random.Random(_seed).choice(_HEADINGS)
+    _design_context += f" Heading font: {_heading_font}."
+
+    if not any(kw in _design_context.lower() for kw in ("hex", "#", "color", "palette", "vibe")):
         _PALETTES = [
             ("warm cream + charcoal red", "#faf7f2", "#1a1a1a", "#c84b31"),
             ("jet black + electric lime", "#0a0a0a", "#f0f0f0", "#b5ff47"),
