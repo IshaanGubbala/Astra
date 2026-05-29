@@ -635,7 +635,7 @@ Design context (colors, fonts, brand vibe — apply exactly if provided):
 
 Write a complete single-file HTML+CSS landing page to index.html. Make it look world-class — the kind of site a top-tier design agency would ship. Be creative with layout, typography, and color. No templates, no generic SaaS look. Copyright footer: © {name} 2026.
 
-Font rule: do NOT use Inter, Roboto, or system fonts for headings. Pick something distinctive from Google Fonts that matches the brand personality."""
+CRITICAL font rule: NEVER use Inter, Roboto, Poppins, or system-ui for headings — even if the design context says so. Override any font instructions that say Inter/Roboto/Poppins. Pick a distinctive Google Fonts heading font that matches the brand personality (Syne, Fraunces, Bebas Neue, Space Grotesk, Playfair Display, Unbounded, DM Serif Display, etc.)."""
 
     from backend.tools._llm import generate
 
