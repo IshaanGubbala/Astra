@@ -208,7 +208,7 @@ def _make_env() -> dict:
     return env
 
 
-def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 480) -> str:
+def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 480, model: str = None) -> str:
     """
     Send one message to openclaude. Session persists via --session-id so
     each call is a new message in the same conversation — like typing to a TUI.
@@ -217,7 +217,7 @@ def _run_claude(local: str, prompt: str, session_id: str = None, timeout: int = 
         raise RuntimeError(f"openclaude not found at {OPENCLAUDE_BIN}")
 
     env = _make_env()
-    model = env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
+    model = model or env.get("OPENAI_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
     # Build args list (excluding cwd — handled by shell cd)
     oc_args = [
         OPENCLAUDE_BIN, "--print", "--allow-dangerously-skip-permissions", "--dangerously-skip-permissions",
