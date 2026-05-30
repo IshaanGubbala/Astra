@@ -23,6 +23,7 @@ from backend.api.schemas import (
     BrainSyncConfigRequest,
     BrainSyncRequest,
     ContinueRequest,
+    CustomStackRequest,
     GoalRequest,
     OrgControlsRequest,
     OrgMemberRequest,
@@ -112,6 +113,32 @@ async def stacks():
     from backend.stacks import list_stack_templates
 
     return {"stacks": list_stack_templates()}
+
+
+@router.get("/agents/catalog")
+async def agents_catalog():
+    """Return the full catalog of all 6 specialist agents with tools, outputs, and dependencies."""
+    from backend.stacks.catalog import get_agent_catalog
+
+    return {"agents": get_agent_catalog()}
+
+
+@router.post("/stacks/custom")
+async def custom_stack_route(body: CustomStackRequest, request: Request):
+    """Build a deployable stack package for a hand-picked subset of agents."""
+    if body.founder_id:
+        require_founder_access(request, body.founder_id, min_role="viewer")
+    from backend.stacks.custom import build_custom_stack_package
+
+    result = build_custom_stack_package(
+        agents=body.agents,
+        instruction=body.instruction,
+        founder_id=body.founder_id or "",
+        company_name=body.company_name,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Custom stack build failed"))
+    return result
 
 
 @router.post("/stacks/recommend")

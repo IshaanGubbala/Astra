@@ -194,3 +194,10 @@ class StripeWebhookRegisterRequest(BaseModel):
 
 class InputResponse(BaseModel):
     data: dict  # field_name → value
+
+
+class CustomStackRequest(BaseModel):
+    agents: list[str]           # subset of ["research","legal","web","marketing","technical","ops"]
+    instruction: str
+    founder_id: Optional[str] = ""
+    company_name: Optional[str] = None
