@@ -283,16 +283,17 @@ export default function OutreachPage() {
 
   const [tab, setTab] = useState<Tab>("search");
 
-  // ── Search state ──────────────────────────────────────────────────────────
+  // ── Find contacts state ───────────────────────────────────────────────────
+  const [targetAudience, setTargetAudience] = useState("");
+  const [findingContacts, setFindingContacts] = useState(false);
+  const [findResult, setFindResult] = useState<{ contacts_found: number; contacts_stored: number; domains_searched: string[]; error?: string } | null>(null);
+
+  // ── Search / filter state ─────────────────────────────────────────────────
   const [searchTitles, setSearchTitles] = useState("");
   const [searchLocations, setSearchLocations] = useState("");
   const [searchIndustries, setSearchIndustries] = useState("");
-  const [searchKeywords, setSearchKeywords] = useState("");
-  const [searchDomainsInclude, setSearchDomainsInclude] = useState("");
-  const [searchDomainsExclude, setSearchDomainsExclude] = useState("");
   const [selectedSeniorities, setSelectedSeniorities] = useState<string[]>([]);
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
-  const [selectedFunding, setSelectedFunding] = useState<string[]>([]);
   const [searchResults, setSearchResults] = useState<Contact[]>([]);
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchPage, setSearchPage] = useState(1);
@@ -325,8 +326,6 @@ export default function OutreachPage() {
   const [sendingBatch, setSendingBatch] = useState(false);
   const [batchResult, setBatchResult] = useState<{ sent: number; failed: number } | null>(null);
 
-  // ── Seeding state ─────────────────────────────────────────────────────────
-  const [isSeeding, setIsSeeding] = useState(false);
 
   // ── Load data ─────────────────────────────────────────────────────────────
 
@@ -338,7 +337,6 @@ export default function OutreachPage() {
       const res = await apiFetch(`${BASE}/outreach/contacts/${founderId}?${params}`);
       const data = await res.json();
       setSavedContacts(data.contacts || []);
-      setIsSeeding(!!data.seeding);
     } catch { /* ignore */ }
     finally { setContactsLoading(false); }
   }, [founderId, contactStatusFilter]);
@@ -380,15 +378,6 @@ export default function OutreachPage() {
     if (tab === "campaigns") loadCampaigns();
   }, [tab, loadContacts, loadLists, loadCampaigns]);
 
-  // Poll while seeding to refresh once contacts arrive
-  useEffect(() => {
-    if (!isSeeding) return;
-    const timer = setInterval(() => {
-      if (tab === "search") runSearch(searchPage);
-      else if (tab === "contacts") loadContacts();
-    }, 15000);
-    return () => clearInterval(timer);
-  }, [isSeeding, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Search ────────────────────────────────────────────────────────────────
 
@@ -405,12 +394,8 @@ export default function OutreachPage() {
       if (searchTitles) params.set("titles", searchTitles);
       if (searchLocations) params.set("locations", searchLocations);
       if (searchIndustries) params.set("industries", searchIndustries);
-      if (searchKeywords) params.set("keywords", searchKeywords);
-      if (searchDomainsInclude) params.set("domains_include", searchDomainsInclude);
-      if (searchDomainsExclude) params.set("domains_exclude", searchDomainsExclude);
       if (selectedSeniorities.length) params.set("seniorities", selectedSeniorities.join(","));
       if (selectedSizes.length) params.set("company_sizes", selectedSizes.join(","));
-      if (selectedFunding.length) params.set("funding_stages", selectedFunding.join(","));
 
       const res = await apiFetch(`${BASE}/outreach/search/people?${params}`);
       const data = await res.json();
@@ -418,11 +403,34 @@ export default function OutreachPage() {
       setSearchResults(data.contacts || []);
       setSearchTotal(data.total || 0);
       setSelectedContacts(new Set());
-      setIsSeeding(!!data.seeding);
     } catch (e) {
       setSearchError(e instanceof Error ? e.message : "Search failed");
     } finally {
       setSearching(false);
+    }
+  };
+
+  const findContacts = async () => {
+    if (!targetAudience.trim()) return;
+    setFindingContacts(true);
+    setFindResult(null);
+    setSearchError("");
+    try {
+      const res = await apiFetch(`${BASE}/outreach/find-contacts/${founderId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_audience: targetAudience.trim(), limit: 8 }),
+      });
+      const data = await res.json();
+      setFindResult(data);
+      if (data.contacts_stored > 0) {
+        // Auto-load results into the search list
+        await runSearch(1);
+      }
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : "Failed to find contacts");
+    } finally {
+      setFindingContacts(false);
     }
   };
 
@@ -599,62 +607,93 @@ export default function OutreachPage() {
 
       {/* ── Tab: Find Contacts ──────────────────────────────────────────────── */}
       {tab === "search" && (
-        <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, alignItems: "start" }}>
-          {/* Filters sidebar */}
-          <div style={{ ...glass({ padding: "16px", display: "flex", flexDirection: "column", gap: 16 }) }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--fg)" }}>Filters</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-            {[
-              { label: "Job Titles", value: searchTitles, set: setSearchTitles, placeholder: "CEO, Founder, CTO" },
-              { label: "Locations", value: searchLocations, set: setSearchLocations, placeholder: "United States, London" },
-              { label: "Industries", value: searchIndustries, set: setSearchIndustries, placeholder: "SaaS, Fintech" },
-              { label: "Keywords", value: searchKeywords, set: setSearchKeywords, placeholder: "AI, automation" },
-              { label: "Include Domains", value: searchDomainsInclude, set: setSearchDomainsInclude, placeholder: "stripe.com, vercel.com" },
-              { label: "Exclude Domains", value: searchDomainsExclude, set: setSearchDomainsExclude, placeholder: "competitor.com" },
-            ].map(f => (
-              <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--fg-mute)" }}>{f.label}</span>
-                <input
-                  value={f.value}
-                  onChange={e => f.set(e.target.value)}
-                  placeholder={f.placeholder}
-                  onKeyDown={e => e.key === "Enter" && runSearch(1)}
-                  className="site-input"
-                  style={{ padding: "7px 10px", fontSize: 12 }}
-                />
+          {/* Audience input — primary entry point */}
+          <div style={{ ...glass({ padding: "20px", display: "flex", flexDirection: "column", gap: 12 }) }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--fg)", marginBottom: 4 }}>Who are you trying to reach?</div>
+              <div style={{ fontSize: 12, color: "var(--fg-mute)" }}>Describe your target audience and we'll find real contacts with verified emails via Hunter.io</div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <input
+                value={targetAudience}
+                onChange={e => setTargetAudience(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && !findingContacts && findContacts()}
+                placeholder='e.g. "restaurant owners in the US" or "SaaS startup CTOs" or "e-commerce store owners"'
+                className="site-input"
+                style={{ flex: 1, padding: "10px 14px", fontSize: 13 }}
+              />
+              <button
+                onClick={findContacts}
+                disabled={findingContacts || !targetAudience.trim()}
+                className="site-btn site-btn-primary"
+                style={{ padding: "0 24px", fontSize: 13, whiteSpace: "nowrap" }}
+              >
+                {findingContacts ? (
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
+                    Finding contacts…
+                  </span>
+                ) : "Find Contacts →"}
+              </button>
+            </div>
+
+            {findingContacts && (
+              <p style={{ fontSize: 12, color: "var(--fg-mute)", margin: 0 }}>
+                Searching the web for matching companies, then pulling emails from Hunter.io — takes ~30s
+              </p>
+            )}
+
+            {findResult && (
+              <div style={{
+                padding: "10px 14px", borderRadius: 10,
+                background: findResult.error ? "rgba(248,113,113,0.08)" : "rgba(74,222,128,0.08)",
+                border: `1px solid ${findResult.error ? "rgba(248,113,113,0.2)" : "rgba(74,222,128,0.2)"}`,
+                fontSize: 12,
+              }}>
+                {findResult.error ? (
+                  <span style={{ color: "#f87171" }}>{findResult.error}</span>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ color: "#4ade80", fontWeight: 600 }}>
+                      Found {findResult.contacts_stored} contacts with verified emails
+                    </span>
+                    <span style={{ color: "var(--fg-mute)" }}>
+                      Searched {findResult.domains_searched?.length || 0} companies: {(findResult.domains_searched || []).slice(0, 6).join(", ")}{(findResult.domains_searched?.length || 0) > 6 ? "…" : ""}
+                    </span>
+                  </div>
+                )}
               </div>
-            ))}
-
-            <CheckGroup label="Seniority" options={SENIORITY_OPTIONS} selected={selectedSeniorities} onChange={setSelectedSeniorities} />
-            <CheckGroup label="Company Size" options={COMPANY_SIZE_OPTIONS} selected={selectedSizes} onChange={setSelectedSizes} />
-            <CheckGroup label="Funding Stage" options={FUNDING_OPTIONS} selected={selectedFunding} onChange={setSelectedFunding} />
-
-            <button
-              onClick={() => runSearch(1)}
-              disabled={searching}
-              className="site-btn site-btn-primary"
-              style={{ padding: "0 0", height: 38, fontSize: 13, width: "100%" }}
-            >
-              {searching ? "Searching…" : "Search →"}
-            </button>
+            )}
 
             {searchError && (
-              <p style={{ fontSize: 11, color: "#f87171", margin: 0, wordBreak: "break-word" }}>{searchError}</p>
-            )}
-
-            {isSeeding && (
-              <div style={{
-                display: "flex", alignItems: "center", gap: 8, padding: "8px 10px",
-                background: "rgba(96,165,250,0.08)", borderRadius: 10,
-                border: "1px solid rgba(96,165,250,0.2)",
-              }}>
-                <div style={{ width: 12, height: 12, border: "2px solid rgba(96,165,250,0.3)", borderTopColor: "#60a5fa", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
-                <span style={{ fontSize: 11, color: "#93c5fd", lineHeight: 1.3 }}>
-                  Building your contact database from HackerNews, GitHub & web — refreshing every 15s
-                </span>
-              </div>
+              <p style={{ fontSize: 12, color: "#f87171", margin: 0 }}>{searchError}</p>
             )}
           </div>
+
+          {/* Filter + results — shown once contacts exist */}
+          <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 14, alignItems: "start" }}>
+            <div style={{ ...glass({ padding: "14px", display: "flex", flexDirection: "column", gap: 12 }) }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--fg-mute)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Filter saved contacts</span>
+              {[
+                { label: "Job Title", value: searchTitles, set: setSearchTitles, placeholder: "CEO, CTO, Founder" },
+                { label: "Location", value: searchLocations, set: setSearchLocations, placeholder: "United States" },
+                { label: "Industry", value: searchIndustries, set: setSearchIndustries, placeholder: "SaaS, Fintech" },
+              ].map(f => (
+                <div key={f.label} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--fg-mute)" }}>{f.label}</span>
+                  <input value={f.value} onChange={e => f.set(e.target.value)} placeholder={f.placeholder}
+                    onKeyDown={e => e.key === "Enter" && runSearch(1)} className="site-input" style={{ padding: "6px 10px", fontSize: 12 }} />
+                </div>
+              ))}
+              <CheckGroup label="Seniority" options={SENIORITY_OPTIONS} selected={selectedSeniorities} onChange={setSelectedSeniorities} />
+              <CheckGroup label="Company Size" options={COMPANY_SIZE_OPTIONS} selected={selectedSizes} onChange={setSelectedSizes} />
+              <button onClick={() => runSearch(1)} disabled={searching} className="site-btn site-btn-ghost"
+                style={{ height: 34, fontSize: 12, width: "100%" }}>
+                {searching ? "Filtering…" : "Filter →"}
+              </button>
+            </div>
 
           {/* Results */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -738,36 +777,28 @@ export default function OutreachPage() {
 
             {searchResults.length === 0 && !searching && (
               <div style={{ ...glass({ padding: "60px 20px" }), textAlign: "center" }}>
-                {isSeeding ? (
-                  <>
-                    <div style={{ width: 36, height: 36, border: "3px solid rgba(96,165,250,0.2)", borderTopColor: "#60a5fa", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
-                    <p style={{ fontSize: 14, color: "var(--fg-dim)", margin: "0 0 6px", fontWeight: 600 }}>
-                      Building your contact database
-                    </p>
-                    <p style={{ fontSize: 12, color: "var(--fg-mute)", margin: 0 }}>
-                      Scraping HackerNews hiring threads, GitHub orgs, company websites & web search.<br />
-                      This takes 1–2 minutes. Page auto-refreshes when contacts are ready.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontSize: 32, marginBottom: 12 }}>🔍</div>
-                    <p style={{ fontSize: 14, color: "var(--fg-mute)", margin: 0 }}>
-                      Set filters and search your contact database
-                    </p>
-                  </>
-                )}
+                <div style={{ fontSize: 32, marginBottom: 12 }}>👆</div>
+                <p style={{ fontSize: 14, color: "var(--fg-dim)", margin: "0 0 6px", fontWeight: 500 }}>
+                  Describe your target audience above
+                </p>
+                <p style={{ fontSize: 12, color: "var(--fg-mute)", margin: 0 }}>
+                  We'll find companies in that niche and pull verified contact emails from Hunter.io
+                </p>
               </div>
             )}
 
             {searching && (
               <div style={{ ...glass({ padding: "60px 20px" }), textAlign: "center" }}>
                 <div style={{ width: 28, height: 28, border: "3px solid rgba(255,255,255,0.1)", borderTopColor: "#60a5fa", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
-                <p style={{ fontSize: 13, color: "var(--fg-mute)", margin: 0 }}>Searching…</p>
+                <p style={{ fontSize: 13, color: "var(--fg-mute)", margin: 0 }}>Filtering…</p>
               </div>
             )}
           </div>
+          {/* end inner results col */}
+          </div>
+          {/* end filter+results grid */}
         </div>
+        /* end search tab */
       )}
 
       {/* ── Tab: Contacts ───────────────────────────────────────────────────── */}
@@ -790,14 +821,7 @@ export default function OutreachPage() {
             <div style={{ textAlign: "center", padding: 40, color: "var(--fg-mute)", fontSize: 13 }}>Loading…</div>
           ) : savedContacts.length === 0 ? (
             <div style={{ ...glass({ padding: "60px 20px" }), textAlign: "center" }}>
-              {isSeeding ? (
-                <>
-                  <div style={{ width: 32, height: 32, border: "3px solid rgba(96,165,250,0.2)", borderTopColor: "#60a5fa", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 14px" }} />
-                  <p style={{ fontSize: 14, color: "var(--fg-dim)", margin: 0 }}>Building contact database from public sources…</p>
-                </>
-              ) : (
-                <p style={{ fontSize: 14, color: "var(--fg-mute)", margin: 0 }}>No contacts yet. Use the Search tab to find and save contacts.</p>
-              )}
+              <p style={{ fontSize: 14, color: "var(--fg-mute)", margin: 0 }}>No contacts yet. Go to Find Contacts, describe your target audience, and we'll pull verified emails.</p>
             </div>
           ) : (
             <>

@@ -1919,6 +1919,93 @@ async def discover_contacts(founder_id: str, body: dict, request: Request):
     return result
 
 
+@router.post("/outreach/find-contacts/{founder_id}")
+async def find_contacts_for_audience(founder_id: str, body: dict, request: Request):
+    """
+    Main outreach entry point. Takes a plain-English target audience description,
+    searches the web for matching companies, runs Hunter domain search on each,
+    and stores all contacts in the founder's outreach_contacts table.
+
+    Body: { "target_audience": "restaurant owners in the US", "limit": 10 }
+    """
+    require_founder_access(request, founder_id, min_role="operator")
+
+    target_audience = (body.get("target_audience") or "").strip()
+    if not target_audience:
+        raise HTTPException(status_code=400, detail="target_audience is required")
+
+    limit = min(int(body.get("limit", 8)), 15)  # max 15 domains = 15 Hunter credits
+
+    def _run():
+        from backend.tools.web_search import web_search
+        from backend.tools.hunter_tools import hunter_search_by_domains
+        import re
+        from urllib.parse import urlparse
+
+        # Search queries to find relevant company domains
+        queries = [
+            f"top {target_audience} companies list",
+            f"{target_audience} software tools",
+            f"best {target_audience} platforms",
+        ]
+
+        # Domains to skip (search engines, social media, directories)
+        _SKIP = {
+            "google.com", "bing.com", "yahoo.com", "duckduckgo.com",
+            "linkedin.com", "twitter.com", "x.com", "facebook.com",
+            "instagram.com", "youtube.com", "reddit.com", "quora.com",
+            "wikipedia.org", "github.com", "crunchbase.com", "capterra.com",
+            "g2.com", "trustpilot.com", "producthunt.com", "ycombinator.com",
+            "techcrunch.com", "forbes.com", "inc.com", "medium.com",
+        }
+
+        seen_domains: set[str] = set()
+        domains: list[str] = []
+
+        for query in queries:
+            if len(domains) >= limit:
+                break
+            try:
+                results = web_search(query)
+                if not isinstance(results, dict):
+                    continue
+                for item in results.get("results", [])[:15]:
+                    url = item.get("url", "")
+                    if not url:
+                        continue
+                    try:
+                        parsed = urlparse(url if url.startswith("http") else f"https://{url}")
+                        domain = parsed.netloc.lower().lstrip("www.")
+                        # Keep only root domain (e.g. toast.com not app.toast.com)
+                        parts = domain.split(".")
+                        if len(parts) >= 2:
+                            domain = ".".join(parts[-2:])
+                    except Exception:
+                        continue
+                    if domain and domain not in seen_domains and domain not in _SKIP:
+                        seen_domains.add(domain)
+                        domains.append(domain)
+                        if len(domains) >= limit:
+                            break
+            except Exception as e:
+                logger.warning("Web search failed for query '%s': %s", query, e)
+
+        if not domains:
+            return {"contacts_found": 0, "contacts_stored": 0, "domains_searched": [], "error": "No relevant companies found — try a more specific audience description"}
+
+        result = hunter_search_by_domains(
+            founder_id=founder_id,
+            domains=domains,
+            seniority="",
+            department="",
+        )
+        result["domains_searched"] = domains
+        return result
+
+    result = await asyncio.to_thread(_run)
+    return result
+
+
 @router.get("/outreach/search/companies")
 async def outreach_search_companies(
     request: Request,
