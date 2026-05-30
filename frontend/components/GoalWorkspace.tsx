@@ -2318,6 +2318,10 @@ function WorkspaceSidebar({
           <span aria-hidden="true">⌘</span>
           Integrations
         </Link>
+        <Link href="/payments" style={navItemStyle}>
+          <span aria-hidden="true">$</span>
+          Payments
+        </Link>
         <a href="https://astracreates.com/" style={navItemStyle}>
           <span aria-hidden="true">↗</span>
           About
