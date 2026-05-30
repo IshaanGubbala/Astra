@@ -560,6 +560,9 @@ class Orchestrator:
         goal = await self._expand_goal(goal, session_id)
 
         # Phase 1: stack plan — default to the productized outcome stack.
+        _agent_filter: list[str] | None = (constraints or {}).get("agents") or (constraints or {}).get("agent_filter") or None
+        _is_custom = bool(_agent_filter)
+
         initial_tasks = [
             task for task in stack_template.build_tasks(goal)
             if task["agent"] in self.specialists
@@ -574,6 +577,13 @@ class Orchestrator:
         if not initial_tasks:
             initial_tasks = [{"id": "t1", "agent": "research", "instruction": f"Research the market and competitive landscape for: {goal}", "depends_on": []}]
 
+        # Custom stack: keep only user-selected agents
+        if _is_custom:
+            _allowed = set(_agent_filter)
+            initial_tasks = [t for t in initial_tasks if t["agent"] in _allowed]
+            if not initial_tasks:
+                initial_tasks = [{"id": "t1", "agent": a, "instruction": goal, "depends_on": []} for a in _agent_filter if a in self.specialists]
+
         _RESEARCH_AGENTS = {
             "research",
             "research_competitors",
@@ -583,15 +593,16 @@ class Orchestrator:
         research_task = next((t for t in initial_tasks if t["agent"] == "research"), None)
         other_agents_initial = [t for t in initial_tasks if t["agent"] not in _RESEARCH_AGENTS]
 
-        # Force-include web + technical if planner omitted them
-        _existing_agents = {t["agent"] for t in other_agents_initial}
-        _mandatory = [
-            ("web", "Build and deploy a public landing page for this product."),
-            ("technical", f"Build a complete working MVP for: {goal}"),
-        ]
-        for _i, (_ag, _instr) in enumerate(_mandatory):
-            if _ag not in _existing_agents and _ag in self.specialists:
-                other_agents_initial.append({"id": f"forced_{_ag}", "agent": _ag, "instruction": _instr, "depends_on": []})
+        # Force-include web + technical if planner omitted them (skip for custom stacks)
+        if not _is_custom:
+            _existing_agents = {t["agent"] for t in other_agents_initial}
+            _mandatory = [
+                ("web", "Build and deploy a public landing page for this product."),
+                ("technical", f"Build a complete working MVP for: {goal}"),
+            ]
+            for _i, (_ag, _instr) in enumerate(_mandatory):
+                if _ag not in _existing_agents and _ag in self.specialists:
+                    other_agents_initial.append({"id": f"forced_{_ag}", "agent": _ag, "instruction": _instr, "depends_on": []})
 
         # Run only configured research specialists in parallel.
         research_instruction = research_task["instruction"] if research_task else f"Research market, competitors, and execution strategy for: {goal}"
