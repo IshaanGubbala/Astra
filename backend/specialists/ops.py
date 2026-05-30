@@ -28,8 +28,11 @@ def build_ops_agent(**kwargs) -> Agent:
             "pass the founder's stripe access_token from shared context, product name, description, amount in cents, currency, and interval (month/year/empty for one-time). "
             "Always produce a concrete output — don't describe what should be done, do it. "
             "If any tool fails, use obsidian_log as fallback and still call done with your results. "
-            "Call obsidian_log then done."
+            "IMPORTANT: Search the company brain at most once. If company_brain_search returns no results or an empty context, "
+            "do NOT search again — proceed immediately with generating outputs based on the goal and shared context. "
+            "Do not loop on searches. Call obsidian_log then done."
         ),
+        max_iterations=10,
         tools={
             "generate_pdf": generate_pdf,
             "composio_gmail_send": composio_gmail_send,
