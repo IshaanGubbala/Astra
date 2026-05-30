@@ -927,6 +927,21 @@ export async function getStacks(): Promise<AgentStackTemplate[]> {
   return data.stacks ?? [];
 }
 
+export async function getCustomStackPackage(
+  agents: string[],
+  instruction: string,
+  founderId: string,
+  companyName = ""
+): Promise<AgentStackTemplate> {
+  const res = await apiFetch(`${BASE}/stacks/custom`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agents, instruction, founder_id: founderId, company_name: companyName }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function recommendStack(instruction: string, companyStage?: string): Promise<StackRecommendation> {
   const res = await apiFetch(`${BASE}/stacks/recommend`, {
     method: "POST",
