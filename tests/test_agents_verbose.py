@@ -1,10 +1,10 @@
-"""Verbose agent smoke test — 3 concurrent, 300s timeout, every SSE event printed."""
+"""Verbose agent smoke test — serial, 300s timeout, every SSE event printed."""
 import asyncio, json, time, httpx, sys
 
 BASE = "https://167.235.151.204"
 GOAL = "Build a SaaS for freelancers to track invoices."
 TIMEOUT = 300
-CONCURRENCY = 3
+CONCURRENCY = 1
 
 AGENTS = [
     "research", "research_market", "research_financial", "research_regulatory",
@@ -29,21 +29,37 @@ async def test_agent(agent: str, client: httpx.AsyncClient) -> tuple[str, str]:
 
     await log(f"\n[{agent}] SUBMITTING")
     try:
-        r = await client.post(f"{BASE}/goal", json={
-            "instruction": GOAL,
-            "founder_id": "test_founder",
-            "constraints": {
-                "stack_id": "custom",
-                "agents": [agent],
-                "bypass_planner": True,
-                "company_name": "InvoiceAI",
-                "test_model": "meta-llama/Llama-3.2-3B-Instruct",
-            },
-        }, timeout=30)
+        r = None
+        for attempt in range(1, 4):
+            try:
+                r = await client.post(f"{BASE}/goal", json={
+                    "instruction": GOAL,
+                    "founder_id": "test_founder",
+                    "constraints": {
+                        "stack_id": "custom",
+                        "agents": [agent],
+                        "bypass_planner": True,
+                        "company_name": "InvoiceAI",
+                        "test_model": "meta-llama/Llama-3.2-3B-Instruct",
+                    },
+                }, timeout=30)
+                if r.status_code != 502:
+                    break
+                await log(f"[{agent}] 502 on attempt {attempt}/3, retrying in 5s...")
+                if attempt < 3:
+                    await asyncio.sleep(5)
+            except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadError) as conn_err:
+                await log(f"[{agent}] Connection error on attempt {attempt}/3: {conn_err}")
+                if attempt < 3:
+                    await asyncio.sleep(5)
+                else:
+                    return agent, "submit_failed:connection_error"
 
-        if r.status_code != 200:
-            await log(f"[{agent}] SUBMIT FAILED {r.status_code}: {r.text[:300]}")
-            return agent, f"submit_failed:{r.status_code}"
+        if r is None or r.status_code != 200:
+            code = r.status_code if r is not None else "no_response"
+            text = r.text[:300] if r is not None else ""
+            await log(f"[{agent}] SUBMIT FAILED {code}: {text}")
+            return agent, f"submit_failed:{code}"
 
         session_id = r.json().get("session_id") or r.json().get("goal_id")
         await log(f"[{agent}] session={session_id}")
