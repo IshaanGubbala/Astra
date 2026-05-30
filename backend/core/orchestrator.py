@@ -668,6 +668,7 @@ class Orchestrator:
                     shared=shared,
                     dep_results=dep_results,
                     vault_context=vault_context_text,
+                    bypass_approvals=True,  # bypass_planner path skips approval gates for testing
                 )
                 await publish(session_id, {"type": "agent_start", "agent": agent_name, "task_id": tid, "lane_id": lane_id})
                 try:
