@@ -76,9 +76,11 @@ _REGULATORY_SEARCHES = (
     "10. news_search('{topic} regulatory enforcement fine penalty 2024 2025')\n"
     "11. web_search('{topic} compliance framework checklist requirements')\n"
     "12. patent_search('{topic} regulatory technology compliance')\n\n"
-    "Then 6+ fetch_and_read calls on the most authoritative regulatory sources found "
-    "(government sites, official bodies, legal publishers).\n\n"
-    "obsidian_log with a structured RISK FLAG REPORT containing:\n"
+    "Then 3 fetch_and_read calls on the most authoritative regulatory sources found "
+    "(government sites, official bodies, legal publishers). Do NOT do more than 3 fetch_and_read calls.\n\n"
+    "IMMEDIATELY AFTER the fetches, call generate_pdf BEFORE obsidian_log:\n"
+    "generate_pdf(title='Regulatory Risk Report', sections=[{\"heading\": \"APPLICABLE REGULATIONS\", \"body\": \"...\"}, {\"heading\": \"DATA PRIVACY REQUIREMENTS\", \"body\": \"...\"}, {\"heading\": \"RISK FLAGS\", \"body\": \"...\"}, {\"heading\": \"RECOMMENDED ACTIONS\", \"body\": \"...\"}])\n\n"
+    "Then obsidian_log with a structured RISK FLAG REPORT containing:\n"
     "- APPLICABLE REGULATIONS (name, jurisdiction, key requirements, penalty exposure)\n"
     "- DATA PRIVACY REQUIREMENTS (GDPR, CCPA, HIPAA — what applies, what's needed)\n"
     "- LICENSING & PERMITS (required licenses, certifications, timelines, costs)\n"
@@ -86,7 +88,7 @@ _REGULATORY_SEARCHES = (
     "- INTERNATIONAL COMPLIANCE (key cross-border obligations)\n"
     "- RISK FLAGS (HIGH / MEDIUM / LOW — specific legal risks with rationale)\n"
     "- RECOMMENDED ACTIONS (prioritized compliance roadmap for a startup)\n\n"
-    "Finally, generate_pdf(title='Regulatory Risk Report', sections=[{\"heading\": \"APPLICABLE REGULATIONS\", \"body\": \"...\"}, {\"heading\": \"DATA PRIVACY REQUIREMENTS\", \"body\": \"...\"}, {\"heading\": \"RISK FLAGS\", \"body\": \"...\"}, {\"heading\": \"RECOMMENDED ACTIONS\", \"body\": \"...\"}]) with the full risk flag report so founders have a shareable artifact."
+    "Then call done with the structured output."
 )
 
 
