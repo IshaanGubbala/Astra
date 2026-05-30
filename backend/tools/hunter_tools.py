@@ -256,7 +256,7 @@ def hunter_enrich_combined(email: str) -> dict:
 def hunter_search_by_domains(
     founder_id: str,
     domains: list[str],
-    seniority: str = "executive",
+    seniority: str = "",
     department: str = "",
     limit_per_domain: int = 10,
 ) -> dict:
@@ -264,12 +264,13 @@ def hunter_search_by_domains(
     Domain-search a list of domains via Hunter and store all contacts in
     the Supabase outreach_contacts table under this founder.
 
-    Use this after the agent has identified target company domains from
-    web search. Each domain costs 1 Hunter search credit (50/month free).
+    Caches results per domain — if we've already searched a domain in the
+    last 90 days (from any founder), we reuse those contacts without burning
+    another Hunter API credit. This dramatically extends the 50/month free limit.
 
     Args:
         founder_id:        The founder's ID (contacts stored under this).
-        domains:           List of company domains, e.g. ["toast.com", "resy.com"].
+        domains:           List of company domains, e.g. ["darden.com", "wingstop.com"].
         seniority:         Filter by seniority: "junior" | "senior" | "executive" | "".
         department:        Filter by dept: "executive" | "sales" | "management" | "it" | "".
         limit_per_domain:  Max emails per domain (max 10 on free tier).
@@ -277,9 +278,50 @@ def hunter_search_by_domains(
     Returns summary of contacts found and stored.
     """
     import time
+    from datetime import datetime, timedelta, timezone
     all_contacts: list[dict] = []
+    cached_domains: set[str] = set()
 
-    for domain in domains:
+    # Check Supabase cache first — skip Hunter call if domain was searched recently
+    try:
+        from backend.db.client import get_supabase
+        db = get_supabase()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+        for domain in domains:
+            res = (
+                db.table("outreach_contacts")
+                .select("email,first_name,last_name,title,company_name,company_domain,linkedin_url,seniority,industry,company_size")
+                .eq("company_domain", domain)
+                .eq("source", "hunter")
+                .gte("created_at", cutoff)
+                .limit(limit_per_domain)
+                .execute()
+            )
+            if res.data:
+                cached_domains.add(domain)
+                for row in res.data:
+                    all_contacts.append({
+                        "founder_id": founder_id,
+                        "email": row.get("email", ""),
+                        "first_name": row.get("first_name", ""),
+                        "last_name": row.get("last_name", ""),
+                        "title": row.get("title", ""),
+                        "company_name": row.get("company_name", ""),
+                        "company_domain": row.get("company_domain", domain),
+                        "linkedin_url": row.get("linkedin_url", ""),
+                        "seniority": row.get("seniority", ""),
+                        "industry": row.get("industry", ""),
+                        "company_size": row.get("company_size", ""),
+                        "city": "",
+                        "country": "",
+                        "source": "hunter",
+                    })
+    except Exception as e:
+        logger.warning("Cache lookup failed (will call Hunter): %s", e)
+
+    domains_to_search = [d for d in domains if d not in cached_domains]
+
+    for domain in domains_to_search:
         result = hunter_domain_search(
             domain=domain,
             limit=min(limit_per_domain, 10),
@@ -315,13 +357,14 @@ def hunter_search_by_domains(
                 "source": "hunter",
             })
 
-        time.sleep(0.3)  # avoid rate limit
+        time.sleep(0.3)  # avoid Hunter rate limit
 
     stored = hunter_store_contacts(founder_id, all_contacts)
     return {
         "domains_searched": len(domains),
         "contacts_found": len(all_contacts),
         "contacts_stored": stored.get("stored", 0),
+        "cached_domains": len(cached_domains),
         "contacts": all_contacts,
     }
 

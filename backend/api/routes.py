@@ -1941,64 +1941,118 @@ async def find_contacts_for_audience(founder_id: str, body: dict, request: Reque
 
         audience_lower = target_audience.lower()
 
-        # Curated keyword → domain map. Web search on server IPs gets blocked by
-        # DuckDuckGo, so this is the primary source. Web search is a fallback only.
+        # Curated keyword → domain map.
+        # Each entry maps audience keywords to domains of ACTUAL companies IN that industry
+        # (not software vendors for that industry). Hunter domain search finds employees
+        # at these companies — executives, owners, and decision makers.
         _INDUSTRY_MAP = [
-            (["restaurant", "food", "dining", "hospitality", "cafe", "bar", "kitchen"], [
-                "toast.com", "olo.com", "resy.com", "opentable.com", "tock.com",
-                "touchbistro.com", "lightspeedhq.com", "spoton.com", "square.com",
+            # Restaurant / Food Service — actual restaurant chains & food companies
+            (["restaurant", "food service", "dining", "cafe", "bar", "kitchen", "eatery", "catering", "food and beverage", "f&b", "food"], [
+                "darden.com", "rbi.com", "jackinthebox.com", "wingstop.com",
+                "sweetgreen.com", "portillos.com", "dutchbros.com", "shakeshack.com",
+                "firstwatch.com", "focusbrands.com", "noodles.com", "carrols.com",
             ]),
-            (["e-commerce", "ecommerce", "online store", "shopify", "retail", "dtc", "direct to consumer", "shop"], [
-                "shopify.com", "bigcommerce.com", "klaviyo.com", "gorgias.com",
-                "recharge.com", "yotpo.com", "attentive.com", "postscript.io",
+            # Hotels / Hospitality — actual hotel chains & lodging companies
+            (["hotel", "lodging", "motel", "resort", "inn", "hospitality management", "bed and breakfast", "hospitality"], [
+                "marriott.com", "hilton.com", "hyatt.com", "ihg.com",
+                "choicehotels.com", "wyndhamhotels.com", "bestwestern.com",
+                "acehotel.com", "sonesta.com", "omnihotels.com",
             ]),
-            (["saas", "b2b software", "developer", "engineering", "cto", "tech startup"], [
+            # E-commerce / DTC — actual consumer brands, not their platforms
+            (["e-commerce", "ecommerce", "online store", "retail brand", "dtc", "direct to consumer", "consumer brand", "shop"], [
+                "allbirds.com", "warbyparker.com", "bombas.com", "casper.com",
+                "gymshark.com", "everlane.com", "glossier.com", "mejuri.com",
+                "alo.com", "vuori.com", "brooklinen.com", "saatva.com",
+            ]),
+            # Retail — physical/omnichannel retail chains
+            (["retail", "store", "boutique", "department store", "brick and mortar", "fashion retail"], [
+                "gap.com", "jcrew.com", "anthropologie.com", "nordstrom.com",
+                "williams-sonoma.com", "crateandbarrel.com", "restorationhardware.com",
+                "macys.com", "bloomingdales.com",
+            ]),
+            # SaaS / Developer Tools — software companies targeting other software people
+            (["saas", "b2b software", "developer tools", "engineering", "cto", "tech startup", "software company", "platform", "developer"], [
                 "vercel.com", "supabase.com", "linear.app", "notion.so",
-                "posthog.com", "segment.com", "mixpanel.com", "amplitude.com",
+                "posthog.com", "segment.com", "amplitude.com", "airtable.com",
+                "retool.com", "figma.com", "loom.com", "intercom.com",
             ]),
-            (["startup", "founder", "venture", "early stage"], [
+            # Startups / VC-backed founders
+            (["startup", "founder", "venture", "early stage", "seed stage", "series a", "yc", "y combinator"], [
                 "stripe.com", "brex.com", "mercury.com", "deel.com",
-                "rippling.com", "gusto.com", "notion.so", "linear.app",
+                "ramp.com", "openai.com", "anthropic.com", "scale.ai",
+                "huggingface.co", "cohere.com", "together.ai", "mistral.ai",
             ]),
-            (["healthcare", "health", "medical", "clinic", "hospital", "doctor", "pharma"], [
-                "athenahealth.com", "modernhealth.com", "hims.com",
-                "ro.co", "truepill.com", "headspace.com", "calm.com",
+            # Healthcare / Medical — actual providers & health companies
+            (["healthcare", "health", "medical", "clinic", "hospital", "doctor", "pharma", "biotech", "healthtech"], [
+                "teladochealth.com", "hcahealthcare.com", "davita.com",
+                "labcorp.com", "questdiagnostics.com", "uhg.com",
+                "cigna.com", "humana.com", "anthem.com", "centene.com",
             ]),
-            (["real estate", "property", "realty", "mortgage", "broker", "agent"], [
-                "compass.com", "opendoor.com", "lofty.com",
-                "kvcore.com", "boomtown.net", "followupboss.com",
+            # Real Estate — brokerages and property companies
+            (["real estate", "property", "realty", "mortgage", "broker", "agent", "realtor", "proptech"], [
+                "remax.com", "century21.com", "coldwellbanker.com", "kw.com",
+                "compass.com", "redfin.com", "opendoor.com", "cbre.com",
+                "jll.com", "cushwake.com", "colliers.com",
             ]),
-            (["fintech", "finance", "banking", "payments", "lending", "insurance", "accounting"], [
-                "brex.com", "ramp.com", "mercury.com", "plaid.com",
-                "rippling.com", "gusto.com", "quickbooks.intuit.com",
+            # Fintech / Finance — actual fintech companies
+            (["fintech", "finance", "banking", "payments", "lending", "insurance", "wealthtech", "insurtech", "accounting"], [
+                "chime.com", "sofi.com", "robinhood.com", "coinbase.com",
+                "lemonade.com", "rootinsurance.com", "betterment.com",
+                "affirm.com", "klarna.com", "marqeta.com",
             ]),
-            (["marketing", "agency", "advertising", "seo", "content", "social media", "pr"], [
-                "hubspot.com", "hootsuite.com", "sproutsocial.com", "semrush.com",
-                "ahrefs.com", "mailchimp.com", "activecampaign.com",
+            # Marketing / Advertising — actual agencies
+            (["marketing agency", "advertising agency", "digital agency", "seo agency", "content agency", "pr firm", "creative studio", "marketing", "advertising", "agency"], [
+                "ogilvy.com", "bbdo.com", "grey.com", "edelman.com",
+                "weberfandhandwick.com", "havas.com", "dentsu.com",
+                "publicisgroupe.com", "interpublic.com",
             ]),
-            (["hr", "human resources", "recruiting", "hiring", "talent", "staffing", "people ops"], [
-                "greenhouse.io", "lever.co", "lattice.com",
-                "bamboohr.com", "rippling.com", "workday.com",
+            # HR / Staffing — actual staffing and recruiting firms
+            (["hr", "human resources", "recruiting", "hiring agency", "talent", "staffing", "workforce", "people ops"], [
+                "adecco.com", "manpowergroup.com", "randstadusa.com",
+                "kellyservices.com", "roberthalf.com", "aerotek.com",
+                "kforce.com", "heidrick.com", "spencerstuart.com",
             ]),
-            (["education", "edtech", "school", "university", "learning", "training", "course"], [
-                "teachable.com", "kajabi.com", "thinkific.com",
-                "coursera.org", "udemy.com", "learnworlds.com",
+            # Education / EdTech — actual education companies
+            (["education", "edtech", "school", "university", "learning", "training", "online course", "tutoring"], [
+                "pearson.com", "chegg.com", "kaplan.com", "2u.com",
+                "duolingo.com", "coursera.org", "udemy.com", "masterclass.com",
             ]),
-            (["logistics", "supply chain", "shipping", "freight", "warehouse", "fulfillment", "delivery"], [
-                "flexport.com", "shipbob.com", "samsara.com",
-                "fleetio.com", "motive.com", "loadsmart.com",
+            # Logistics / Supply Chain — actual logistics companies
+            (["logistics", "supply chain", "shipping", "freight", "warehouse", "fulfillment", "delivery", "trucking"], [
+                "ups.com", "fedex.com", "xpo.com", "jbhunt.com",
+                "chrobinson.com", "echo.com", "coyote.com", "freightos.com",
             ]),
-            (["construction", "contractor", "builder", "architecture", "trade"], [
-                "procore.com", "buildertrend.com", "autodesk.com", "trimble.com",
+            # Construction / Trades — actual construction and architecture firms
+            (["construction", "contractor", "builder", "architecture", "civil engineering", "hvac", "plumbing", "trade"], [
+                "aecom.com", "jacobs.com", "wsp.com", "hdr.com",
+                "bechtel.com", "fluor.com", "turner.com", "skanska.com",
             ]),
-            (["legal", "law", "attorney", "lawyer", "compliance"], [
-                "clio.com", "lawpay.com", "mycase.com", "filevine.com",
+            # Legal — actual law firms
+            (["legal", "law firm", "attorney", "lawyer", "legal tech", "compliance", "law", "counsel"], [
+                "kirkland.com", "lathamwatkins.com", "skadden.com",
+                "cooley.com", "wilsonsonsini.com", "fenwick.com",
+                "akerman.com", "foley.com", "gunderson.com",
             ]),
-            (["fitness", "gym", "wellness", "yoga", "sport"], [
-                "mindbodyonline.com", "zenoti.com", "glofox.com", "wodify.com",
+            # Fitness / Wellness — actual gym chains and wellness companies
+            (["fitness", "gym", "wellness", "yoga", "pilates", "crossfit", "health club", "studio", "sport"], [
+                "equinox.com", "planetfitness.com", "lifetimefitness.com",
+                "orangetheory.com", "f45training.com", "anytimefitness.com",
+                "soulcycle.com", "peloton.com", "crunch.com",
             ]),
-            (["agency", "consulting", "freelance", "creative", "design studio"], [
-                "hubspot.com", "monday.com", "asana.com", "clickup.com", "notion.so",
+            # Media / Entertainment — actual media companies
+            (["media", "entertainment", "content", "streaming", "gaming", "podcast", "publishing", "news"], [
+                "netflix.com", "spotify.com", "buzzfeed.com", "vox.com",
+                "axios.com", "substack.com", "discord.com", "twitch.tv",
+            ]),
+            # Consumer Apps / Marketplaces
+            (["consumer app", "mobile app", "marketplace", "consumer tech", "social app", "platform"], [
+                "doordash.com", "instacart.com", "airbnb.com", "lyft.com",
+                "turo.com", "rover.com", "bumble.com", "offerup.com",
+            ]),
+            # Consulting / Professional Services
+            (["consulting", "management consulting", "professional services", "advisory", "freelance", "independent"], [
+                "mckinsey.com", "bain.com", "bcg.com", "deloitte.com",
+                "pwc.com", "kpmg.com", "ey.com", "accenture.com",
             ]),
         ]
 
