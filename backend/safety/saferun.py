@@ -48,7 +48,7 @@ _RISKY_TOOLS: dict[str, dict[str, str]] = {
         "reason": "Publishes public social content.",
     },
     "build_crm_contact": {
-        "risk_level": "medium",
+        "risk_level": "low",
         "category": "crm_write",
         "approval_gate": "outbound_send",
         "reason": "Creates or prepares a CRM/customer record.",
