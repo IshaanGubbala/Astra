@@ -98,6 +98,9 @@ def build_finance_model_agent(**kwargs) -> Agent:
     - Condensed P&L projection (Y1/Y2/Y3)
     All output compiled into a structured PDF report with investor-ready tables.
     """
+    # finance_model has 9 explicit steps, each potentially requiring multiple tool calls;
+    # override the default max_iterations=5 so the agent can complete the full workflow.
+    kwargs.setdefault("max_iterations", 20)
     return Agent(
         name="finance_model",
         role=(
