@@ -1937,69 +1937,124 @@ async def find_contacts_for_audience(founder_id: str, body: dict, request: Reque
     limit = min(int(body.get("limit", 8)), 15)  # max 15 domains = 15 Hunter credits
 
     def _run():
-        from backend.tools.web_search import web_search
         from backend.tools.hunter_tools import hunter_search_by_domains
-        import re
         from urllib.parse import urlparse
 
-        # Search queries to find relevant company domains
-        queries = [
-            f"top {target_audience} companies list",
-            f"{target_audience} software tools",
-            f"best {target_audience} platforms",
+        audience_lower = target_audience.lower()
+
+        # Curated keyword → domain map. Web search on server IPs gets blocked by
+        # DuckDuckGo, so this is the primary source. Web search is a fallback only.
+        _INDUSTRY_MAP = [
+            (["restaurant", "food", "dining", "hospitality", "cafe", "bar", "kitchen"], [
+                "toast.com", "olo.com", "resy.com", "opentable.com", "tock.com",
+                "touchbistro.com", "lightspeedhq.com", "spoton.com", "square.com",
+            ]),
+            (["e-commerce", "ecommerce", "online store", "shopify", "retail", "dtc", "direct to consumer", "shop"], [
+                "shopify.com", "bigcommerce.com", "klaviyo.com", "gorgias.com",
+                "recharge.com", "yotpo.com", "attentive.com", "postscript.io",
+            ]),
+            (["saas", "b2b software", "developer", "engineering", "cto", "tech startup"], [
+                "vercel.com", "supabase.com", "linear.app", "notion.so",
+                "posthog.com", "segment.com", "mixpanel.com", "amplitude.com",
+            ]),
+            (["startup", "founder", "venture", "early stage"], [
+                "stripe.com", "brex.com", "mercury.com", "deel.com",
+                "rippling.com", "gusto.com", "notion.so", "linear.app",
+            ]),
+            (["healthcare", "health", "medical", "clinic", "hospital", "doctor", "pharma"], [
+                "athenahealth.com", "modernhealth.com", "hims.com",
+                "ro.co", "truepill.com", "headspace.com", "calm.com",
+            ]),
+            (["real estate", "property", "realty", "mortgage", "broker", "agent"], [
+                "compass.com", "opendoor.com", "lofty.com",
+                "kvcore.com", "boomtown.net", "followupboss.com",
+            ]),
+            (["fintech", "finance", "banking", "payments", "lending", "insurance", "accounting"], [
+                "brex.com", "ramp.com", "mercury.com", "plaid.com",
+                "rippling.com", "gusto.com", "quickbooks.intuit.com",
+            ]),
+            (["marketing", "agency", "advertising", "seo", "content", "social media", "pr"], [
+                "hubspot.com", "hootsuite.com", "sproutsocial.com", "semrush.com",
+                "ahrefs.com", "mailchimp.com", "activecampaign.com",
+            ]),
+            (["hr", "human resources", "recruiting", "hiring", "talent", "staffing", "people ops"], [
+                "greenhouse.io", "lever.co", "lattice.com",
+                "bamboohr.com", "rippling.com", "workday.com",
+            ]),
+            (["education", "edtech", "school", "university", "learning", "training", "course"], [
+                "teachable.com", "kajabi.com", "thinkific.com",
+                "coursera.org", "udemy.com", "learnworlds.com",
+            ]),
+            (["logistics", "supply chain", "shipping", "freight", "warehouse", "fulfillment", "delivery"], [
+                "flexport.com", "shipbob.com", "samsara.com",
+                "fleetio.com", "motive.com", "loadsmart.com",
+            ]),
+            (["construction", "contractor", "builder", "architecture", "trade"], [
+                "procore.com", "buildertrend.com", "autodesk.com", "trimble.com",
+            ]),
+            (["legal", "law", "attorney", "lawyer", "compliance"], [
+                "clio.com", "lawpay.com", "mycase.com", "filevine.com",
+            ]),
+            (["fitness", "gym", "wellness", "yoga", "sport"], [
+                "mindbodyonline.com", "zenoti.com", "glofox.com", "wodify.com",
+            ]),
+            (["agency", "consulting", "freelance", "creative", "design studio"], [
+                "hubspot.com", "monday.com", "asana.com", "clickup.com", "notion.so",
+            ]),
         ]
 
-        # Domains to skip (search engines, social media, directories)
-        _SKIP = {
-            "google.com", "bing.com", "yahoo.com", "duckduckgo.com",
-            "linkedin.com", "twitter.com", "x.com", "facebook.com",
-            "instagram.com", "youtube.com", "reddit.com", "quora.com",
-            "wikipedia.org", "github.com", "crunchbase.com", "capterra.com",
-            "g2.com", "trustpilot.com", "producthunt.com", "ycombinator.com",
-            "techcrunch.com", "forbes.com", "inc.com", "medium.com",
-        }
-
-        seen_domains: set[str] = set()
+        seen: set[str] = set()
         domains: list[str] = []
 
-        for query in queries:
-            if len(domains) >= limit:
-                break
+        for keywords, industry_domains in _INDUSTRY_MAP:
+            if any(kw in audience_lower for kw in keywords):
+                for d in industry_domains:
+                    if d not in seen and len(domains) < limit:
+                        seen.add(d)
+                        domains.append(d)
+
+        # Fallback: web search (may fail from server IP)
+        if not domains:
             try:
-                results = web_search(query)
-                if not isinstance(results, dict):
-                    continue
-                for item in results.get("results", [])[:15]:
-                    url = item.get("url", "")
-                    if not url:
-                        continue
+                from backend.tools.web_search import web_search
+                _SKIP = {
+                    "google.com", "bing.com", "yahoo.com", "linkedin.com", "twitter.com",
+                    "facebook.com", "reddit.com", "wikipedia.org", "crunchbase.com",
+                    "capterra.com", "g2.com", "producthunt.com", "techcrunch.com",
+                }
+                for query in [f"top {target_audience} companies", f"best {target_audience} software"]:
+                    if len(domains) >= limit:
+                        break
                     try:
-                        parsed = urlparse(url if url.startswith("http") else f"https://{url}")
-                        domain = parsed.netloc.lower().lstrip("www.")
-                        # Keep only root domain (e.g. toast.com not app.toast.com)
-                        parts = domain.split(".")
-                        if len(parts) >= 2:
-                            domain = ".".join(parts[-2:])
+                        results = web_search(query)
+                        for item in (results.get("results", []) if isinstance(results, dict) else [])[:15]:
+                            url = item.get("url", "")
+                            try:
+                                parsed = urlparse(url if url.startswith("http") else f"https://{url}")
+                                d = ".".join(parsed.netloc.lower().lstrip("www.").split(".")[-2:])
+                                if d and d not in seen and d not in _SKIP:
+                                    seen.add(d)
+                                    domains.append(d)
+                            except Exception:
+                                continue
                     except Exception:
                         continue
-                    if domain and domain not in seen_domains and domain not in _SKIP:
-                        seen_domains.add(domain)
-                        domains.append(domain)
-                        if len(domains) >= limit:
-                            break
             except Exception as e:
-                logger.warning("Web search failed for query '%s': %s", query, e)
+                logger.warning("Web search fallback failed: %s", e)
 
         if not domains:
-            return {"contacts_found": 0, "contacts_stored": 0, "domains_searched": [], "error": "No relevant companies found — try a more specific audience description"}
+            return {
+                "contacts_found": 0, "contacts_stored": 0, "domains_searched": [],
+                "error": f"No matching companies found for '{target_audience}'. Try terms like: restaurant owners, SaaS CTOs, e-commerce founders, healthcare startups, real estate agents.",
+            }
 
         result = hunter_search_by_domains(
             founder_id=founder_id,
-            domains=domains,
+            domains=domains[:limit],
             seniority="",
             department="",
         )
-        result["domains_searched"] = domains
+        result["domains_searched"] = domains[:limit]
         return result
 
     result = await asyncio.to_thread(_run)
