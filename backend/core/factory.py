@@ -13,6 +13,23 @@ from backend.specialists.legal import build_legal_agent
 from backend.specialists.ops import build_ops_agent
 from backend.specialists.sales import build_sales_agent
 from backend.specialists.design import build_design_agent
+from backend.specialists.research_market import build_research_market_agent
+from backend.specialists.research_financial import build_research_financial_agent
+from backend.specialists.research_regulatory import build_research_regulatory_agent
+from backend.specialists.legal_docs import build_legal_docs_agent
+from backend.specialists.legal_entity import build_legal_entity_agent
+from backend.specialists.legal_ip import build_legal_ip_agent
+from backend.specialists.marketing_content import build_marketing_content_agent
+from backend.specialists.marketing_outreach import build_marketing_outreach_agent
+from backend.specialists.marketing_seo import build_marketing_seo_agent
+from backend.specialists.marketing_paid import build_marketing_paid_agent
+from backend.specialists.sales_pipeline import build_sales_pipeline_agent
+from backend.specialists.sales_enablement import build_sales_enablement_agent
+from backend.specialists.technical_scaffold import build_technical_scaffold_agent
+from backend.specialists.technical_infra import build_technical_infra_agent
+from backend.specialists.technical_data import build_technical_data_agent
+from backend.specialists.finance_model import build_finance_model_agent
+from backend.specialists.finance_fundraise import build_finance_fundraise_agent
 
 _orchestrator: Orchestrator | None = None
 
@@ -52,6 +69,23 @@ def get_orchestrator() -> Orchestrator:
             "ops": build_ops_agent(use_computer=True, **_highoutput_kwargs),
             "sales": build_sales_agent(use_computer=False, **_small_kwargs),
             "design": build_design_agent(use_computer=False, **_instruct_kwargs),
+            "research_market": build_research_market_agent(use_computer=True),
+            "research_financial": build_research_financial_agent(use_computer=True, **_highoutput_kwargs),
+            "research_regulatory": build_research_regulatory_agent(use_computer=True, **_highoutput_kwargs),
+            "legal_docs": build_legal_docs_agent(use_computer=True, **_highoutput_kwargs),
+            "legal_entity": build_legal_entity_agent(use_computer=True, **_highoutput_kwargs),
+            "legal_ip": build_legal_ip_agent(use_computer=True, **_highoutput_kwargs),
+            "marketing_content": build_marketing_content_agent(use_computer=True, **_highoutput_kwargs),
+            "marketing_outreach": build_marketing_outreach_agent(use_computer=True, **_highoutput_kwargs),
+            "marketing_seo": build_marketing_seo_agent(use_computer=True, **_highoutput_kwargs),
+            "marketing_paid": build_marketing_paid_agent(use_computer=True, **_highoutput_kwargs),
+            "sales_pipeline": build_sales_pipeline_agent(use_computer=False, **_small_kwargs),
+            "sales_enablement": build_sales_enablement_agent(use_computer=False, **_small_kwargs),
+            "technical_scaffold": build_technical_scaffold_agent(use_computer=True, **_coder_kwargs),
+            "technical_infra": build_technical_infra_agent(use_computer=True, **_coder_kwargs),
+            "technical_data": build_technical_data_agent(use_computer=True, **_coder_kwargs),
+            "finance_model": build_finance_model_agent(use_computer=True, **_highoutput_kwargs),
+            "finance_fundraise": build_finance_fundraise_agent(use_computer=True, **_highoutput_kwargs),
         }
         from backend.tools.company_brain import (
             add_company_brain_record,
