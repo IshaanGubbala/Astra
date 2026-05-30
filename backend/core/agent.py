@@ -111,6 +111,9 @@ class AgentContext:
     session_id: str
     shared: dict = field(default_factory=dict)  # P2P shared state
     bypass_approvals: bool = False  # set True in tests to skip SafeRun approval gates
+    task_id: str = ""
+    dep_results: dict = field(default_factory=dict)
+    vault_context: str = ""
 
 
 class Agent:
