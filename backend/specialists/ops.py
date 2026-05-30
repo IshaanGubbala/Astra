@@ -30,7 +30,9 @@ def build_ops_agent(**kwargs) -> Agent:
             "If any tool fails, use obsidian_log as fallback and still call done with your results. "
             "IMPORTANT: Search the company brain at most once. If company_brain_search returns no results or an empty context, "
             "do NOT search again — proceed immediately with generating outputs based on the goal and shared context. "
-            "Do not loop on searches. Call obsidian_log then done."
+            "Do not loop on searches. Call obsidian_log then done. "
+            "When calling generate_pdf, write FULL substantive bodies for each section (at least 200 words per section) — "
+            "do not pass placeholder or one-line bodies. Do NOT call generate_pdf more than once."
         ),
         max_iterations=10,
         tools={

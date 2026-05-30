@@ -57,8 +57,8 @@ def _expand_section(heading: str, body: str, doc_title: str) -> str:
     return body
 
 
-def generate_pdf(title: str, sections: list, output_dir: str = "", expand_content: bool = True) -> dict:
-    """Generate PDF. Args: title (str), sections (list — MUST be a JSON array of objects, e.g. [{"heading": "Executive Summary", "body": "text..."}, {"heading": "Market Size", "body": "text..."}]), expand_content (bool, default True). Returns {generated, path, filename}. IMPORTANT: sections must be a real list/array, NOT a string."""
+def generate_pdf(title: str, sections: list, output_dir: str = "", expand_content: bool = False) -> dict:
+    """Generate PDF. Args: title (str), sections (list — MUST be a JSON array of objects, e.g. [{"heading": "Executive Summary", "body": "text..."}, {"heading": "Market Size", "body": "text..."}]), expand_content (bool, default False — set True only if you want slow LLM expansion of thin sections). Returns {generated, path, filename}. IMPORTANT: sections must be a real list/array, NOT a string."""
     import os as _os
     from backend.config import settings
     if not output_dir:
