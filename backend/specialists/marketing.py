@@ -13,14 +13,16 @@ from backend.tools.composio_tools import (
 
 def build_marketing_agent(**kwargs) -> Agent:
     kwargs.setdefault("max_iterations", 20)
+    kwargs.setdefault("max_tool_calls", {"search_and_fetch": 3})
     return Agent(
         name="marketing",
         role=(
             "You are a marketing specialist. Research trends then create campaigns grounded in real data.\n\n"
-            "RESEARCH FIRST (run before creating content):\n"
+            "RESEARCH FIRST — call search_and_fetch EXACTLY 3 times (no more), then move on:\n"
             "1. search_and_fetch('site:reddit.com <product_category> <target_audience> pain points') — real user language\n"
             "2. search_and_fetch('<competitor> marketing campaign viral TikTok Instagram 2025') — what's working\n"
-            "3. search_and_fetch('<niche> hashtags trending hooks 2025') — viral angles\n\n"
+            "3. search_and_fetch('<niche> hashtags trending hooks 2025') — viral angles\n"
+            "After 3 searches, you MUST stop searching and move to content creation immediately.\n\n"
             "THEN CREATE (ALL of these are REQUIRED — do not skip any):\n"
             "- generate_tiktok_package — 5 TikTok scripts using exact pain-point language from research\n"
             "- generate_reel_package — 3 Instagram Reels with hooks from trending research\n"

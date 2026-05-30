@@ -137,6 +137,7 @@ class Agent:
         model_base_url: str = None,
         model_api_key: str = None,
         max_iterations: int = None,
+        max_tool_calls: dict[str, int] | None = None,
     ):
         self.name = name
         self.role = role
@@ -147,6 +148,7 @@ class Agent:
         self._model_base_url = model_base_url or settings.agent_model_base_url
         self._model_api_key = model_api_key or settings.agent_model_api_key
         self._max_iterations = max_iterations
+        self._max_tool_calls = max_tool_calls or {}
         self._inbox: asyncio.Queue = asyncio.Queue()
         self._llm: Optional[openai.OpenAI] = None
 
@@ -372,6 +374,17 @@ class Agent:
                         f"You MUST NOT call it again. Call done with the results you already have."
                     )})
                     continue
+                # Enforce per-tool call limits (e.g. max 3 search calls for marketing)
+                _tool_call_limit = self._max_tool_calls.get(tool_name)
+                if _tool_call_limit is not None:
+                    _tool_success_count = sum(1 for tn, _ in _tool_results if tn == tool_name)
+                    if _tool_success_count >= _tool_call_limit:
+                        messages.append({"role": "user", "content": (
+                            f"BLOCKED: {tool_name} has already been called {_tool_success_count} time(s) "
+                            f"(limit={_tool_call_limit}). You have enough research data. "
+                            f"Stop calling {tool_name} and move on to content creation tools now."
+                        )})
+                        continue
                 # Always use the actual cached HTML — LLM may pass a truncated/regenerated version
                 if tool_name == "vercel_deploy" and _large_results.get("generate_landing_page_html"):
                     args["html"] = _large_results["generate_landing_page_html"]
