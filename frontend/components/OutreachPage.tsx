@@ -613,7 +613,7 @@ export default function OutreachPage() {
           <div style={{ ...glass({ padding: "20px", display: "flex", flexDirection: "column", gap: 12 }) }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "var(--fg)", marginBottom: 4 }}>Who are you trying to reach?</div>
-              <div style={{ fontSize: 12, color: "var(--fg-mute)" }}>Describe your target audience and we'll find real contacts with verified emails via Hunter.io</div>
+              <div style={{ fontSize: 12, color: "var(--fg-mute)" }}>Describe your target audience and we'll find verified contacts from our database</div>
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <input
@@ -641,7 +641,7 @@ export default function OutreachPage() {
 
             {findingContacts && (
               <p style={{ fontSize: 12, color: "var(--fg-mute)", margin: 0 }}>
-                Searching the web for matching companies, then pulling emails from Hunter.io — takes ~30s
+                Searching our contact database — this takes ~30s
               </p>
             )}
 
@@ -782,7 +782,7 @@ export default function OutreachPage() {
                   Describe your target audience above
                 </p>
                 <p style={{ fontSize: 12, color: "var(--fg-mute)", margin: 0 }}>
-                  We'll find companies in that niche and pull verified contact emails from Hunter.io
+                  We'll search our contact database and return verified emails for that audience
                 </p>
               </div>
             )}

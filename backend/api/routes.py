@@ -1938,7 +1938,6 @@ async def find_contacts_for_audience(founder_id: str, body: dict, request: Reque
 
     def _run():
         from backend.tools.hunter_tools import hunter_search_by_domains
-        from urllib.parse import urlparse
 
         audience_lower = target_audience.lower()
 
@@ -2012,35 +2011,6 @@ async def find_contacts_for_audience(founder_id: str, body: dict, request: Reque
                     if d not in seen and len(domains) < limit:
                         seen.add(d)
                         domains.append(d)
-
-        # Fallback: web search (may fail from server IP)
-        if not domains:
-            try:
-                from backend.tools.web_search import web_search
-                _SKIP = {
-                    "google.com", "bing.com", "yahoo.com", "linkedin.com", "twitter.com",
-                    "facebook.com", "reddit.com", "wikipedia.org", "crunchbase.com",
-                    "capterra.com", "g2.com", "producthunt.com", "techcrunch.com",
-                }
-                for query in [f"top {target_audience} companies", f"best {target_audience} software"]:
-                    if len(domains) >= limit:
-                        break
-                    try:
-                        results = web_search(query)
-                        for item in (results.get("results", []) if isinstance(results, dict) else [])[:15]:
-                            url = item.get("url", "")
-                            try:
-                                parsed = urlparse(url if url.startswith("http") else f"https://{url}")
-                                d = ".".join(parsed.netloc.lower().lstrip("www.").split(".")[-2:])
-                                if d and d not in seen and d not in _SKIP:
-                                    seen.add(d)
-                                    domains.append(d)
-                            except Exception:
-                                continue
-                    except Exception:
-                        continue
-            except Exception as e:
-                logger.warning("Web search fallback failed: %s", e)
 
         if not domains:
             return {
