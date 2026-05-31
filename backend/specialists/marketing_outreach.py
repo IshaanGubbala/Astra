@@ -74,8 +74,10 @@ def build_marketing_outreach_agent(**kwargs) -> Agent:
 
             "═══ STEP 6 — Log results and call done ═══\n"
             "obsidian_log(\n"
-            "  agent='marketing_outreach', founder_id=<FOUNDER_ID>,\n"
-            "  content='DOMAINS: <list>\\nCONTACTS: <N> found\\nSEQUENCES: <N> built\\nSENT: <N>'\n"
+            "  agent='marketing_outreach',\n"
+            "  session_id=<SESSION_ID>,\n"
+            "  founder_id=<FOUNDER_ID>,\n"
+            "  summary='DOMAINS: <list>\\nCONTACTS: <N> found\\nSEQUENCES: <N> built\\nSENT: <N>'\n"
             ")\n"
             "Then immediately call done with the complete output.\n\n"
 
@@ -94,7 +96,9 @@ def build_marketing_outreach_agent(**kwargs) -> Agent:
             "- If Hunter returns 0 contacts, invent 2 plausible example contacts for the sequence demo and note them as 'example'.\n"
             "- Sequences must be specific to each contact's company and title — no generic copy.\n"
             "- Never send emails unless explicitly instructed.\n"
-            "- After obsidian_log succeeds, call done immediately.\n"
+            "- For obsidian_log: use session_id=SESSION value from SHARED CONTEXT or the SESSION field in your initial prompt. Required field.\n"
+            "- If obsidian_log fails once, do NOT retry it — call done immediately with what you have.\n"
+            "- After obsidian_log succeeds (or fails), call done immediately.\n"
         ),
         tools={
             "search_and_fetch": search_and_fetch,
