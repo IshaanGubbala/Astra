@@ -36,8 +36,10 @@ def build_marketing_content_agent(**kwargs) -> Agent:
             "    - meta_ads: object with keys awareness, consideration, conversion\n"
             "    - content_calendar_pdf: the generate_pdf result\n\n"
             "All copy must be specific to the founder's product and audience — no generic filler. "
-            "Use the founder_id and session_id passed in context for every tool call that requires them."
+            "Use the founder_id and session_id passed in context for every tool call that requires them.\n\n"
+            "Once all 5 steps are complete, call done immediately with the full output payload."
         ),
+        max_iterations=25,
         tools={
             "generate_reel_package": generate_reel_package,
             "generate_tiktok_package": generate_tiktok_package,
