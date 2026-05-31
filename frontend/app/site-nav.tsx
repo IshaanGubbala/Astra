@@ -1,9 +1,45 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
+import { Show, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
 import ThemeToggle from "@/components/ThemeToggle";
+
+function TeamBadge() {
+  const { user, isLoaded } = useUser();
+  const [teamName, setTeamName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isLoaded || !user) return;
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+    fetch(`${apiBase}/api/teams/me?founder_id=${encodeURIComponent(user.id)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.team_name) setTeamName(data.team_name);
+      })
+      .catch(() => {});
+  }, [isLoaded, user]);
+
+  if (!teamName) return null;
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        padding: "2px 8px",
+        borderRadius: 20,
+        background: "rgba(99,102,241,0.18)",
+        color: "var(--color-accent, #818cf8)",
+        border: "1px solid rgba(99,102,241,0.28)",
+        letterSpacing: "0.04em",
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {teamName}
+    </span>
+  );
+}
 
 export default function SiteNav() {
   const pathname = usePathname();
@@ -20,6 +56,7 @@ export default function SiteNav() {
         <a href="https://astracreates.com">About</a>
 
         <Show when="signed-in">
+          <TeamBadge />
           <Link href="/?new=1" className="site-btn site-btn-primary">
             New goal <span aria-hidden="true">→</span>
           </Link>
