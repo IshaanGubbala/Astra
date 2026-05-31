@@ -2,13 +2,10 @@
 claude_code_scaffold — clones a GitHub repo, runs Claude Code to build real code, commits + pushes.
 The technical agent calls this after github_create_repo to get actual working code into the repo.
 """
-import hashlib
-import json
 import logging
 import os
 import subprocess
 import tempfile
-import uuid
 
 from backend.config import settings
 
@@ -85,19 +82,12 @@ Start with file 1 immediately. Write each file completely before moving to the n
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
 
-            # Stable session UUID per repo — persistent conversation like TUI
-            repo_hash = hashlib.md5(repo_url.encode()).hexdigest()
-            oc_session_id = str(uuid.UUID(repo_hash))
-
-            # openclaude ignores subprocess cwd — must cd in shell so it writes files in the repo dir.
-            # Also: openclaude refuses --dangerously-skip-permissions when running as root, so we
-            # must drop to the 'astra' non-root user. sudo env_reset strips API keys, so we pass
-            # them explicitly via `sudo -u astra env KEY=VAL ...` rather than sudo -E.
+            # Use a fresh session each run — reusing a stable session-id causes openclaude to
+            # resume the old conversation and skip writing files ("session state pollution").
             escaped_task = full_task.replace("'", "'\\''")
             oc_args = (
                 f"{OPENCLAUDE_BIN} --print --allow-dangerously-skip-permissions --dangerously-skip-permissions"
                 f" --provider openai --model deepseek-ai/DeepSeek-V4-Flash"
-                f" --session-id {oc_session_id}"
             )
             import shutil as _shutil
             if os.getuid() == 0 and _shutil.which("sudo"):
