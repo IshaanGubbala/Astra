@@ -19,6 +19,7 @@ def build_legal_ip_agent(**kwargs) -> Agent:
 
     return Agent(
         name="legal_ip",
+        max_iterations=20,
         role=(
             "You are an IP protection specialist. Analyze the patent landscape, assess trademark risk, "
             "draft trade secret and IP assignment policies, and produce a comprehensive IP strategy report as a PDF.\n\n"
@@ -33,11 +34,13 @@ def build_legal_ip_agent(**kwargs) -> Agent:
             "5. format_legal_document(doc_type='ip_assignment', company_name=<COMPANY_NAME>, "
             "   content=<full IP assignment clause text covering all inventions, work-for-hire, prior IP carve-outs, "
             "   assignment confirmation, and governing law>) — draft the IP assignment clause.\n"
-            "   IMMEDIATELY after: generate_pdf(content=<formatted_text from step 5>, filename='ip_assignment.pdf')\n"
+            "   IMMEDIATELY after: generate_pdf(title='<COMPANY_NAME> IP Assignment Agreement', "
+            "   sections=[{\"heading\": \"IP Assignment Agreement\", \"body\": <formatted_text from step 5>}])\n"
             "6. format_legal_document(doc_type='trade_secret_policy', company_name=<COMPANY_NAME>, "
             "   content=<full trade secret policy covering definition of confidential information, employee obligations, "
             "   access controls, incident response, and enforcement>) — draft the trade secret policy.\n"
-            "   IMMEDIATELY after: generate_pdf(content=<formatted_text from step 6>, filename='trade_secret_policy.pdf')\n"
+            "   IMMEDIATELY after: generate_pdf(title='<COMPANY_NAME> Trade Secret Policy', "
+            "   sections=[{\"heading\": \"Trade Secret Policy\", \"body\": <formatted_text from step 6>}])\n"
             "7. format_legal_document(doc_type='ip_strategy_report', company_name=<COMPANY_NAME>, "
             "   content=<full IP strategy report including: (a) patent landscape summary with key risk patents and "
             "   whitespace, (b) recommended filing priorities (provisional vs. utility, jurisdictions), "
@@ -45,7 +48,8 @@ def build_legal_ip_agent(**kwargs) -> Agent:
             "   (d) trade secret identification and protection checklist, "
             "   (e) IP assignment and ownership structure, "
             "   (f) competitive IP risk rating and mitigation actions>) — draft the IP strategy report.\n"
-            "   IMMEDIATELY after: generate_pdf(content=<formatted_text from step 7>, filename='ip_strategy_report.pdf')\n"
+            "   IMMEDIATELY after: generate_pdf(title='<COMPANY_NAME> IP Strategy Report', "
+            "   sections=[{\"heading\": \"IP Strategy Report\", \"body\": <formatted_text from step 7>}])\n"
             "8. obsidian_log — log all document titles and PDF file paths produced in steps 5-7.\n"
             "9. done — return {\n"
             "     documents: [{doc_type, title, path, text}],\n"
@@ -56,11 +60,14 @@ def build_legal_ip_agent(**kwargs) -> Agent:
             "   }\n\n"
             "RULES:\n"
             "- NEVER skip generate_pdf. Call it immediately after EACH format_legal_document.\n"
+            "- generate_pdf takes 'title' (string) and 'sections' (JSON array of objects with 'heading' and 'body' keys). "
+            "  Do NOT use 'content' or 'filename' arguments — they are not valid.\n"
             "- Use COMPANY_NAME from SHARED CONTEXT as the company name everywhere.\n"
             "- Write FULL document content — no placeholders, no [INSERT HERE] stubs.\n"
             "- done output MUST include documents array where each entry has path (the PDF filepath returned by generate_pdf).\n"
             "- If patent_search returns no results, note 'no blocking patents found' and continue — do NOT retry or halt.\n"
-            "- If trademark search returns ambiguous results, flag as 'requires attorney clearance opinion' in the report."
+            "- If trademark search returns ambiguous results, flag as 'requires attorney clearance opinion' in the report.\n"
+            "- After step 9, you are finished. Call done and stop."
         ),
         tools={
             "patent_search": patent_search,
