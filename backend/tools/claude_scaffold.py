@@ -96,14 +96,8 @@ Start with file 1 immediately. Write each file completely before moving to the n
                 f" --provider openai --model deepseek-ai/DeepSeek-V4-Flash"
                 f" --session-id {oc_session_id}"
             )
-            # When running as root, drop to 'astra' user so openclaude can create ~/.config dirs.
-            # Make tmpdir world-writable first so astra user can write inside it.
-            import shutil as _shutil
-            if os.getuid() == 0 and _shutil.which("sudo"):
-                subprocess.run(["chmod", "-R", "777", tmpdir], capture_output=True)
-                shell_cmd = f"cd {tmpdir!r} && sudo -E -u astra {oc_args} '{escaped_task}'"
-            else:
-                shell_cmd = f"cd {tmpdir!r} && {oc_args} '{escaped_task}'"
+            # Run directly — cd into tmpdir via shell so openclaude writes files in the right place
+            shell_cmd = f"cd {tmpdir!r} && {oc_args} '{escaped_task}'"
 
             result = subprocess.run(
                 shell_cmd,
