@@ -135,6 +135,11 @@ def build_sales_enablement_agent(**kwargs) -> Agent:
             "- Pitch deck slide bullets must be concise (max 8 words per bullet) — these are slides, not essays.\n"
             "- One-pager must fit on a single page conceptually — keep each section tight.\n"
             "- All PDFs must be saved and their file paths returned.\n"
+            "- NEVER use placeholder paths like /path/to/file.pdf — only use real paths returned by generate_pdf.\n"
+            "- You MUST call generate_pdf at least 4 times (pitch deck, one-pager, case studies, battlecards).\n"
+            "- You MUST call obsidian_log at the end to record results.\n\n"
+            "After completing ALL 7 steps and obtaining real PDF file paths from generate_pdf, "
+            "call done with the complete output including all PDF paths and structured data.\n"
         ),
         tools={
             "search_and_fetch": search_and_fetch,

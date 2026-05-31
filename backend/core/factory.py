@@ -80,7 +80,7 @@ def get_orchestrator() -> Orchestrator:
             "marketing_seo": build_marketing_seo_agent(use_computer=True, **_highoutput_kwargs),
             "marketing_paid": build_marketing_paid_agent(use_computer=True, **_highoutput_kwargs),
             "sales_pipeline": build_sales_pipeline_agent(use_computer=False, max_iterations=10, **_small_kwargs),
-            "sales_enablement": build_sales_enablement_agent(use_computer=False, max_iterations=10, **_small_kwargs),
+            "sales_enablement": build_sales_enablement_agent(use_computer=False, max_iterations=25, **_highoutput_kwargs),
             "technical_scaffold": build_technical_scaffold_agent(use_computer=True, **_coder_kwargs),
             "technical_infra": build_technical_infra_agent(use_computer=True, **_coder_kwargs),
             "technical_data": build_technical_data_agent(use_computer=True, **_coder_kwargs),

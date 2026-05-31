@@ -327,6 +327,7 @@ class Agent:
                     "legal_docs": {"format_legal_document", "generate_pdf"},
                     "sales": {"find_leads", "build_outreach_sequence", "build_crm_contact"},
                     "design": {"generate_design_spec", "generate_wireframe", "generate_logo_brief"},
+                    "sales_enablement": {"generate_pdf", "obsidian_log"},
                 }
                 missing = sorted(required_by_agent.get(self.name, set()) - _called_tools)
                 if missing:
@@ -544,6 +545,18 @@ class Agent:
                 missing.append("wireframes[]")
             if not output.get("logo_brief"):
                 missing.append("logo_brief")
+            return missing
+        if self.name == "sales_enablement":
+            missing: list[str] = []
+            # Reject placeholder PDF paths — real generate_pdf returns actual file paths
+            for key in ("pitch_deck_pdf", "one_pager_pdf", "case_studies_pdf", "battlecards_pdf"):
+                val = output.get(key, "")
+                if not val or "/path/to/" in str(val) or not str(val).endswith(".pdf"):
+                    missing.append(key)
+            if not isinstance(output.get("pitch_deck_outline"), list) or len(output.get("pitch_deck_outline", [])) < 12:
+                missing.append("pitch_deck_outline (12 slides required)")
+            if not isinstance(output.get("battlecards"), list) or len(output.get("battlecards", [])) < 3:
+                missing.append("battlecards (3 required)")
             return missing
         if self.name == "marketing":
             missing: list[str] = []
