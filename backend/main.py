@@ -21,7 +21,7 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(admin_router)
-app.include_router(teams_router)
+app.include_router(teams_router, prefix="/api")
 
 
 @app.on_event("startup")
