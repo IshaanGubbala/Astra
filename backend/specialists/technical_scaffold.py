@@ -6,6 +6,9 @@ from backend.tools.claude_scaffold import claude_code_scaffold
 
 
 def build_technical_scaffold_agent(**kwargs) -> Agent:
+    # Ensure enough iterations: obsidian_read + github_create_repo + claude_code_scaffold
+    # + obsidian_log + done = 5 tool calls minimum, plus any retries
+    kwargs.setdefault("max_iterations", 20)
     return Agent(
         name="technical_scaffold",
         role=(
@@ -22,17 +25,18 @@ def build_technical_scaffold_agent(**kwargs) -> Agent:
             "— create the GitHub repository. If this fails (missing token / 403 / 422), skip and "
             "continue using a placeholder repo_url of the form "
             "'https://github.com/placeholder/<repo_name>'.\n"
-            "3. claude_code_scaffold(repo_url=<url>, goal=<full product description>, "
-            "session_id=<SESSION>, context=<research notes>) — scaffold the full codebase. "
+            "3. claude_code_scaffold(repo_url=<url>, task=<full product description>, "
+            "context=<research notes>) — scaffold the full codebase. "
+            "The 'task' argument is REQUIRED — pass the complete product description there. "
             "This MUST produce 20-30 real files across frontend, backend, config, and tests. "
-            "Run multiple rounds (at minimum: project structure → core modules → UI → tests → "
-            "final polish) and commit after each round. Do NOT stop after a single round.\n"
-            "4. obsidian_log(agent='technical_scaffold', founder_id=<FOUNDER_ID>, "
-            "content=<summary with repo_url and file count>) — record results.\n"
-            "5. Return a result dict: {repo_url, files_scaffolded, rounds_run, notes}.\n\n"
+            "Do NOT stop after a single call — the tool handles multiple scaffold rounds internally.\n"
+            "4. obsidian_log(agent='technical_scaffold', session_id=<SESSION>, "
+            "founder_id=<FOUNDER_ID>, summary=<one-line summary with repo_url and file count>) "
+            "— record results.\n"
+            "5. Return a result dict: {repo_url, files_scaffolded, notes}.\n\n"
             "Key rules:\n"
             "- Never substitute claude_code_scaffold with write_files_to_repo or any other tool.\n"
-            "- Always commit after every scaffold round so progress is preserved.\n"
+            "- The 'task' parameter must contain the full product description — not 'goal'.\n"
             "- The repo must be push-ready when you finish.\n"
             "- Focus exclusively on code generation quality — do not attempt deploys or "
             "third-party service integrations."

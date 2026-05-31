@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 def claude_code_scaffold(
     repo_url: str,
-    task: str,
+    task: str = "",
+    goal: str = "",
     commit_message: str = "feat: scaffold via claude code",
     context: str = "",
     api_key: str = "",
@@ -28,11 +29,14 @@ def claude_code_scaffold(
     Clone a GitHub repo, run Claude Code to implement the task, commit and push.
     Args:
         repo_url: full GitHub HTTPS URL (e.g. https://github.com/org/repo)
-        task: detailed instruction for Claude Code (what to build / scaffold)
+        task: detailed instruction for Claude Code (what to build / scaffold). Also accepts 'goal' as alias.
+        goal: alias for task (accepted for agent compatibility)
         commit_message: git commit message for the changes
         context: optional extra context (research findings, session notes, etc.)
     Returns: {success, repo_url, commit, output_preview, error?}
     """
+    # Accept 'goal' as alias for 'task'
+    task = task or goal
     token = settings.github_token
     if not token:
         return {"error": "GITHUB_TOKEN not set — cannot clone/push"}
@@ -77,7 +81,7 @@ Start with file 1 immediately. Write each file completely before moving to the n
             # Run openclaude with DeepInfra backend
             from backend.tools.git_tools import OPENCLAUDE_BIN, _make_env
             env = _make_env()
-            env["HOME"] = os.environ.get("HOME", "/Users/ishaangubbala")
+            env["HOME"] = os.environ.get("HOME", "/root")
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
 
@@ -85,11 +89,25 @@ Start with file 1 immediately. Write each file completely before moving to the n
             repo_hash = hashlib.md5(repo_url.encode()).hexdigest()
             oc_session_id = str(uuid.UUID(repo_hash))
 
+            # openclaude ignores subprocess cwd — must cd in shell so it writes files in the repo dir
+            escaped_task = full_task.replace("'", "'\\''")
+            oc_args = (
+                f"{OPENCLAUDE_BIN} --print --allow-dangerously-skip-permissions --dangerously-skip-permissions"
+                f" --provider openai --model deepseek-ai/DeepSeek-V4-Flash"
+                f" --session-id {oc_session_id}"
+            )
+            # When running as root, drop to 'astra' user so openclaude can create ~/.config dirs.
+            # Make tmpdir world-writable first so astra user can write inside it.
+            import shutil as _shutil
+            if os.getuid() == 0 and _shutil.which("sudo"):
+                subprocess.run(["chmod", "-R", "777", tmpdir], capture_output=True)
+                shell_cmd = f"cd {tmpdir!r} && sudo -E -u astra {oc_args} '{escaped_task}'"
+            else:
+                shell_cmd = f"cd {tmpdir!r} && {oc_args} '{escaped_task}'"
+
             result = subprocess.run(
-                [OPENCLAUDE_BIN, "--print", "--dangerously-skip-permissions",
-                 "--provider", "openai", "--model", "deepseek-ai/DeepSeek-V4-Flash",
-                 "--session-id", oc_session_id, full_task],
-                cwd=tmpdir,
+                shell_cmd,
+                shell=True,
                 capture_output=True,
                 text=True,
                 timeout=600,
