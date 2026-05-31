@@ -5,6 +5,7 @@ from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import router
 from backend.api.admin import router as admin_router
+from backend.api.teams_routes import teams_router
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(admin_router)
+app.include_router(teams_router)
 
 
 @app.on_event("startup")
